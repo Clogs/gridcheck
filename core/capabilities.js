@@ -15,9 +15,10 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { spawnSync } = require("node:child_process");
 
+const patchEngine = require("./patches");
+
 const COPY_ROOT = path.join(__dirname, "..");
-const PATCHES_DIR = path.join(COPY_ROOT, "patches");
-const PATCH_MARKER = "evejs-e2e:patch";
+const { PATCHES_DIR, PATCH_MARKER } = patchEngine;
 
 // Every gateway call (service, method) the CLI makes, and what needs it.
 // Gateway routes (account, characters, session) aren't on the allowlist.
@@ -59,55 +60,13 @@ function errorText(error) {
 }
 
 function loadPatches(dir = PATCHES_DIR, load = require) {
-  if (!fs.existsSync(dir)) return [];
-  return fs.readdirSync(dir).filter((name) => name.endsWith(".js")).sort().map((name) => {
-    try {
-      return load(path.join(dir, name));
-    } catch (error) {
-      return { id: name.replace(/\.js$/, ""), title: `failed to load: ${errorText(error)}`, files: [], detect: null, broken: true };
-    }
-  });
+  return patchEngine.loadPatches(dir, load);
 }
 
-// Each patch as the tree has it:
-//   applied   its marker comment is in one of its files
-//   detected  no marker, but its detect() finds equivalent code
-//   absent    neither
-//   unknown   no marker, and the patch has no detect() yet
-//   no-target a file it patches isn't in this tree
+// Each patch as the tree has it (core/patches.js patchState): applied,
+// partial, detected, absent, no-target or unknown.
 function detectPatches(serverRoot, { patches = loadPatches() } = {}) {
-  const srcRoot = path.join(serverRoot, "src");
-  const cache = new Map();
-  const read = (relativePath) => {
-    if (!cache.has(relativePath)) {
-      let text = null;
-      try {
-        text = fs.readFileSync(path.join(srcRoot, ...relativePath.split("/")), "utf8");
-      } catch (_error) {
-        text = null;
-      }
-      cache.set(relativePath, text);
-    }
-    return cache.get(relativePath);
-  };
-  return patches.map((patch) => {
-    const row = { id: patch.id, title: patch.title || "", state: "absent" };
-    if (patch.broken) return { ...row, state: "unknown" };
-    const files = Array.isArray(patch.files) ? patch.files : [];
-    const missing = files.filter((file) => read(file) === null);
-    if (missing.length) return { ...row, state: "no-target", missing };
-    const marker = new RegExp(`${PATCH_MARKER} ${String(patch.id).replace(/[^a-z0-9-]/gi, "")} v(\\d+)`);
-    for (const file of files) {
-      const found = marker.exec(read(file));
-      if (found) return { ...row, state: "applied", version: Number(found[1]) };
-    }
-    if (typeof patch.detect !== "function") return { ...row, state: "unknown" };
-    try {
-      return { ...row, state: patch.detect({ read }) ? "detected" : "absent" };
-    } catch (error) {
-      return { ...row, state: "unknown", error: errorText(error) };
-    }
-  });
+  return patchEngine.patchStates(serverRoot, { patches });
 }
 
 // The tree's allowlist and destiny probe without its server running: one

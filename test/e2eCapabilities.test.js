@@ -74,9 +74,13 @@ test("the shipped patches' checks find the LU fork's equivalent code and nothing
   const fork = path.join(scratch(t), "server");
   write(fork, "src/edge/chat/chatEdgeRuntime.js", "const port = Number(process.env.EVEJS_XMPP_SERVER_PORT) || 5222;\n");
   write(fork, "src/space/npc/npcBehaviorLoop.js", "controller.lastDecision = \"engage\";\n");
+  for (const file of loadPatches().find((patch) => patch.id === "slash-success").files) write(fork, `src/${file}`, "\n");
+  write(fork, "src/services/chat/commands/commandReplies.js",
+    "function handledResult(a, b, c, message, success = true) { return { handled: true, success, message }; }\n" +
+    "function rejectedResult(a, b, c, message) { return handledResult(a, b, c, message, false); }\n");
   const states = (serverRoot) => Object.fromEntries(detectPatches(serverRoot).map((row) => [row.id, row.state]));
-  assert.deepEqual(states(stock), { "last-decision": "absent", "slash-success": "unknown", "xmpp-port": "absent" });
-  assert.deepEqual(states(fork), { "last-decision": "detected", "slash-success": "unknown", "xmpp-port": "detected" });
+  assert.deepEqual(states(stock), { "last-decision": "absent", "slash-success": "no-target", "xmpp-port": "absent" });
+  assert.deepEqual(states(fork), { "last-decision": "detected", "slash-success": "detected", "xmpp-port": "detected" });
 });
 
 test("a session's shape is what the client view checks before it attaches", () => {

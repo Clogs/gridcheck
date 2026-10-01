@@ -29,6 +29,7 @@ const scenarioTools = require("../core/scenario");
 const frameTools = require("../core/frames");
 const actionTools = require("../core/actions");
 const vendor = require("../core/vendor");
+const patchEngine = require("../core/patches");
 
 const REPO_ROOT = DEFAULT_TREE_ROOT;
 const REGISTRY = defaultRegistry();
@@ -55,7 +56,7 @@ const TREE_PORTS = portsForTree(REPO_ROOT, process.env, LISTENERS);
 const MANAGED = CONFIG.mode === "managed";
 
 const BOOLEAN_FLAGS = new Set(["all", "json", "any-pid", "force", "fresh", "no-market", "no-log", "help",
-  "check", "keep-up", "positions", "once", "serve", "offline", ...REGISTRY.booleanFlags]);
+  "check", "keep-up", "positions", "once", "serve", "offline", "dry-run", ...REGISTRY.booleanFlags]);
 
 class CliError extends Error {}
 
@@ -401,12 +402,16 @@ async function runSlash(command) {
   const state = requireLogin(readState());
   const before = await currentSystemID(state);
   const reply = await bridge("POST", "/slash", { characterID: state.characterID, command });
-  const verdict = !reply.handled ? "not a command" : reply.success ? "ok" : "refused";
+  // success null: the tree's command doesn't say whether it refused (stock
+  // EveJS; e2e patch apply slash-success makes the commands this tool drives say).
+  const verdict = !reply.handled ? "not a command" : reply.success === null || reply.success === undefined
+    ? "done (this tree doesn't say whether it refused)" : reply.success ? "ok" : "refused";
   const text = `${command} -> ${verdict}${reply.message ? `\n${reply.message}` : ""}`;
   console.log(text);
-  if (reply.handled && !reply.success) process.exitCode = 2;
-  if (reply.success) await bindRemotePark(state, { unlessIn: before });
-  return { ok: Boolean(reply.handled && reply.success), text };
+  const refused = reply.handled && reply.success === false;
+  if (refused) process.exitCode = 2;
+  if (reply.handled && !refused) await bindRemotePark(state, { unlessIn: before });
+  return { ok: Boolean(reply.handled && !refused), text };
 }
 
 async function cmdGrid(flags) {
@@ -1444,6 +1449,85 @@ function cmdVendor(positionals, flags) {
   }
 }
 
+
+// ---------- patches ----------
+
+// Apply and revert refuse while this tree's server runs. A server started
+// without EVEJS_AGENT_BRIDGE=1 writes no handshake, so it isn't seen.
+function serverUpReason() {
+  const handshake = readHandshake();
+  if (handshake) return `this tree's server is up (pid ${handshake.pid})`;
+  const run = readRun();
+  if (run && pidAlive(run.pid)) return `this tree's server is up (pid ${run.pid}, started by e2e up)`;
+  return null;
+}
+
+// A patch can make a listener movable (xmpp-port), so the config's
+// listeners are probed again after each change. -> the names that changed
+function refreshConfigListeners() {
+  if (!CONFIG.exists) return [];
+  const raw = readJSON(CONFIG.file);
+  if (!raw || typeof raw !== "object") return [];
+  const listeners = treeConfig.probeListeners(CONFIG.serverDir, { pluginListeners: LISTENERS });
+  const before = raw.listeners || {};
+  const changed = Object.keys(listeners).filter((name) => !before[name] || before[name].movable !== listeners[name].movable);
+  if (!changed.length) return [];
+  treeConfig.writeTreeConfig(REPO_ROOT, { ...raw, listeners }, { force: true });
+  return changed.map((name) => `${name} ${listeners[name].movable ? "now moves" : "now stays on its stock port"}`);
+}
+
+function describePatchState(row) {
+  const version = row.version ? ` v${row.version}` : "";
+  const why = row.state === "no-target" ? `: ${row.missing.join(", ")} not in this tree`
+    : row.state === "absent" && row.applies === false ? `; apply would fail: ${row.problems.join("; ")}`
+      : row.state === "absent" && row.applies ? "; applies cleanly"
+        : row.problems ? `: ${row.problems.join("; ")}` : row.error ? `: ${row.error}` : "";
+  return `${row.id.padEnd(14)} ${row.state}${version}${why}`;
+}
+
+function cmdPatch(positionals, flags) {
+  const [action = "status", ...ids] = positionals;
+  const patches = patchEngine.loadPatches();
+  if (action === "list") {
+    for (const patch of patches) {
+      console.log(`${patch.id.padEnd(14)} v${patch.version || 1}  ${patch.title}`);
+      console.log(`${"".padEnd(14)}     ${patch.files.length ? patch.files.join(", ") : "no files"}` +
+        `${patch.hunks.length ? `, ${patch.hunks.length} hunk(s)` : ""}`);
+    }
+    return patches;
+  }
+  if (action === "status") {
+    const rows = patchEngine.patchStates(CONFIG.serverDir, { patches })
+      .filter((row) => !ids.length || ids.includes(row.id));
+    console.log(flags.json ? JSON.stringify(rows, null, 2) : rows.map(describePatchState).join("\n"));
+    return rows;
+  }
+  if (action !== "apply" && action !== "revert") {
+    throw new CliError("patch takes list, status [<id>], apply <id>... or revert <id>...");
+  }
+  if (!ids.length) throw new CliError(`patch ${action} needs a patch id (e2e patch list)`);
+  const results = [];
+  for (const id of ids) {
+    let result;
+    try {
+      result = patchEngine.changePatch(action, id, {
+        treeRoot: REPO_ROOT, serverRoot: CONFIG.serverDir, patches, serverUp: serverUpReason(), dryRun: Boolean(flags["dry-run"]),
+      });
+    } catch (error) {
+      throw error instanceof patchEngine.PatchError ? new CliError(error.message) : error;
+    }
+    const verb = result.dryRun ? `would ${action}` : action === "apply" ? "applied" : "reverted";
+    console.log(`${verb} ${id} in ${result.files.join(", ")}`);
+    for (const line of result.preview) console.log(line);
+    for (const note of result.notes) console.log(`note: ${note}`);
+    results.push(result);
+  }
+  if (!flags["dry-run"]) {
+    for (const change of refreshConfigListeners()) console.log(`${treeConfig.CONFIG_NAME}: ${change}`);
+  }
+  return results;
+}
+
 // Probes the tree and writes its e2e.config.json.
 function cmdInit(flags) {
   const mode = flags.mode === undefined ? "attach" : String(flags.mode);
@@ -1609,6 +1693,10 @@ const CORE_COMMANDS = {
   vendor: {
     usage: ["vendor update [--from <checkout|tag>] [--tree <path>] [--force] | vendor check [--tree <path>]"],
     run: cmdVendor,
+  },
+  patch: {
+    usage: ["patch list | patch status [<id>] [--json] | patch apply|revert <id>... [--dry-run]"],
+    run: cmdPatch,
   },
   up: { usage: upUsage(), run: (_positionals, flags) => cmdUp(flags) },
   down: { usage: ["down [--force]"], run: (_positionals, flags) => cmdDown(flags) },
