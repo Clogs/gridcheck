@@ -2,7 +2,7 @@
 
 // `e2e run <scenario>` (core/scenario.js, core/conditions.js): the
 // condition language, scenario checks at load, the run with its server calls
-// faked, and the report. The live path is in docs/E2E-GRID-TESTING.md
+// faked, and the report. The live path is in docs/GUIDE.md
 // "Scenarios".
 
 const test = require("node:test");

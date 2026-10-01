@@ -4,7 +4,7 @@
 // Headless observer for end-to-end grid checks: log a character in through
 // the web gateway, undock it, run slash commands on its session and read its
 // grid, with no EVE client. `e2e help` lists the commands, the plugins'
-// included (core/plugins.js). Guide: docs/E2E-GRID-TESTING.md.
+// included (core/plugins.js). Guide: docs/GUIDE.md.
 
 // `e2e vendor` loads core/vendor.js and nothing else: a copy edited by hand
 // may not load, and the check is what has to say which files changed.

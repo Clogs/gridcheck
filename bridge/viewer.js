@@ -16,7 +16,7 @@
 // directory, so a request can't read any other file. The page knows the core's
 // event kinds; lines of a plugin's kinds come with the plugin's own text
 // (`summaries`), so the page needs no plugin code. Guide:
-// docs/E2E-GRID-TESTING.md "Viewer".
+// docs/GUIDE.md "Viewer".
 
 const fs = require("node:fs");
 const path = require("node:path");

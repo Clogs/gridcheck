@@ -236,12 +236,14 @@ function serverUpReason(root, config = treeConfig.loadTreeConfig(root)) {
 
 function prerequisites(root, config) {
   const rows = [];
-  const serverPkg = readJSON(path.join(config.serverDir, "package.json"));
-  if (serverPkg && Object.keys(serverPkg.dependencies || {}).length) {
+  for (const dir of [root, config.serverDir]) {
+    const pkg = readJSON(path.join(dir, "package.json"));
+    if (!pkg || !Object.keys(pkg.dependencies || {}).length) continue;
+    const where = slashed(path.relative(root, dir)) || ".";
     rows.push({
-      name: "server dependencies",
-      ok: exists(path.join(config.serverDir, "node_modules")),
-      fix: `npm ci in ${slashed(path.relative(root, config.serverDir) || ".")}`,
+      name: where === "." ? "the tree's dependencies" : `${where} dependencies`,
+      ok: exists(path.join(dir, "node_modules")),
+      fix: `npm ci in ${where === "." ? "the tree's root" : where}`,
     });
   }
   rows.push({

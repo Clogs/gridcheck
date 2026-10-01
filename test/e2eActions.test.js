@@ -2,7 +2,7 @@
 
 // Player actions for `e2e act` and scenario steps (core/actions.js):
 // picking a target and modules, and the gateway calls each action makes, with
-// the gateway faked. The live path is in docs/E2E-GRID-TESTING.md "Player actions".
+// the gateway faked. The live path is in docs/GUIDE.md "Player actions".
 
 const test = require("node:test");
 const assert = require("node:assert");

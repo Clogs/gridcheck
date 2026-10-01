@@ -11,7 +11,7 @@
  * The tree loads this through its shim, server/src/_secondary/agentBridge/server.js,
  * which passes the server root in. The core reads stock modules only
  * (stock.js); anything mod-specific is a plugin (plugins.js). Routes are in
- * routes.js. Guide: docs/E2E-GRID-TESTING.md.
+ * routes.js. Guide: docs/GUIDE.md.
  */
 
 "use strict";

@@ -7,7 +7,7 @@
 // only things it does itself are writing a scenario file it was handed,
 // running a scenario in the background, and reading a run's report files.
 // MCP over stdio (JSON-RPC, one message per line), no dependencies and no
-// listener. Registered in .mcp.json. Guide: docs/E2E-GRID-TESTING.md
+// listener. Registered in .mcp.json. Guide: docs/GUIDE.md
 // "Agent MCP tools".
 
 const { spawn } = require("node:child_process");
@@ -45,7 +45,7 @@ function instructions(registry = REGISTRY) {
   const pluginSteps = Object.keys(registry.steps);
   const kinds = kindsOf(registry).filter((kind) => !["CLIENT", "FX", "DIVERGE"].includes(kind)).join(" ");
   const pluginTools = registry.mcpTools.map((tool) => tool.name);
-  const core = `End-to-end grid testing for EveJS with no EVE client. A server boots from a saved world; a character logs in through the web gateway, undocks, and you read its grid, run slash commands, act as the player and watch what happens as a timeline. Every tool runs the CLI \`node tools/evejs-e2e/bin/e2e.js\` in this tree; the guide is docs/E2E-GRID-TESTING.md.
+  const core = `End-to-end grid testing for EveJS with no EVE client. A server boots from a saved world; a character logs in through the web gateway, undocks, and you read its grid, run slash commands, act as the player and watch what happens as a timeline. Every tool runs the CLI \`node tools/evejs-e2e/bin/e2e.js\` in this tree; the guide is tools/evejs-e2e/docs/GUIDE.md.
 
 Start with e2e_status: it shows whether this tree's server is up, the saved worlds, the scenarios and the plugins that are active. e2e_doctor says what this tree supports: the gateway calls, the client view, the optional patches and the ports.
 
@@ -678,7 +678,7 @@ const TOOLS = [
       "(the JSON object) to write one first. check: true only validates it, which boots nothing; do that first. " +
       (MANAGED ? "The server must be down (e2e_down). " : "") +
       "A run takes minutes; wait: false returns at once and e2e_report waits. " +
-      "The scenario format is in this server's instructions and docs/E2E-GRID-TESTING.md \"Scenarios\".",
+      "The scenario format is in this server's instructions and docs/GUIDE.md \"Scenarios\".",
     inputSchema: schema({
       name: str("A scenario in tools/e2e-scenarios, tools/evejs-e2e/scenarios, a plugin's scenarios or _local/e2e/scenarios (without .json), or a path. With scenario: the file name to write."),
       scenario: { type: "object", description: "The scenario JSON to write as <name>.json before checking or running it." },

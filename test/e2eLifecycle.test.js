@@ -2,7 +2,7 @@
 
 // evejs-e2e phase 2: per-tree port blocks, the market daemon's generated
 // config, and saved worlds. The live boot is checked by
-// docs/E2E-GRID-TESTING.md.
+// docs/GUIDE.md.
 
 const test = require("node:test");
 const assert = require("node:assert");

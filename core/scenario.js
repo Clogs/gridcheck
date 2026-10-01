@@ -6,7 +6,7 @@
 // tools/evejs-e2e/scenarios/ and each plugin's plugins/<name>/scenarios/).
 // Plugins add steps and `up` options through the registry (core/plugins.js).
 // The server calls come in as `ops`, so the run can be tested without a
-// server. Guide: docs/E2E-GRID-TESTING.md "Scenarios".
+// server. Guide: docs/GUIDE.md "Scenarios".
 
 const fs = require("node:fs");
 const path = require("node:path");

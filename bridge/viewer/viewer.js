@@ -5,7 +5,7 @@
 // bridge (bridge/viewer.js), by `e2e view` or by `e2e gui`. Positions come from the
 // watch's POS events, the rest from the timeline's own events; DIVERGE events
 // (what the client was sent disagreeing with the server) are marked on the
-// map, the scrubber and their own list. Guide: docs/E2E-GRID-TESTING.md "Viewer".
+// map, the scrubber and their own list. Guide: docs/GUIDE.md "Viewer".
 
 (() => {
   const SVG = "http://www.w3.org/2000/svg";

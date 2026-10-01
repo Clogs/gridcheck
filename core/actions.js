@@ -6,7 +6,7 @@
 // The server owns every rule (range, capacitor, lock time, slots); this only
 // picks what to act on and reports what the server answered. The calls come
 // in as `io`, so the actions can be tested without a server. Guide:
-// docs/E2E-GRID-TESTING.md "Player actions".
+// docs/GUIDE.md "Player actions".
 
 const { tokenize } = require("./conditions");
 const { formatDistance } = require("./format");

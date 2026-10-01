@@ -2,7 +2,7 @@
 
 // evejs-e2e: the pure parts of the headless observer CLI -- argument parsing,
 // log filtering and the grid table. The live path is checked by
-// docs/E2E-GRID-TESTING.md.
+// docs/GUIDE.md.
 
 const test = require("node:test");
 const assert = require("node:assert");

@@ -32,8 +32,8 @@ node tools/evejs-e2e/bin/e2e.js init --force          # replace an existing file
 The environment wins over the file, as it does for the server: `EVEJS_GAMESTORE_DATA_DIR` moves the
 data dir and the world beside it, `EVEJS_DATA_ROOT` moves the log, and
 `EVEJS_AGENT_BRIDGE_HANDSHAKE` moves the handshake. A tree with no file runs with the defaults. A
-file with a mistake stops every command except `init`, `doctor`, `help` and `vendor`, and says what
-is wrong.
+file with a mistake stops every command except `init`, `doctor`, `help`, `vendor` and `gui`, and
+says what is wrong. `init --dry-run` prints the file it would write without writing it.
 
 ## Attach and managed
 

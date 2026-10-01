@@ -2,7 +2,7 @@
 
 // Tactical frames for `e2e run` (core/frames.js) and the POS events the
 // bridge watch writes for them (agentBridgeWatch positionFrame). The live
-// path is in docs/E2E-GRID-TESTING.md "Tactical frames".
+// path is in docs/GUIDE.md "Tactical frames".
 
 const test = require("node:test");
 const assert = require("node:assert");

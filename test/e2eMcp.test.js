@@ -3,7 +3,7 @@
 // bin/mcp.js: the MCP server over the e2e CLI. Covers the CLI argument
 // mapping, argument checks, the JSON-RPC protocol, the PR citation, and one
 // real stdio session that spawns the CLI without booting anything. Live runs
-// through the tools are in docs/E2E-GRID-TESTING.md "Agent MCP tools".
+// through the tools are in docs/GUIDE.md "Agent MCP tools".
 
 const test = require("node:test");
 const assert = require("node:assert");

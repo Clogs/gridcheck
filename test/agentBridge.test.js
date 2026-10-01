@@ -2,7 +2,7 @@
 
 // The agent bridge (bridge/): the grid reader, the
 // routes and the loopback HTTP layer, each built from injected seams so none of
-// it needs a booted server. The live path is checked by docs/E2E-GRID-TESTING.md.
+// it needs a booted server. The live path is checked by docs/GUIDE.md.
 
 const test = require("node:test");
 const assert = require("node:assert");
