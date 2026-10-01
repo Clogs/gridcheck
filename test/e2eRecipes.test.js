@@ -48,14 +48,18 @@ test("the starter recipe loads and reads as the steps that build it", () => {
     "login",
     "slash /allskills",
     "loadout Tristan: 7 module(s), 5 drone(s), Antimatter Charge S loaded, 1 cargo stack(s)",
-    "undock",
-    "teleport Amamake",
-    "wait 5s",
-    "dock",
+    "slash /tr me 60004603",
   ]);
-  assert.strictEqual(recipe.steps.find((step) => step.type === "teleport").systemID, 30002537);
   assert.deepStrictEqual(recipes.listRecipes().map((row) => row.name), ["starter"]);
 });
+
+test("a recipe's teleport resolves its system when the recipe is read", () => withDir((dir) => {
+  writeRecipe(dir, "lowsec", { steps: ["fresh", "undock", { teleport: "Amamake" }, { wait: 5 }, "dock"] });
+  const recipe = recipes.loadRecipe("lowsec", { dir, resolveSystemID, registry });
+  assert.strictEqual(recipe.steps.find((step) => step.type === "teleport").systemID, 30002537);
+  assert.deepStrictEqual(recipes.describeRecipe(recipe, registry), ["fresh", "undock", "teleport Amamake", "wait 5s", "dock"],
+    "the implicit login isn't listed");
+}));
 
 test("a recipe starts fresh, takes only recipe steps, and names the step that is wrong", () => withDir((dir) => {
   const load = (name) => () => recipes.loadRecipe(name, { dir, resolveSystemID, registry });

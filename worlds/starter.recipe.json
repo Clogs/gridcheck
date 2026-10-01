@@ -1,5 +1,5 @@
 {
-  "description": "A fresh character with every skill, in a Tristan with two blasters loaded with antimatter, an afterburner, a scrambler, a web, an armour repairer and five Hobgoblins, docked in Amamake. Stock EveJS's own commands and the loadout build it, so it builds in any tree.",
+  "description": "A fresh character with every skill, in a Tristan with two blasters loaded with antimatter, an afterburner, a scrambler, a web, an armour repairer and five Hobgoblins, docked at Amamake II - Brutor Tribe Bureau. Stock EveJS's own commands and the loadout build it, so it builds in any tree.",
   "steps": [
     "fresh",
     "login",
@@ -18,9 +18,6 @@
       "cargo": ["Antimatter Charge S x400"],
       "charges": ["Antimatter Charge S"]
     } },
-    "undock",
-    { "teleport": "Amamake" },
-    { "wait": 5 },
-    "dock"
+    { "slash": "/tr me 60004603", "note": "docks at Amamake II - Brutor Tribe Bureau; stock /dock goes back to the home station" }
   ]
 }
