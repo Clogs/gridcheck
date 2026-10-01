@@ -2,20 +2,24 @@
 
 // `e2e run <scenario>`: scenario files, their checks, the run itself and its
 // report. A scenario names a saved world, setup steps, stop conditions and
-// expectations (tools/evejs-e2e/scenarios/*.json, and each plugin's
-// plugins/<name>/scenarios/). Plugins add steps and `up` options through the
-// registry (core/plugins.js). The server calls come in as `ops`, so the run
-// can be tested without a server. Guide: docs/E2E-GRID-TESTING.md "Scenarios".
+// expectations (the tree's tools/e2e-scenarios/*.json, the core's
+// tools/evejs-e2e/scenarios/ and each plugin's plugins/<name>/scenarios/).
+// Plugins add steps and `up` options through the registry (core/plugins.js).
+// The server calls come in as `ops`, so the run can be tested without a
+// server. Guide: docs/E2E-GRID-TESTING.md "Scenarios".
 
 const fs = require("node:fs");
 const path = require("node:path");
 
 const { parseCondition } = require("./conditions");
-const { defaultRegistry } = require("./plugins");
+const { DEFAULT_TREE_ROOT, defaultRegistry } = require("./plugins");
 const { formatOffset, formatTimelineEvent } = require("./timeline");
 const actionTools = require("./actions");
 
 const SCENARIO_DIR = path.join(__dirname, "..", "scenarios");
+// The tree's own scenarios, committed with its features. tools/evejs-e2e/ is a
+// vendored copy (core/vendor.js), so a scenario saved there would be drift.
+const TREE_SCENARIO_DIR = path.join(DEFAULT_TREE_ROOT, "tools", "e2e-scenarios");
 
 // The bridge ends a watch after an hour (agentBridgeWatch LIMITS). The run
 // watches for that hour and stops it itself; this leaves room for the setup
@@ -478,8 +482,8 @@ function validateScenario(raw, { source = "scenario", defaultName = null, worldE
 }
 
 // The folders scenarios live in: the core's, then each plugin's.
-function scenarioDirs({ dir = SCENARIO_DIR, registry = defaultRegistry() } = {}) {
-  return [{ plugin: null, dir }, ...registry.scenarioDirs];
+function scenarioDirs({ dir = SCENARIO_DIR, treeDir = TREE_SCENARIO_DIR, registry = defaultRegistry() } = {}) {
+  return [{ plugin: null, dir: treeDir }, { plugin: null, dir }, ...registry.scenarioDirs];
 }
 
 // A bare name is a file in the first folder that has it; a path is a path.
@@ -503,7 +507,8 @@ function loadScenario(nameOrPath, context = {}) {
   return { file, scenario };
 }
 
-// Every scenario in every folder; a name the core has hides a plugin's.
+// Every scenario in every folder; a name the tree has hides the core's, and
+// the core's hides a plugin's.
 function listScenarios(context = {}) {
   const rows = [];
   const seen = new Set();
@@ -948,6 +953,7 @@ function resultRecord(result, { runID, scenarioFile }) {
 module.exports = {
   BUDGET_SECONDS,
   SCENARIO_DIR,
+  TREE_SCENARIO_DIR,
   ScenarioError,
   bindStep,
   describeStep,

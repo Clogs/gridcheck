@@ -17,7 +17,7 @@ const path = require("node:path");
 const { formatOffset, formatTimelineEvent } = require("../core/timeline");
 const { DEFAULT_TREE_ROOT, defaultRegistry } = require("../core/plugins");
 const { kindsOf } = require("../core/conditions");
-const { scenarioDirs } = require("../core/scenario");
+const { TREE_SCENARIO_DIR, scenarioDirs } = require("../core/scenario");
 
 const REPO_ROOT = DEFAULT_TREE_ROOT;
 const REGISTRY = defaultRegistry();
@@ -26,7 +26,6 @@ const E2E_DIR = path.join(REPO_ROOT, "_local", "e2e");
 const RUNS_DIR = path.join(E2E_DIR, "runs");
 const BACKGROUND_DIR = path.join(E2E_DIR, "mcp");
 const DRAFT_DIR = path.join(E2E_DIR, "scenarios");
-const SCENARIO_DIR = path.join(__dirname, "..", "scenarios");
 
 const SERVER_INFO = { name: "e2e", version: "1.0.0" };
 const PROTOCOL_VERSIONS = ["2025-06-18", "2025-03-26", "2024-11-05"];
@@ -58,7 +57,7 @@ To verify a feature, write a scenario and run it (e2e_run_scenario). A run boots
 - until: any (stop conditions), timeout (s after setup, required), grace (s more after a stop), from ("setup" default: only events after setup count; "start": setup's own events count, e.g. the GRID an undock causes).
 - expect: conditions that should be seen; "no <condition>" expects none. A missing one fails the run (exit 1) but the run keeps watching.
 - Conditions: KIND then field tests. Kinds: ${kinds}, and CLIENT (needs "watch": { "client": "all" }), FX (needs "client": "fx" or "all") and DIVERGE. Tests: field=value, field!=value, field~regex, field>=N (also > < <=), bare field (set), !field (unset). Units: 30km, 90s, 5min. "self" = about your ship. $name = IDs a step bound with "as". A field is looked up on the event, then one level down. Field names are the ones e2e_watch with json:true prints; a check lists a kind's fields when you name a wrong one.
-Write the file with e2e_run_scenario { name, scenario, check: true } first: that validates without booting. save:true writes it to tools/evejs-e2e/scenarios/ to commit with the feature; otherwise it goes to _local/e2e/scenarios/.
+Write the file with e2e_run_scenario { name, scenario, check: true } first: that validates without booting. save:true writes it to tools/e2e-scenarios/ to commit with the feature; otherwise it goes to _local/e2e/scenarios/.
 
 Runs take minutes (boot about 25 s, then real-time grid behaviour). wait:false starts one in the background; e2e_report { run, waitSeconds } waits for it and reads the verdict. e2e_report { run, section: "pr" } gives the markdown to cite the run in a PR description.
 
@@ -286,10 +285,10 @@ function resolveScenario(name) {
   return fs.existsSync(draft) ? draft : tree[0];
 }
 
-// A scenario committed with the tool, which a reviewer can rerun by name.
+// A scenario committed with the tree or the tool, which a reviewer can rerun by name.
 function committedScenario(scenarioFile) {
   const file = String(scenarioFile || "");
-  return file.startsWith("tools/evejs-e2e/scenarios/") || /^tools\/evejs-e2e\/plugins\/[^/]+\/scenarios\//.test(file);
+  return file.startsWith("tools/e2e-scenarios/") || file.startsWith("tools/evejs-e2e/scenarios/") || /^tools\/evejs-e2e\/plugins\/[^/]+\/scenarios\//.test(file);
 }
 
 function writeScenario(name, scenario, { save = false } = {}) {
@@ -299,7 +298,7 @@ function writeScenario(name, scenario, { save = false } = {}) {
   if (scenario === null || typeof scenario !== "object" || Array.isArray(scenario)) {
     throw new ToolError("scenario: the scenario as a JSON object");
   }
-  const dir = save ? SCENARIO_DIR : DRAFT_DIR;
+  const dir = save ? TREE_SCENARIO_DIR : DRAFT_DIR;
   fs.mkdirSync(dir, { recursive: true });
   const file = path.join(dir, `${name}.json`);
   fs.writeFileSync(file, `${JSON.stringify(scenario, null, 2)}\n`);
@@ -431,7 +430,7 @@ function prCitation(state, report) {
     lines.join("\n"),
     "",
     "---",
-    ...(inTree ? [] : [`The scenario is not in tools/evejs-e2e/scenarios/, so a reviewer can't rerun it. Save it there ` +
+    ...(inTree ? [] : [`The scenario is not in tools/e2e-scenarios/, so a reviewer can't rerun it. Save it there ` +
       "(e2e_run_scenario with save: true) and commit it with the feature."]),
     `Paste the markdown above. Attach these, or PNGs rendered from them, so reviewers see the frames:`,
     ...(attach.length ? attach.map((file) => `- ${file}`) : ["- (no frames in this run)"]),
@@ -477,7 +476,7 @@ const TOOLS = [
   {
     name: "e2e_status",
     description: "Where things stand in this tree: whether the e2e server is up (pid, ports, boot time), the held character, " +
-      "the saved worlds a run can start from, the scenarios (tools/evejs-e2e/scenarios and drafts in _local/e2e/scenarios), " +
+      "the saved worlds a run can start from, the scenarios (the tree's tools/e2e-scenarios, the tool's and its plugins', and drafts in _local/e2e/scenarios), " +
       "background runs, and the most recent runs. Call this first.",
     inputSchema: schema(),
     async run(_params, context) {
@@ -627,9 +626,9 @@ const TOOLS = [
       "The server must be down (e2e_down). A run takes minutes; wait: false returns at once and e2e_report waits. " +
       "The scenario format is in this server's instructions and docs/E2E-GRID-TESTING.md \"Scenarios\".",
     inputSchema: schema({
-      name: str("A scenario in tools/evejs-e2e/scenarios or _local/e2e/scenarios (without .json), or a path. With scenario: the file name to write."),
+      name: str("A scenario in tools/e2e-scenarios, tools/evejs-e2e/scenarios, a plugin's scenarios or _local/e2e/scenarios (without .json), or a path. With scenario: the file name to write."),
       scenario: { type: "object", description: "The scenario JSON to write as <name>.json before checking or running it." },
-      save: bool("With scenario: write it to tools/evejs-e2e/scenarios/ (to commit with the feature) instead of _local/e2e/scenarios/."),
+      save: bool("With scenario: write it to tools/e2e-scenarios/ (to commit with the feature) instead of _local/e2e/scenarios/."),
       check: bool("Only load and check the scenario; boot nothing."),
       run: str("Run ID (default: start time and scenario name). Must be new."),
       keepUp: bool("Leave the server running after the run, to look around with the other tools."),

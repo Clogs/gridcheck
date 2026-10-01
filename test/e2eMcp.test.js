@@ -121,6 +121,7 @@ test("a bare scenario name is the tree's file, the core's or a plugin's; a path 
   assert.strictEqual(mcp.resolveScenario("tools/evejs-e2e/scenarios/x.json"),
     path.join(DEFAULT_TREE_ROOT, "tools", "evejs-e2e", "scenarios", "x.json"), "a path is from the tree's root");
   assert.ok(mcp.committedScenario("tools/evejs-e2e/plugins/lu/scenarios/fleet-to-grid.json"));
+  assert.ok(mcp.committedScenario("tools/e2e-scenarios/fleet-arrives.json"), "the tree's own scenarios");
   assert.ok(!mcp.committedScenario("_local/e2e/scenarios/fleet-to-grid.json"));
 });
 

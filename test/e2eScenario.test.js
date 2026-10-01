@@ -658,3 +658,19 @@ test("a during step that fails ends the run as not completed", async () => {
   assert.strictEqual(exitCodeFor(result), 2);
   assert.match(renderReport(result, { runID: "r", scenario }), /\*\*during failed\*\* at `lock nearest npc as \$mark`/);
 });
+
+test("a bare name is the tree's scenario first, then the core's, then a plugin's", (t) => {
+  const { scenarioPath } = require("../core/scenario");
+  const os = require("os");
+  const treeDir = fs.mkdtempSync(path.join(os.tmpdir(), "e2e-tree-scenarios-"));
+  t.after(() => fs.rmSync(treeDir, { recursive: true, force: true }));
+  const registry = emptyRegistry();
+  const core = path.resolve(__dirname, "..", "scenarios", "smoke-undock.json");
+  assert.strictEqual(scenarioPath("smoke-undock", { treeDir, registry }), core);
+  fs.writeFileSync(path.join(treeDir, "smoke-undock.json"), "{}\n");
+  assert.strictEqual(scenarioPath("smoke-undock", { treeDir, registry }), path.join(treeDir, "smoke-undock.json"));
+  assert.strictEqual(scenarioPath("not-anywhere", { treeDir, registry }), path.join(treeDir, "not-anywhere.json"),
+    "a new name is the tree's");
+  assert.deepStrictEqual(listScenarios({ treeDir, registry }).find((row) => row.name === "smoke-undock").file,
+    path.join(treeDir, "smoke-undock.json"));
+});
