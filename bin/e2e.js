@@ -6,6 +6,13 @@
 // grid, with no EVE client. `e2e help` lists the commands, the plugins'
 // included (core/plugins.js). Guide: docs/E2E-GRID-TESTING.md.
 
+// `e2e vendor` loads core/vendor.js and nothing else: a copy edited by hand
+// may not load, and the check is what has to say which files changed.
+if (require.main === module && process.argv[2] === "vendor") {
+  process.exitCode = require("../core/vendor").main(process.argv.slice(3));
+  return;
+}
+
 const { spawn, spawnSync } = require("node:child_process");
 const fs = require("node:fs");
 const net = require("node:net");
@@ -1362,37 +1369,12 @@ function cmdWorld(positionals, flags) {
   }
 }
 
-const VENDOR_USAGE = "usage: e2e vendor update [--from <checkout|tag>] [--tree <path>] [--force] | vendor check [--tree <path>]";
-
-const slashed = (file) => String(file).split(path.sep).join("/");
-
-// --tree defaults to the tree this copy is vendored into.
+// main() reaches this only when called in-process; from a shell, `vendor` runs
+// at the top of this file, before the rest of the copy loads.
 function cmdVendor(positionals, flags) {
-  const action = positionals[0];
-  const tree = flags.tree ? path.resolve(String(flags.tree)) : REPO_ROOT;
-  const target = slashed(path.join(tree, vendor.VENDOR_DIR));
+  const options = { tree: flags.tree ? String(flags.tree) : REPO_ROOT, from: flags.from, force: Boolean(flags.force) };
   try {
-    if (action === "update") {
-      const result = vendor.updateVendored({ tree, from: flags.from, force: Boolean(flags.force) });
-      const { manifest, counts } = result;
-      console.log(`vendored ${manifest.name} ${manifest.version} at ${manifest.commit.slice(0, 8)} (${manifest.ref}) ` +
-        `from ${slashed(result.checkout)}`);
-      console.log(`  ${target}: ${Object.keys(manifest.files).length} files, ${counts.added} added, ` +
-        `${counts.changed} changed, ${counts.removed} removed; shim ${result.shim}`);
-      if (result.dirty) console.log(`  ${slashed(result.checkout)} has uncommitted changes; they were not vendored`);
-      console.log(`  commit ${slashed(vendor.VENDOR_DIR)}/ and ${slashed(vendor.SHIM_PATH)} in ${slashed(tree)}`);
-    } else if (action === "check") {
-      const result = vendor.checkVendored({ tree });
-      if (!result.ok) {
-        throw new CliError([`${target} differs from ${vendor.MANIFEST_NAME}; change the evejs-e2e repo and ` +
-          "run e2e vendor update:", ...vendor.problemLines(result.problems)].join("\n"));
-      }
-      const { manifest } = result;
-      console.log(`${target} matches ${vendor.MANIFEST_NAME}: ${manifest.name} ${manifest.version} at ` +
-        `${String(manifest.commit).slice(0, 8)}, ${Object.keys(manifest.files).length} files and the shim`);
-    } else {
-      throw new CliError(VENDOR_USAGE);
-    }
+    for (const line of vendor.runVendor(positionals[0], options)) console.log(line);
   } catch (error) {
     throw error instanceof vendor.VendorError ? new CliError(error.message) : error;
   }

@@ -146,3 +146,30 @@ test("the installed shim loads the vendored bridge from where the stock loader f
   assert.strictEqual(service.serviceName, "agentBridge");
   assert.strictEqual(service.serverRoot, path.join(s.tree, "server"));
 });
+
+test("vendor check runs from a copy whose other files no longer load, and names them", (t) => {
+  const dir = scratch(t);
+  const tree = path.join(dir, "tree");
+  fs.mkdirSync(path.join(tree, "server", "src"), { recursive: true });
+  // This repo's own HEAD, so the real bin/e2e.js runs: commit a change to
+  // bin/e2e.js or core/vendor.js before this tests it.
+  vendor.updateVendored({ tree });
+  const bin = path.join(tree, "tools", "evejs-e2e", "bin", "e2e.js");
+  const run = (...args) => spawnSync(process.execPath, [bin, "vendor", ...args], { encoding: "utf8", windowsHide: true,
+    env: { ...process.env, EVEJS_E2E_TREE: "" } });
+  assert.strictEqual(run("check").status, 0);
+  fs.appendFileSync(path.join(tree, "tools", "evejs-e2e", "core", "plugins.js"), "this is not javascript (\n");
+  const broken = run("check");
+  assert.strictEqual(broken.status, 1);
+  assert.match(broken.stderr, /edited +core\/plugins\.js/);
+  assert.doesNotMatch(broken.stderr, /SyntaxError/);
+  assert.strictEqual(run("check", "--bogus").status, 1);
+});
+
+test("vendor arguments: an action, --tree and --from take values, --force doesn't", () => {
+  assert.deepStrictEqual(vendor.parseVendorArgs(["update", "--from", "v1", "--tree", "x", "--force"]),
+    { action: "update", from: "v1", tree: "x", force: true });
+  assert.throws(() => vendor.parseVendorArgs(["check", "--tree"]), /--tree needs a value/);
+  assert.throws(() => vendor.parseVendorArgs(["check", "extra"]), /unknown argument extra/);
+  assert.throws(() => vendor.runVendor("nope"), /usage: e2e vendor/);
+});

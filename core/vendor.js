@@ -25,6 +25,12 @@ const MANIFEST_NAME = "VENDOR.json";
 const PACKAGE_NAME = "evejs-e2e";
 // The checkout this file sits in, when it is one.
 const OWN_CHECKOUT = path.resolve(__dirname, "..");
+// The tree this copy is vendored into, as core/plugins.js reads it. Repeated
+// here because this file must load when the rest of the copy doesn't.
+const OWN_TREE = String(process.env.EVEJS_E2E_TREE || "").trim()
+  ? path.resolve(process.env.EVEJS_E2E_TREE.trim())
+  : path.resolve(__dirname, "..", "..", "..");
+const USAGE = "usage: e2e vendor update [--from <checkout|tag>] [--tree <path>] [--force] | vendor check [--tree <path>]";
 
 class VendorError extends Error {}
 
@@ -281,7 +287,71 @@ function updateVendored({ tree, from, force = false }) {
   };
 }
 
+const slashed = (file) => String(file).split(path.sep).join("/");
+
+// `e2e vendor <action>` -> the lines to print; a VendorError when it fails.
+function runVendor(action, { tree = OWN_TREE, from, force = false } = {}) {
+  const treeRoot = path.resolve(String(tree));
+  const target = slashed(path.join(treeRoot, VENDOR_DIR));
+  if (action === "update") {
+    const result = updateVendored({ tree: treeRoot, from, force });
+    const { manifest, counts } = result;
+    return [
+      `vendored ${manifest.name} ${manifest.version} at ${manifest.commit.slice(0, 8)} (${manifest.ref}) from ${slashed(result.checkout)}`,
+      `  ${target}: ${Object.keys(manifest.files).length} files, ${counts.added} added, ${counts.changed} changed, ` +
+        `${counts.removed} removed; shim ${result.shim}`,
+      ...(result.dirty ? [`  ${slashed(result.checkout)} has uncommitted changes; they were not vendored`] : []),
+      `  commit ${slashed(VENDOR_DIR)}/ and ${slashed(SHIM_PATH)} in ${slashed(treeRoot)}`,
+    ];
+  }
+  if (action === "check") {
+    const result = checkVendored({ tree: treeRoot });
+    if (!result.ok) {
+      throw new VendorError([`${target} differs from ${MANIFEST_NAME}; change the evejs-e2e repo and run ` +
+        "e2e vendor update:", ...problemLines(result.problems)].join("\n"));
+    }
+    const { manifest } = result;
+    return [`${target} matches ${MANIFEST_NAME}: ${manifest.name} ${manifest.version} at ` +
+      `${String(manifest.commit).slice(0, 8)}, ${Object.keys(manifest.files).length} files and the shim`];
+  }
+  throw new VendorError(USAGE);
+}
+
+function parseVendorArgs(argv) {
+  const options = { action: null };
+  for (let index = 0; index < argv.length; index += 1) {
+    const token = argv[index];
+    if (token === "--force") options.force = true;
+    else if (token === "--tree" || token === "--from") {
+      const value = argv[index + 1];
+      if (value === undefined || value.startsWith("--")) throw new VendorError(`${token} needs a value`);
+      options[token.slice(2)] = value;
+      index += 1;
+    } else if (!token.startsWith("--") && !options.action) options.action = token;
+    else throw new VendorError(`unknown argument ${token}\n${USAGE}`);
+  }
+  return options;
+}
+
+// bin/e2e.js runs this before it loads anything else, so a copy whose other
+// files no longer load can still say which ones changed.
+function main(argv, { stdout = process.stdout, stderr = process.stderr } = {}) {
+  try {
+    const { action, ...options } = parseVendorArgs(argv);
+    for (const line of runVendor(action, options)) stdout.write(`${line}\n`);
+    return 0;
+  } catch (error) {
+    if (!(error instanceof VendorError)) throw error;
+    stderr.write(`e2e: ${error.message}\n`);
+    return 1;
+  }
+}
+
 module.exports = {
+  USAGE,
+  main,
+  parseVendorArgs,
+  runVendor,
   MANIFEST_NAME,
   SHIM_PATH,
   SHIM_SOURCE,
