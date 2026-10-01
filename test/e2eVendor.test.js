@@ -49,6 +49,7 @@ function setup(t) {
   write(source, "core/crlf.js", CRLF);
   write(source, "core/mixed.js", MIXED);
   write(source, "test/x.test.js", "// not vendored\n");
+  write(source, "compat-report.md", "# not vendored either\n");
   write(source, ".gitattributes", "* -text\n");
   git(source, "add", "-A");
   git(source, "commit", "-q", "-m", "one");
@@ -67,6 +68,7 @@ test("update copies a commit's files byte for byte, installs the shim and record
   assert.strictEqual(fs.readFileSync(s.shim, "utf8"), SHIM);
   assert.ok(!fs.existsSync(path.join(s.target, "test")), "tests stay in the repo");
   assert.ok(!fs.existsSync(path.join(s.target, ".gitattributes")), "dotfiles stay in the repo");
+  assert.ok(!fs.existsSync(path.join(s.target, "compat-report.md")), "the compatibility report stays in the repo");
   const manifest = JSON.parse(fs.readFileSync(path.join(s.target, "VENDOR.json"), "utf8"));
   assert.strictEqual(manifest.version, "1.2.3");
   assert.strictEqual(manifest.commit, git(s.source, "rev-parse", "HEAD"));

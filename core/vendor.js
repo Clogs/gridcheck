@@ -34,9 +34,12 @@ const USAGE = "usage: e2e vendor update [--from <checkout|tag>] [--tree <path>] 
 
 class VendorError extends Error {}
 
+// The compatibility report is the repo's evidence, with the machine's paths in it.
+const REPO_ONLY = new Set([MANIFEST_NAME, "compat-report.md"]);
+
 function vendored(relativePath) {
   const first = relativePath.split("/")[0];
-  return !first.startsWith(".") && first !== "test" && relativePath !== MANIFEST_NAME;
+  return !first.startsWith(".") && first !== "test" && !REPO_ONLY.has(relativePath);
 }
 
 function sha256(bytes) {
