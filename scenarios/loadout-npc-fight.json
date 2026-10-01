@@ -1,0 +1,24 @@
+{
+  "description": "A fitted ship fights. From the starter world's Tristan, undock, spawn two Blood Raider frigates with stock /npc, launch the Hobgoblins and send them in, lock one rat, orbit it and fire the blasters. The rat should take damage and die. The drone and gun actions' live check.",
+  "recipe": "starter",
+  "setup": [
+    "undock",
+    { "slash": "/npc 2 parity_blood_raider_pulse_frigate", "note": "the default /npc pool rolls cruisers that outfight a Tristan" },
+    { "launchDrones": "all" },
+    { "lock": "nearest npc", "as": "mark", "timeout": 30 },
+    { "engageDrones": "$mark" },
+    { "orbit": "$mark", "range": 1500 },
+    { "activate": "weapons", "target": "$mark" }
+  ],
+  "watch": { "every": 1, "client": "fx" },
+  "until": { "any": ["DESTROYED itemID=$mark"], "timeout": 120, "grace": 10 },
+  "expect": [
+    { "match": "ARRIVE who=npc", "note": "the rats appear" },
+    { "match": "TARGET sourceLabel=self targetID=$mark locked", "note": "the ship locks one" },
+    { "match": "FX self", "note": "the blasters fire" },
+    { "match": "DAMAGE itemID=$mark", "note": "the rat takes damage" },
+    { "match": "DESTROYED itemID=$mark", "note": "and dies" },
+    { "match": "KILLMAIL", "note": "the kill is recorded" },
+    { "match": "no DESTROYED self", "note": "the Tristan survives two frigates" }
+  ]
+}

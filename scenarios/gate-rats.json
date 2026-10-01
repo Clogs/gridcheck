@@ -1,6 +1,6 @@
 {
   "description": "Gate rats. Jump to Siseide, which lands the ship on a stargate, and turn the system's gate rats on (the stock gate operator, /gaterats, spawn group blood_raider_gate_ambush). The rats should stand up on the gate, lock the ship and shoot it.",
-  "world": "lowsec-docked",
+  "recipe": "starter",
   "setup": [
     "undock",
     { "teleport": "Siseide" },

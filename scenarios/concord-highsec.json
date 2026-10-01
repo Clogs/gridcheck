@@ -1,6 +1,6 @@
 {
   "description": "CONCORD response in high sec. Jump to Rens (0.9) and commit an offence with /naughty, which sets the criminal timers and schedules CONCORD. CONCORD should arrive, lock the ship and destroy it.",
-  "world": "lowsec-docked",
+  "recipe": "starter",
   "setup": [
     "undock",
     { "teleport": "Rens" },

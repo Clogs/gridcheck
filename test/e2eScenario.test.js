@@ -280,7 +280,7 @@ test("a scenario that can't fit in one bridge watch is refused", () => {
 
 test("every shipped scenario loads", LU, () => {
   const rows = listScenarios();
-  for (const name of ["pirate-stalking", "gate-rats", "lu-traffic", "alliance-skirmish", "concord-highsec"]) {
+  for (const name of ["pirate-stalking", "gate-rats", "lu-traffic", "alliance-skirmish", "concord-highsec", "loadout-npc-fight"]) {
     assert.ok(rows.some((row) => row.name === name), `the first scenarios include ${name}`);
   }
   for (const row of rows) {
