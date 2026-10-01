@@ -724,11 +724,12 @@ function createGridWatch({
     let lastOffGridAtMs = -Infinity;
     let lastPositionsAtMs = -Infinity;
     let reason = "time";
-    const client = destinyTee && clientMode !== "off"
+    const client = destinyTee && !destinyTee.off && clientMode !== "off"
       ? createClientWatch({ tee: destinyTee, differ, describeType, clientMode, divergeMeters, emit })
       : null;
 
     emit({ kind: "START", characterID, forMs, everyMs, offGridEveryMs, clientMode: client ? clientMode : "off",
+      ...(destinyTee && destinyTee.off && clientMode !== "off" ? { clientOff: destinyTee.off } : {}),
       positions: positions === true });
     for (;;) {
       if (sink.closed()) { reason = "client-closed"; break; }

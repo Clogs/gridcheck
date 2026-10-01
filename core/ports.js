@@ -29,6 +29,19 @@ const OFFSETS = Object.freeze({
   xmpp: 10,
 });
 
+// The variable that moves each core listener, which a tree must read for the
+// listener to leave its stock port. gatewayTls follows the gateway, the agent
+// bridge is this tool's own, and marketHttp is in the market's TOML.
+const LISTENER_ENV = Object.freeze({
+  game: "EVEJS_SERVER_PORT",
+  image: "EVEJS_IMAGE_SERVER_URL",
+  gateway: "EVEJS_MICROSERVICES_PORT",
+  cdn: "EVEJS_PROXY_LOOPBACK_CDN_LISTEN_PORT",
+  redshift: "EVEJS_REDSHIFT_MONITOR_PORT",
+  marketRpc: "EVEJS_MARKET_DAEMON_PORT",
+  xmpp: "EVEJS_XMPP_SERVER_PORT",
+});
+
 // The plugin listeners that fit: inside the block, on an offset nothing else
 // has, under a name nothing else has.
 function usableListeners(listeners = []) {
@@ -135,6 +148,7 @@ async function busyPorts(ports, listeners = []) {
 module.exports = {
   BLOCK_BASE,
   BLOCK_SIZE,
+  LISTENER_ENV,
   OFFSETS,
   SLOT_COUNT,
   busyPorts,

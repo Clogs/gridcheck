@@ -1,10 +1,10 @@
 {
-  "description": "Runner self-test with one expectation that can't be met: nothing in setup leaves Amamake. The run should stop at its stop condition, mark that expectation MISSING in report.md, keep the whole timeline and exit 1.",
-  "world": "lowsec-docked",
+  "description": "Runner self-test with one expectation that can't be met: nothing in setup jumps. The run should stop at its stop condition, mark that expectation MISSING in report.md, keep the whole timeline and exit 1.",
+  "world": "fresh",
   "setup": ["undock"],
   "until": { "any": ["GRID"], "from": "start", "timeout": 60, "grace": 15 },
   "expect": [
-    "GRID systemName=Amamake",
+    "GRID",
     { "match": "SYSTEM toSystemName=Jita", "note": "deliberately unmet" }
   ]
 }

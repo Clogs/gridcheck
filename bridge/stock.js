@@ -19,6 +19,12 @@ const STOCK_MODULES = Object.freeze({
   marshal: "network/tcp/utils/marshal",
   logger: "utils/logger",
   webGateway: "_secondary/express/evejsWebGatewayRuntime",
+  // The handshake reports the server's own ports, log and store (attach mode
+  // reads them), and the layout probe encodes balls with the tree's encoder.
+  config: "config",
+  dataRoot: "config/dataRoot",
+  storeRoot: "gameStore/storeRoot",
+  statePayloads: "space/destiny/stream/statePayloads",
 });
 
 function createStock(serverRoot, { load = require } = {}) {

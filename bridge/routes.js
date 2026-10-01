@@ -12,6 +12,8 @@
 //                                     client: "all" (default), "diverge" or "off"
 //   POST /tee      { characterID }    start keeping the client's view of that gateway session
 //   POST /shutdown                    graceful stop, as if the process got SIGTERM
+//   GET  /capabilities ?characterID=  what this tree can do for the tool (core/capabilities.js);
+//                                     with characterID, also that session's shape
 //
 // Plugins add their own routes through the route table (plugins.js). A
 // plugin can't replace a core route.
@@ -78,7 +80,7 @@ function createRouteTable(log) {
 
 function createAgentBridgeRoutes({
   findSession, executeChatCommand, readGrid, watcher, requestShutdown, log, destinyTee = null, gridAnnotate = null,
-  viewer = null, extraRoutes = [],
+  viewer = null, extraRoutes = [], capabilities = null,
 }) {
   const logger = log || { debug() {} };
 
@@ -207,6 +209,11 @@ function createAgentBridgeRoutes({
   table.add("POST /watch", ({ body }) => watch(body), "core");
   table.add("POST /tee", ({ body }) => tee(body), "core");
   table.add("POST /shutdown", () => shutdown(), "core");
+  table.add("GET /capabilities", ({ query }) => {
+    if (typeof capabilities !== "function") return { statusCode: 503, body: { ok: false, error: "Capabilities are not available." } };
+    const id = toPositiveInt(query.characterID);
+    return { statusCode: 200, body: { ok: true, ...capabilities({ session: id ? findSession(id) : undefined, characterID: id || null }) } };
+  }, "core");
   for (const { owner, routes } of extraRoutes) {
     for (const [key, handler] of Object.entries(routes || {})) table.add(key, handler, owner);
   }

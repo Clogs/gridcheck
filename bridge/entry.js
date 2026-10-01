@@ -1,9 +1,12 @@
 /**
  * Agent bridge: lets the e2e CLI run slash commands on a character's session
  * and read that character's grid, so an agent can check on-grid behaviour
- * without an EVE client. Loopback only, bearer token from the handshake at
- * _local/agentBridge/bridge.json, and off unless EVEJS_AGENT_BRIDGE=1 -- the
- * shipped mod never listens on it. `e2e up` sets the variable.
+ * without an EVE client. Loopback only, bearer token from the handshake
+ * (e2e.config.json handshake, _local/agentBridge/bridge.json by default), and
+ * off unless EVEJS_AGENT_BRIDGE=1 -- the shipped mod never listens on it.
+ * `e2e up` sets the variable; in attach mode you set it yourself. The
+ * handshake also carries this server's ports, log and data dir, which is how
+ * the CLI finds a server it didn't start.
  *
  * The tree loads this through its shim, server/src/_secondary/agentBridge/server.js,
  * which passes the server root in. The core reads stock modules only
@@ -19,11 +22,13 @@ const { createAgentBridgeHttp, removeHandshake } = require("./http");
 const { createAgentBridgeRoutes } = require("./routes");
 const { createGridReader } = require("./grid");
 const { annotateRow, createGridWatch } = require("./watch");
-const { createDestinyTee } = require("./destiny");
+const { createDestinyTee, probeDestinyLayout } = require("./destiny");
 const { createAgentBridgeViewer } = require("./viewer");
 const { createStock, serverRequire } = require("./stock");
 const { DEFAULT_PLUGINS_DIR, loadPlugins, startPlugins, stopPlugins } = require("./plugins");
 const { createToolRegistry, treeAt } = require("../core/plugins");
+const { loadTreeConfig } = require("../core/treeConfig");
+const { buildReport, copyInfo, sessionShape } = require("../core/capabilities");
 
 const DEFAULT_PORT = 26052;
 
@@ -32,12 +37,27 @@ function isEnabledByEnvironment(env = process.env) {
   return ["1", "true", "on", "yes"].includes(raw);
 }
 
-function defaultHandshakePath(treeRoot) {
-  return path.join(treeRoot, "_local", "agentBridge", "bridge.json");
+function handshakePath(treeRoot, env = process.env) {
+  return loadTreeConfig(treeRoot, { env }).handshake;
 }
 
-function handshakePath(treeRoot, env = process.env) {
-  return String(env.EVEJS_AGENT_BRIDGE_HANDSHAKE || "").trim() || defaultHandshakePath(treeRoot);
+// The server's own game and gateway ports, as its config resolved them.
+function serverPorts(stock) {
+  const config = optional(() => stock.config) || {};
+  const port = (value) => {
+    const numeric = Math.trunc(Number(value) || 0);
+    return numeric > 0 && numeric < 65536 ? numeric : null;
+  };
+  return { game: port(config.serverPort), gateway: port(config.microservicesPort) };
+}
+
+// The client view runs only if the decoder reads this tree's ball layout.
+function probeLayout(stock) {
+  const encoder = optional(() => stock.statePayloads);
+  if (!encoder || typeof encoder.buildAddBallsStateBuffer !== "function") {
+    return { ok: false, error: "the tree has no ball state encoder (space/destiny/stream/statePayloads)", balls: 0 };
+  }
+  return probeDestinyLayout((stamp, entities) => encoder.buildAddBallsStateBuffer(stamp, entities));
 }
 
 function resolvePort(env = process.env) {
@@ -91,6 +111,8 @@ function createService({ serverRoot, stock: givenStock = null, pluginsDir = DEFA
     if (bridge) return bridge;
     const stock = givenStock || createStock(serverRoot);
     const log = optional(() => stock.logger) || quietLogger();
+    const config = loadTreeConfig(treeRoot, { env });
+    for (const problem of config.problems) log.warn(`[AgentBridge] ${config.file}: ${problem}`);
     const seams = buildSeams(stock);
     const tree = treeAt(treeRoot, serverRoot);
     const loaded = loadPlugins({ pluginsDir, tree, log });
@@ -104,9 +126,12 @@ function createService({ serverRoot, stock: givenStock = null, pluginsDir = DEFA
       describeType: seams.describeType,
       describeSystem: seams.describeSystem,
     });
+    const layout = probeLayout(stock);
+    if (!layout.ok) log.warn(`[AgentBridge] client view off: ${layout.error}`);
     // A PackagedAction carries its updates as marshalled bytes.
     const destinyTee = createDestinyTee({
       decodePackaged: (bytes) => stock.marshal.marshalDecodeExact(bytes),
+      off: layout.ok ? null : layout.error,
     });
     const watcher = createGridWatch({
       findSession: seams.findSession,
@@ -132,14 +157,38 @@ function createService({ serverRoot, stock: givenStock = null, pluginsDir = DEFA
         characterID: session && session.characterID,
       }),
       extraRoutes: hooks.map((hook) => ({ owner: `plugin ${hook.name}`, routes: hook.routes })),
-      viewer: createAgentBridgeViewer({ runsDir: path.join(treeRoot, "_local", "e2e", "runs"),
+      viewer: createAgentBridgeViewer({ runsDir: config.runsDir,
         registry: createToolRegistry({ active: loaded.active.filter((entry) => hooks.some((hook) => hook.name === entry.name)), skipped }) }),
+      capabilities: ({ session, characterID }) => buildReport({
+        treeRoot,
+        serverRoot,
+        config,
+        registry: pluginStatus,
+        probe: {
+          allowlist: optional(() => stock.webGateway.WEB_CALL_ALLOWLIST),
+          allowlistError: "the gateway exports no WEB_CALL_ALLOWLIST",
+          destiny: layout,
+        },
+        live: {
+          pid: process.pid,
+          ports: { ...serverPorts(stock), agentBridge: bridge ? bridge.port() : null },
+          ...(characterID ? { characterID, session: sessionShape(session) } : {}),
+        },
+      }),
     });
     bridge = createAgentBridgeHttp({
       routes,
       port: port === null ? resolvePort(env) : port,
-      handshakePath: handshakePath(treeRoot, env),
+      handshakePath: config.handshake,
       log,
+      // What attach mode needs to find this server's gateway, log and store.
+      handshakeExtra: () => ({
+        treeRoot,
+        ports: serverPorts(stock),
+        logFile: optional(() => stock.dataRoot.resolveDataRootPath("logs", "server.log")) || config.logFile,
+        dataDir: optional(() => stock.storeRoot.resolveDataDir()) || config.dataDir,
+        tool: copyInfo(),
+      }),
     });
     bridge.start().catch(() => { bridge = null; });
     stock.gameStore.registerShutdownHook("agent-bridge", () => {
@@ -162,7 +211,7 @@ function createService({ serverRoot, stock: givenStock = null, pluginsDir = DEFA
       return start();
     },
     __testing: {
-      DEFAULT_HANDSHAKE_PATH: defaultHandshakePath(treeRoot),
+      DEFAULT_HANDSHAKE_PATH: handshakePath(treeRoot, {}),
       DEFAULT_PORT,
       handshakePath: (overrides) => handshakePath(treeRoot, overrides),
       isEnabledByEnvironment,

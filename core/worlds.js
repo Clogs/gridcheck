@@ -5,22 +5,27 @@
 // VACUUM INTO, which reads a consistent snapshot (WAL included) through a
 // read-only connection, so a source world is never written.
 //
-// Static reference data (_local/gameStore/data, usually a link into another
-// tree) and content-pack state (_local/gameStore/content-packs, files only)
-// are not part of a world and are never touched.
+// Static reference data (the data dir, usually a link into another tree) and
+// content-pack state (content-packs beside it, files only) are not part of a
+// world and are never touched. Where each lives is the tree's e2e.config.json
+// (treeConfig.js).
 
 const fs = require("node:fs");
 const path = require("node:path");
 
+const { loadTreeConfig } = require("./treeConfig");
+
 const NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+// A scenario's "world": "fresh" boots a new game store, so no saved world may take the name.
+const FRESH = "fresh";
 
 function worldPaths(treeRoot) {
-  const store = path.join(treeRoot, "_local", "gameStore");
+  const config = loadTreeConfig(treeRoot);
   return {
-    world: path.join(store, "gamestore.sqlite"),
-    manifest: path.join(store, "manifest.json"),
-    market: path.join(treeRoot, "externalservices", "market-server", "data", "generated", "market.sqlite"),
-    saved: path.join(treeRoot, "_local", "e2e", "worlds"),
+    world: config.gameStore,
+    manifest: config.manifest,
+    market: config.market.database,
+    saved: config.worldsDir,
   };
 }
 
@@ -131,6 +136,7 @@ function runHook(hook, method, ctx) {
 function saveWorld(treeRoot, name, { force = false, note = "", hooks = [] } = {}) {
   const here = worldPaths(treeRoot);
   requireWorld(here, "this tree");
+  if (name === FRESH) throw new Error(`"${FRESH}" names a new game store in a scenario; save under another name`);
   const dir = savedWorldDir(treeRoot, name);
   if (fs.existsSync(dir) && !force) throw new Error(`saved world ${name} exists; pass --force to replace it`);
   const ext = {};
@@ -202,7 +208,8 @@ function restoreWorld(treeRoot, name, { hooks = [], options = {} } = {}) {
 function freshWorld(treeRoot) {
   const here = worldPaths(treeRoot);
   if (!fs.existsSync(here.manifest)) {
-    throw new Error("--fresh needs this tree's manifest.json; copy a world once with `e2e world copy --from ../dev`");
+    throw new Error(`--fresh needs the tree's generated reference data (${here.manifest}); ` +
+      "run the tree's database setup first, or copy a world with `e2e world copy --from <tree>`");
   }
   removeSqlite(here.world);
 }
@@ -230,6 +237,7 @@ function dirBytes(dir) {
 }
 
 module.exports = {
+  FRESH,
   clearOwnerLeases,
   copyWorld,
   freshWorld,

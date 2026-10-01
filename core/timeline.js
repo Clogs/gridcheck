@@ -137,7 +137,7 @@ function eventBody(event, registry) {
     case "START":
       return [`character ${event.characterID}, ${Math.round(event.forMs / 1000)}s, sample every ` +
         `${event.everyMs / 1000}s, off grid every ${event.offGridEveryMs / 1000}s`,
-      event.clientMode ? `client=${event.clientMode}` : ""];
+      event.clientOff ? `client=off (${event.clientOff})` : event.clientMode ? `client=${event.clientMode}` : ""];
     case "CLIENT":
       return clientBody(event);
     case "FX":

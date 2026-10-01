@@ -18,12 +18,15 @@ const { formatOffset, formatTimelineEvent } = require("../core/timeline");
 const { DEFAULT_TREE_ROOT, defaultRegistry } = require("../core/plugins");
 const { kindsOf } = require("../core/conditions");
 const { TREE_SCENARIO_DIR, scenarioDirs } = require("../core/scenario");
+const { defaultTreeConfig } = require("../core/treeConfig");
 
 const REPO_ROOT = DEFAULT_TREE_ROOT;
 const REGISTRY = defaultRegistry();
+const CONFIG = defaultTreeConfig();
+const MANAGED = CONFIG.mode === "managed";
 const CLI_PATH = path.join(__dirname, "e2e.js");
-const E2E_DIR = path.join(REPO_ROOT, "_local", "e2e");
-const RUNS_DIR = path.join(E2E_DIR, "runs");
+const E2E_DIR = CONFIG.e2eDir;
+const RUNS_DIR = CONFIG.runsDir;
 const BACKGROUND_DIR = path.join(E2E_DIR, "mcp");
 const DRAFT_DIR = path.join(E2E_DIR, "scenarios");
 
@@ -44,10 +47,14 @@ function instructions(registry = REGISTRY) {
   const pluginTools = registry.mcpTools.map((tool) => tool.name);
   const core = `End-to-end grid testing for EveJS with no EVE client. A server boots from a saved world; a character logs in through the web gateway, undocks, and you read its grid, run slash commands, act as the player and watch what happens as a timeline. Every tool runs the CLI \`node tools/evejs-e2e/bin/e2e.js\` in this tree; the guide is docs/E2E-GRID-TESTING.md.
 
-Start with e2e_status: it shows whether this tree's server is up, the saved worlds, the scenarios and the plugins that are active.
+Start with e2e_status: it shows whether this tree's server is up, the saved worlds, the scenarios and the plugins that are active. e2e_doctor says what this tree supports: the gateway calls, the client view, the optional patches and the ports.
 
-To verify a feature, write a scenario and run it (e2e_run_scenario). A run boots its own world, so call e2e_down first if the server is up. A scenario is JSON:
-{ "description": "...", "world": "<a saved world e2e_status lists>",
+${MANAGED
+    ? "This tree is in managed mode: the CLI boots and stops its server (e2e_up, e2e_down), and a run boots its own world, so call e2e_down first if the server is up."
+    : "This tree is in attach mode: its server is started by hand with EVEJS_AGENT_BRIDGE=1 set, and the tools work on that live server. e2e_up and e2e_down refuse, and a run uses the server as it is: its world is not restored and the server stays up. If no server is up, ask the user to start one."}
+
+To verify a feature, write a scenario and run it (e2e_run_scenario). A scenario is JSON:
+{ "description": "...", "world": "<a saved world e2e_status lists, or fresh>",
   "setup": ["undock", { "teleport": "Siseide" }, { "slash": "/gaterats on" }, { "waitFor": "ARRIVE who=npc", "timeout": 120 }],
   "until": { "any": ["DESTROYED self"], "timeout": 300, "grace": 10 },
   "expect": ["ARRIVE who=npc", { "match": "TARGET self locked", "note": "why it matters" }, "no DIVERGE status=open"] }
@@ -57,7 +64,7 @@ To verify a feature, write a scenario and run it (e2e_run_scenario). A run boots
 - until: any (stop conditions), timeout (s after setup, required), grace (s more after a stop), from ("setup" default: only events after setup count; "start": setup's own events count, e.g. the GRID an undock causes).
 - expect: conditions that should be seen; "no <condition>" expects none. A missing one fails the run (exit 1) but the run keeps watching.
 - Conditions: KIND then field tests. Kinds: ${kinds}, and CLIENT (needs "watch": { "client": "all" }), FX (needs "client": "fx" or "all") and DIVERGE. Tests: field=value, field!=value, field~regex, field>=N (also > < <=), bare field (set), !field (unset). Units: 30km, 90s, 5min. "self" = about your ship. $name = IDs a step bound with "as". A field is looked up on the event, then one level down. Field names are the ones e2e_watch with json:true prints; a check lists a kind's fields when you name a wrong one.
-Write the file with e2e_run_scenario { name, scenario, check: true } first: that validates without booting. save:true writes it to tools/e2e-scenarios/ to commit with the feature; otherwise it goes to _local/e2e/scenarios/.
+Write the file with e2e_run_scenario { name, scenario, check: true } first: that validates without booting. save:true writes it to ${relativePath(TREE_SCENARIO_DIR)}/ to commit with the feature; otherwise it goes to ${relativePath(DRAFT_DIR)}/.
 
 Runs take minutes (boot about 25 s, then real-time grid behaviour). wait:false starts one in the background; e2e_report { run, waitSeconds } waits for it and reads the verdict. e2e_report { run, section: "pr" } gives the markdown to cite the run in a PR description.
 
@@ -253,6 +260,12 @@ const CLI_ARGS = {
     flag("any-pid", p.anyPid);
     return args;
   },
+  e2e_doctor(p) {
+    const { args, flag } = argList("doctor");
+    flag("offline", p.offline);
+    flag("json", p.json);
+    return args;
+  },
 };
 
 function cliArgs(tool, params = {}) {
@@ -288,7 +301,8 @@ function resolveScenario(name) {
 // A scenario committed with the tree or the tool, which a reviewer can rerun by name.
 function committedScenario(scenarioFile) {
   const file = String(scenarioFile || "");
-  return file.startsWith("tools/e2e-scenarios/") || file.startsWith("tools/evejs-e2e/scenarios/") || /^tools\/evejs-e2e\/plugins\/[^/]+\/scenarios\//.test(file);
+  return file.startsWith(`${relativePath(TREE_SCENARIO_DIR)}/`) || file.startsWith("tools/evejs-e2e/scenarios/") ||
+    /^tools\/evejs-e2e\/plugins\/[^/]+\/scenarios\//.test(file);
 }
 
 function writeScenario(name, scenario, { save = false } = {}) {
@@ -501,7 +515,7 @@ const TOOLS = [
   },
   {
     name: "e2e_up",
-    description: "Start this tree's server (and market daemon) in the background and wait until a character can log in, " +
+    description: "Managed mode only. Start this tree's server (and market daemon) in the background and wait until a character can log in, " +
       "about 25 s warm. For grid checks pass world (a saved world e2e_status lists). Without world or fresh it keeps " +
       "the current world. Refuses if the server is already up. e2e_run_scenario does its own up and down, so don't " +
       "call this before a run.",
@@ -610,7 +624,7 @@ const TOOLS = [
   },
   {
     name: "e2e_log",
-    description: "The tail of the server log (_local/logs/server.log), only the running server's lines unless anyPid.",
+    description: "The tail of the server log, only the running server's lines unless anyPid.",
     inputSchema: schema({
       grep: str("Case-insensitive regex, e.g. NpcController."),
       lines: int("How many lines (default 40).", { minimum: 1, maximum: 2000 }),
@@ -619,11 +633,26 @@ const TOOLS = [
     run: simple("e2e_log"),
   },
   {
+    name: "e2e_doctor",
+    description: "What this tree can do for the tool: which gateway calls the CLI makes it allows, whether the client " +
+      "view can run (the destiny layout check), which optional patches it has, which plugins are active or skipped and " +
+      "why, and which ports can move. Asks the running server when there is one, else reads the tree's files.",
+    inputSchema: schema({
+      offline: bool("Read the tree's files even when a server is up."),
+      json: bool("The whole report as JSON."),
+    }),
+    run: simple("e2e_doctor"),
+  },
+  {
     name: "e2e_run_scenario",
-    description: "Run a scenario: boot its saved world, run setup, watch until a stop condition, shut down, and write a " +
+    description: (MANAGED
+      ? "Run a scenario: boot its world, run setup, watch until a stop condition, shut down, and write a "
+      : "Run a scenario on the live server (attach mode: its world is not restored and the server stays up): run setup, " +
+        "watch until a stop condition, and write a ") +
       "report of expected against observed with tactical frames. Pass name to run a scenario file, or name and scenario " +
       "(the JSON object) to write one first. check: true only validates it, which boots nothing; do that first. " +
-      "The server must be down (e2e_down). A run takes minutes; wait: false returns at once and e2e_report waits. " +
+      (MANAGED ? "The server must be down (e2e_down). " : "") +
+      "A run takes minutes; wait: false returns at once and e2e_report waits. " +
       "The scenario format is in this server's instructions and docs/E2E-GRID-TESTING.md \"Scenarios\".",
     inputSchema: schema({
       name: str("A scenario in tools/e2e-scenarios, tools/evejs-e2e/scenarios, a plugin's scenarios or _local/e2e/scenarios (without .json), or a path. With scenario: the file name to write."),
@@ -632,6 +661,7 @@ const TOOLS = [
       check: bool("Only load and check the scenario; boot nothing."),
       run: str("Run ID (default: start time and scenario name). Must be new."),
       keepUp: bool("Leave the server running after the run, to look around with the other tools."),
+      world: str("Managed mode: boot this saved world (or fresh) instead of the scenario's."),
       wait: bool("Wait for the run to finish (default true). false: start it in the background and return its run ID."),
     }),
     async run(params, context) {
@@ -655,7 +685,8 @@ const TOOLS = [
       const scenarioName = (params.scenario && params.scenario.name) || path.basename(target, ".json");
       const runID = params.run ? safeRunID(params.run) : `${runStamp(Date.now())}-${scenarioName}`;
       if (fs.existsSync(path.join(RUNS_DIR, runID))) throw new ToolError(`run ${runID} already exists; pass another run`);
-      const args = ["run", `--run=${runID}`, ...(params.keepUp ? ["--keep-up"] : []), "--", target];
+      const args = ["run", `--run=${runID}`, ...(params.keepUp ? ["--keep-up"] : []),
+        ...(params.world ? [`--world=${params.world}`] : []), "--", target];
 
       if (params.wait === false) {
         fs.mkdirSync(BACKGROUND_DIR, { recursive: true });
@@ -679,9 +710,9 @@ const TOOLS = [
 
       const reply = await runCli(args, context);
       if (reply.aborted) {
-        // A killed CLI can't run its own `down`.
-        const down = await runCli(["down"]);
-        return textResult(`${prefix}run ${runID} cancelled.\n${tailLines(reply.output, 20)}\n${down.output}`, true);
+        // A killed CLI can't run its own `down`. In attach mode the server isn't the run's to stop.
+        const down = MANAGED ? (await runCli(["down"])).output : "";
+        return textResult(`${prefix}run ${runID} cancelled.\n${tailLines(reply.output, 20)}\n${down}`, true);
       }
       const state = runState(runID);
       if (!state.result) return textResult(`${prefix}${clip(reply.output)}\n(exit ${reply.code}; no report written)`, true);

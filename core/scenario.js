@@ -12,14 +12,18 @@ const fs = require("node:fs");
 const path = require("node:path");
 
 const { parseCondition } = require("./conditions");
-const { DEFAULT_TREE_ROOT, defaultRegistry } = require("./plugins");
+const { defaultRegistry } = require("./plugins");
+const { defaultTreeConfig } = require("./treeConfig");
 const { formatOffset, formatTimelineEvent } = require("./timeline");
 const actionTools = require("./actions");
 
 const SCENARIO_DIR = path.join(__dirname, "..", "scenarios");
-// The tree's own scenarios, committed with its features. tools/evejs-e2e/ is a
+// The tree's own scenarios, committed with its features (e2e.config.json
+// scenariosDir, tools/e2e-scenarios by default). tools/evejs-e2e/ is a
 // vendored copy (core/vendor.js), so a scenario saved there would be drift.
-const TREE_SCENARIO_DIR = path.join(DEFAULT_TREE_ROOT, "tools", "e2e-scenarios");
+const TREE_SCENARIO_DIR = defaultTreeConfig().scenariosDir;
+// "world": "fresh" boots a new game store seeded from the reference data.
+const FRESH_WORLD = "fresh";
 
 // The bridge ends a watch after an hour (agentBridgeWatch LIMITS). The run
 // watches for that hour and stops it itself; this leaves room for the setup
@@ -156,9 +160,9 @@ function validateScenario(raw, { source = "scenario", defaultName = null, worldE
   if (raw.description !== undefined && typeof raw.description !== "string") problem("description", "a string");
 
   if (typeof raw.world !== "string" || !raw.world) {
-    problem("world", "the saved world to start from (e2e world list)");
-  } else if (!worldExists(raw.world)) {
-    problem("world", `no saved world "${raw.world}" in _local/e2e/worlds/ (e2e world list)`);
+    problem("world", `the saved world to start from (e2e world list), or "${FRESH_WORLD}"`);
+  } else if (raw.world !== FRESH_WORLD && !worldExists(raw.world)) {
+    problem("world", `no saved world "${raw.world}" (e2e world list)`);
   }
 
   const up = upDefaults(registry);
@@ -952,6 +956,7 @@ function resultRecord(result, { runID, scenarioFile }) {
 
 module.exports = {
   BUDGET_SECONDS,
+  FRESH_WORLD,
   SCENARIO_DIR,
   TREE_SCENARIO_DIR,
   ScenarioError,

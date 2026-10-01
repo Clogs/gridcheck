@@ -94,7 +94,8 @@ function removeHandshake(handshakePath, options = {}) {
   return true;
 }
 
-function createAgentBridgeHttp({ routes, port, handshakePath, log, serviceName = "agentBridge" }) {
+// handshakeExtra(): more fields for the handshake, read once at listen.
+function createAgentBridgeHttp({ routes, port, handshakePath, log, serviceName = "agentBridge", handshakeExtra = null }) {
   const logger = log || { debug() {}, err() {} };
   const token = crypto.randomBytes(32).toString("hex");
   let server = null;
@@ -164,7 +165,15 @@ function createAgentBridgeHttp({ routes, port, handshakePath, log, serviceName =
 
   function writeHandshake(boundPort) {
     fs.mkdirSync(path.dirname(handshakePath), { recursive: true });
-    const payload = { host: LOOPBACK_HOST, port: boundPort, token, pid: process.pid, startedAtMs: Date.now() };
+    let extra = {};
+    if (typeof handshakeExtra === "function") {
+      try {
+        extra = handshakeExtra() || {};
+      } catch (error) {
+        logger.err(`[AgentBridge] handshake details failed: ${error.message}`);
+      }
+    }
+    const payload = { ...extra, host: LOOPBACK_HOST, port: boundPort, token, pid: process.pid, startedAtMs: Date.now() };
     fs.writeFileSync(handshakePath, `${JSON.stringify(payload, null, 2)}\n`, { mode: 0o600 });
   }
 
@@ -202,7 +211,7 @@ function createAgentBridgeHttp({ routes, port, handshakePath, log, serviceName =
     return new Promise((resolve) => closing.close(() => resolve()));
   }
 
-  return { start, stop, token };
+  return { start, stop, token, port: () => (server ? server.address().port : null) };
 }
 
 module.exports = {

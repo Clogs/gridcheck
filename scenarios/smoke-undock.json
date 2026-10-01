@@ -1,11 +1,10 @@
 {
-  "description": "Undock in Amamake and read the grid. The runner's smoke test: every expectation should be met.",
-  "world": "lowsec-docked",
+  "description": "Undock and read the grid, in any tree. The runner's smoke test: every expectation should be met.",
+  "world": "fresh",
   "setup": ["undock"],
   "until": { "any": ["GRID"], "from": "start", "timeout": 60, "grace": 15 },
   "expect": [
-    "GRID systemName=Amamake",
-    { "match": "GRID self.typeName=Rifter", "note": "the saved world's fitted Rifter" },
+    "GRID",
     { "match": "GRID self.protection.active", "note": "undock protection is on" },
     { "match": "no DIVERGE status=open", "note": "the client view agrees with the server" }
   ]

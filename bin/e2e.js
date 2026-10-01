@@ -22,6 +22,8 @@ const { formatClock, formatGrid } = require("../core/format");
 const { collectIDs, createReorderBuffer, formatTimelineEvent, mentionsAny, parseLogLine } = require("../core/timeline");
 const { busyPorts, marketConfig, portsForTree, serverEnvironment, usableListeners } = require("../core/ports");
 const { DEFAULT_TREE_ROOT, defaultRegistry } = require("../core/plugins");
+const treeConfig = require("../core/treeConfig");
+const capabilities = require("../core/capabilities");
 const worlds = require("../core/worlds");
 const scenarioTools = require("../core/scenario");
 const frameTools = require("../core/frames");
@@ -30,29 +32,30 @@ const vendor = require("../core/vendor");
 
 const REPO_ROOT = DEFAULT_TREE_ROOT;
 const REGISTRY = defaultRegistry();
-const E2E_DIR = path.join(REPO_ROOT, "_local", "e2e");
-const RUNS_DIR = path.join(E2E_DIR, "runs");
+// Every path below is the tree's e2e.config.json (core/treeConfig.js).
+const CONFIG = treeConfig.defaultTreeConfig();
+const E2E_DIR = CONFIG.e2eDir;
+const RUNS_DIR = CONFIG.runsDir;
 const STATE_PATH = path.join(E2E_DIR, "state.json");
 const SERVER_OUT_PATH = path.join(E2E_DIR, "server.out.log");
-const BRIDGE_HANDSHAKE_PATH = String(process.env.EVEJS_AGENT_BRIDGE_HANDSHAKE || "").trim() ||
-  path.join(REPO_ROOT, "_local", "agentBridge", "bridge.json");
-const SOLAR_SYSTEMS_PATH = path.join(REPO_ROOT, "_local", "gameStore", "data", "solarSystems", "data.json");
-const SERVER_LOG_PATH = path.join(REPO_ROOT, "_local", "logs", "server.log");
+const BRIDGE_HANDSHAKE_PATH = CONFIG.handshake;
+const SOLAR_SYSTEMS_PATH = path.join(CONFIG.dataDir, "solarSystems", "data.json");
 const WORLD = worlds.worldPaths(REPO_ROOT);
 const WORLD_PATH = WORLD.world;
 const MANIFEST_PATH = WORLD.manifest;
 const RUN_PATH = path.join(E2E_DIR, "run.json");
-const MARKET_DIR = path.join(REPO_ROOT, "externalservices", "market-server");
+const MARKET_DIR = CONFIG.market.dir;
 const MARKET_EXE = path.join(MARKET_DIR, "target", "release", `market-server${process.platform === "win32" ? ".exe" : ""}`);
-const MARKET_TRACKED_CONFIG = path.join(MARKET_DIR, "config", "market-server.local.toml");
+const MARKET_TRACKED_CONFIG = CONFIG.market.config;
 const MARKET_CONFIG_PATH = path.join(E2E_DIR, "market-server.toml");
 const MARKET_OUT_PATH = path.join(E2E_DIR, "market.out.log");
 const MARKET_BUILD_PATH = path.join(E2E_DIR, "market.build.log");
 const LISTENERS = usableListeners(REGISTRY.listeners);
 const TREE_PORTS = portsForTree(REPO_ROOT, process.env, LISTENERS);
+const MANAGED = CONFIG.mode === "managed";
 
 const BOOLEAN_FLAGS = new Set(["all", "json", "any-pid", "force", "fresh", "no-market", "no-log", "help",
-  "check", "keep-up", "positions", "once", "serve", ...REGISTRY.booleanFlags]);
+  "check", "keep-up", "positions", "once", "serve", "offline", ...REGISTRY.booleanFlags]);
 
 class CliError extends Error {}
 
@@ -123,6 +126,21 @@ function readHandshake() {
   return handshake && handshake.port && handshake.token && pidAlive(handshake.pid) ? handshake : null;
 }
 
+// The running server's log as its handshake reports it, else the config's.
+function serverLogPath(handshake = readHandshake()) {
+  return (handshake && handshake.logFile) || CONFIG.logFile;
+}
+
+// The lifecycle commands belong to managed mode (e2e.config.json mode).
+function requireManaged(command) {
+  if (MANAGED) return;
+  throw new CliError(
+    `\`e2e ${command}\` needs managed mode; this tree is in attach mode (${relativePath(CONFIG.file)}). ` +
+    "Start the server yourself with EVEJS_AGENT_BRIDGE=1 set, or let the CLI manage it: " +
+    "`e2e init --mode managed --force`.",
+  );
+}
+
 // What `e2e up` started: server and market pids, the port block, boot time.
 function readRun() {
   return readJSON(RUN_PATH);
@@ -133,12 +151,17 @@ function writeRun(run) {
   fs.writeFileSync(RUN_PATH, `${JSON.stringify(run, null, 2)}\n`);
 }
 
-// The ports of the server this tree runs: the live run's, else this tree's
-// block. EVEJS_MICROSERVICES_PORT still points the CLI at a server started
-// some other way (StartServer.bat with EVEJS_AGENT_BRIDGE=1 uses 26002).
+// The ports of the server this tree runs: the live run's; else those a live
+// bridge's handshake reports (a server started some other way, as in attach
+// mode); else this tree's block. EVEJS_MICROSERVICES_PORT still names the
+// gateway of a server whose bridge predates the handshake's ports.
 function activePorts() {
   const run = readRun();
   if (run && run.ports && pidAlive(run.pid)) return run.ports;
+  const handshake = readHandshake();
+  if (handshake && handshake.ports && handshake.ports.gateway) {
+    return { slot: null, attached: true, game: handshake.ports.game, gateway: handshake.ports.gateway, agentBridge: handshake.port };
+  }
   const gateway = Math.trunc(Number(process.env.EVEJS_MICROSERVICES_PORT) || 0);
   return gateway ? { ...TREE_PORTS, gateway } : TREE_PORTS;
 }
@@ -193,7 +216,7 @@ function requireHandshake() {
   if (!handshake) {
     throw new CliError(
       `no live agent bridge (${relativePath(BRIDGE_HANDSHAKE_PATH)}). ` +
-      "Start the server with `e2e up`, or with EVEJS_AGENT_BRIDGE=1.",
+      (MANAGED ? "Start the server with `e2e up`." : "Start the tree's server with EVEJS_AGENT_BRIDGE=1 set (attach mode)."),
     );
   }
   return handshake;
@@ -476,7 +499,7 @@ async function openWatch(state, handshake, { forSeconds, everySeconds, offGridEv
   if (log) {
     const explicit = grep !== undefined && grep !== null;
     tailer = createLogTailer({
-      file: SERVER_LOG_PATH,
+      file: serverLogPath(handshake),
       pid: handshake.pid,
       pattern: new RegExp(explicit ? String(grep) : DEFAULT_WATCH_LOG, "i"),
       keep: explicit ? () => true : (text) => mentionsAny(text, knownIDs),
@@ -637,7 +660,7 @@ let itemTypes = null;
 // typeID -> { name, groupName } from the static item table, read on first use.
 function typeInfo(typeID) {
   if (!itemTypes) {
-    const file = path.join(REPO_ROOT, "_local", "gameStore", "data", "itemTypes", "data.json");
+    const file = path.join(CONFIG.dataDir, "itemTypes", "data.json");
     const table = readJSON(file);
     itemTypes = new Map((table && Array.isArray(table.types) ? table.types : [])
       .map((row) => [row.typeID, { name: row.name || null, groupName: row.groupName || null }]));
@@ -781,9 +804,11 @@ function savedWorldExists(name) {
   }
 }
 
-function loadScenarioOrFail(name) {
+// anyWorld: the scenario's own world won't be booted (attach mode, or --world).
+function loadScenarioOrFail(name, { anyWorld = false } = {}) {
   try {
-    return scenarioTools.loadScenario(name, { worldExists: savedWorldExists, resolveSystemID, registry: REGISTRY });
+    return scenarioTools.loadScenario(name, { worldExists: anyWorld ? () => true : savedWorldExists, resolveSystemID,
+      registry: REGISTRY });
   } catch (error) {
     throw new CliError(error.message);
   }
@@ -860,18 +885,30 @@ async function cmdRun(positionals, flags) {
       console.log(`${row.name.padEnd(28)} ${String(row.world || "?").padEnd(16)} ${row.plugin ? `[${row.plugin}] ` : ""}${row.description}`);
     }
     if (!rows.length) console.log(`no scenarios in ${relativePath(scenarioTools.SCENARIO_DIR)}`);
-    console.log("usage: e2e run <scenario> [--check] [--run <id>] [--keep-up]");
+    console.log("usage: e2e run <scenario> [--check] [--run <id>] [--world <name>|fresh] [--keep-up]");
     return;
   }
-  const { file, scenario } = loadScenarioOrFail(positionals.join(" "));
+  const override = flags.world === undefined ? null : String(flags.world);
+  const { file, scenario: loaded } = loadScenarioOrFail(positionals.join(" "), { anyWorld: !MANAGED || override !== null });
   if (flags.check) {
-    printScenario(file, scenario);
+    printScenario(file, loaded);
     return;
   }
+  // Managed: the run boots the scenario's world (or --world) and stops it after.
+  // Attach: it runs on the live server as it is, and leaves it running.
   const running = readHandshake();
-  if (running) {
+  if (MANAGED && running) {
     throw new CliError(`this tree's server is running (pid ${running.pid}); a run boots its own world. \`e2e down\` first.`);
   }
+  if (!MANAGED && !running) {
+    throw new CliError("attach mode runs on a live server, and this tree has none. Start it with EVEJS_AGENT_BRIDGE=1 " +
+      "set, or `e2e init --mode managed --force` to let runs boot their own world.");
+  }
+  if (MANAGED && override !== null && override !== scenarioTools.FRESH_WORLD && !savedWorldExists(override)) {
+    throw new CliError(`no saved world ${override} (e2e world list)`);
+  }
+  const world = MANAGED ? override || loaded.world : null;
+  const scenario = MANAGED ? { ...loaded, world } : { ...loaded, world: `attached to pid ${running.pid}`, up: {} };
   const runID = flags.run ? String(flags.run).replace(/[^A-Za-z0-9._-]/g, "_") : `${runStamp(Date.now())}-${scenario.name}`;
   const runDir = path.join(RUNS_DIR, runID);
   if (fs.existsSync(runDir)) throw new CliError(`run ${runID} already exists (${relativePath(runDir)}); pass another --run`);
@@ -885,7 +922,12 @@ async function cmdRun(positionals, flags) {
   const onInterrupt = () => controller.abort();
   process.on("SIGINT", onInterrupt);
   const ops = {
-    up: () => cmdUp({ world: scenario.world, ...upFlagsFor(scenario.up) }),
+    up: MANAGED
+      ? () => cmdUp({ ...(world === scenarioTools.FRESH_WORLD ? { fresh: true } : { world }), ...upFlagsFor(scenario.up) })
+      : async () => {
+        console.log(`run: attach mode: scenario world ${loaded.world} and its up options are not applied; ` +
+          `running on the live server, pid ${running.pid}`);
+      },
     step: runScenarioStep,
     startWatch: (onEvent) => openWatch(requireLogin(readState()), requireHandshake(), {
       // The bridge's longest watch; the run stops it at its own stop condition.
@@ -902,6 +944,7 @@ async function cmdRun(positionals, flags) {
       onEvent,
     }),
     down: async () => {
+      if (!MANAGED) return;
       if (flags["keep-up"]) console.log("--keep-up: the server stays up; `e2e down` stops it");
       else await cmdDown({});
     },
@@ -970,14 +1013,15 @@ function selectLogLines(text, { grep, pid, lines }) {
 }
 
 function cmdLog(flags) {
-  if (!fs.existsSync(SERVER_LOG_PATH)) throw new CliError(`no server log at ${SERVER_LOG_PATH}`);
-  const lines = Math.max(1, Math.trunc(Number(flags.lines) || 40));
   const handshake = readHandshake();
+  const logPath = serverLogPath(handshake);
+  if (!fs.existsSync(logPath)) throw new CliError(`no server log at ${logPath}`);
+  const lines = Math.max(1, Math.trunc(Number(flags.lines) || 40));
   const pid = flags["any-pid"] ? null : handshake && handshake.pid;
-  const size = fs.statSync(SERVER_LOG_PATH).size;
+  const size = fs.statSync(logPath).size;
   const readBytes = Math.min(size, 16 * 1024 * 1024);
   const buffer = Buffer.alloc(readBytes);
-  const fd = fs.openSync(SERVER_LOG_PATH, "r");
+  const fd = fs.openSync(logPath, "r");
   try {
     fs.readSync(fd, buffer, 0, readBytes, size - readBytes);
   } finally {
@@ -1047,12 +1091,10 @@ async function waitForExit(pid, timeoutMs) {
   return !pidAlive(pid);
 }
 
+// e2e.config.json start, run with this CLI's node.
 function serverStartArgs() {
-  const pkg = readJSON(path.join(REPO_ROOT, "server", "package.json"));
-  const script = pkg && pkg.scripts && pkg.scripts.start;
-  const tokens = String(script || "node .").split(/\s+/).filter(Boolean);
-  if (tokens[0] !== "node") throw new CliError(`server start script is not a node command: ${script}`);
-  return tokens.slice(1);
+  if (CONFIG.start[0] !== "node") throw new CliError(`the server start command is not a node command: ${CONFIG.start.join(" ")}`);
+  return CONFIG.start.slice(1);
 }
 
 function describeLeases(leases) {
@@ -1138,6 +1180,10 @@ async function startMarket(ports, timeoutMs) {
 }
 
 function describePorts(ports) {
+  if (ports.attached) {
+    return `attached: game :${ports.game || "?"}, gateway :${ports.gateway}, agent bridge :${ports.agentBridge} ` +
+      "(from the running server's handshake)";
+  }
   const plugins = LISTENERS.filter((listener) => ports[listener.name])
     .map((listener) => `${listener.label || listener.name} :${ports[listener.name]}, `).join("");
   return `slot ${ports.slot}: game :${ports.game}, gateway :${ports.gateway}, agent bridge :${ports.agentBridge}, ` +
@@ -1173,6 +1219,7 @@ function upOptions(flags) {
 }
 
 async function cmdUp(flags) {
+  requireManaged("up");
   const running = readHandshake();
   if (running && await bridgeReady(running)) {
     console.log(`already up: pid ${running.pid}, ${describePorts(activePorts())}`);
@@ -1212,27 +1259,40 @@ async function cmdUp(flags) {
   } catch (error) {
     throw error instanceof CliError ? error : new CliError(error.message);
   }
-  if (!fs.existsSync(MANIFEST_PATH) || (!flags.fresh && !fs.existsSync(WORLD_PATH))) {
+  if (!fs.existsSync(MANIFEST_PATH)) {
     throw new CliError(
-      `this tree has no world (${relativePath(WORLD_PATH)} and manifest.json). ` +
-      "Copy one with `e2e world copy --from ../dev`. e2e up will not create one: setup would " +
-      "regenerate the static data through a linked data directory. " +
-      "See docs/E2E-GRID-TESTING.md#a-world-to-run.",
+      `this tree has no generated reference data (${relativePath(MANIFEST_PATH)}). Run the tree's database ` +
+      "setup first; e2e up will not, because it rewrites the data dir, which may be a link into another tree.",
+    );
+  }
+  if (!flags.fresh && !fs.existsSync(WORLD_PATH)) {
+    throw new CliError(
+      `this tree has no world (${relativePath(WORLD_PATH)}). Boot a new one with \`e2e up --fresh\`, ` +
+      "restore a saved one with --world <name>, or copy one with `e2e world copy --from <tree>`.",
     );
   }
 
   fs.mkdirSync(E2E_DIR, { recursive: true });
-  fs.mkdirSync(path.join(REPO_ROOT, "server", "logs", "node-reports"), { recursive: true });
+  fs.mkdirSync(path.join(CONFIG.serverDir, "logs", "node-reports"), { recursive: true });
   const state = readState();
   if (state.bridgeSessionID) writeState({ ...state, bridgeSessionID: null });
 
-  const market = flags["no-market"] ? null : await startMarket(ports, 120_000);
+  const fixed = Object.entries(CONFIG.listeners).filter(([, listener]) => listener && listener.movable === false)
+    .map(([name]) => name);
+  if (fixed.length) {
+    console.log(`note: ${fixed.join(", ")} can't move in this tree and stay on stock ports; ` +
+      "another server using them will clash (e2e doctor)");
+  }
+
+  const market = flags["no-market"] || !CONFIG.market.enabled ? null : await startMarket(ports, 120_000);
   if (market) console.log(`market daemon pid ${market.pid} ready in ${market.seconds.toFixed(1)}s`);
 
   const out = fs.openSync(SERVER_OUT_PATH, "w");
   const child = spawn(process.execPath, serverStartArgs(), {
-    cwd: path.join(REPO_ROOT, "server"),
-    env: { ...process.env, ...serverEnvironment(ports, LISTENERS), ...options.env, EVEJS_AGENT_BRIDGE: "1" },
+    cwd: CONFIG.serverDir,
+    // The data dir as the config resolved it, so the server and this CLI agree.
+    env: { ...process.env, ...serverEnvironment(ports, LISTENERS), ...options.env, EVEJS_GAMESTORE_DATA_DIR: CONFIG.dataDir,
+      EVEJS_AGENT_BRIDGE: "1" },
     detached: true,
     stdio: ["ignore", out, out],
     windowsHide: true,
@@ -1298,6 +1358,7 @@ function tailFile(file, count) {
 }
 
 async function cmdDown(flags) {
+  requireManaged("down");
   const run = readRun() || {};
   const handshake = readHandshake();
   const serverPid = handshake ? handshake.pid : pidAlive(run.pid) ? run.pid : null;
@@ -1337,6 +1398,7 @@ function cmdWorld(positionals, flags) {
   const megabytes = (bytes) => Math.round(bytes / 1e6);
   try {
     if (action === "copy" && flags.from) {
+      requireManaged("world copy");
       requireWorldIdle();
       const result = worlds.copyWorld(REPO_ROOT, String(flags.from), { force: Boolean(flags.force) });
       console.log(
@@ -1345,6 +1407,7 @@ function cmdWorld(positionals, flags) {
         (result.market ? " and the market database" : "; the source has no market database"),
       );
     } else if (action === "save" && positionals[1]) {
+      requireManaged("world save");
       requireWorldIdle();
       const result = worlds.saveWorld(REPO_ROOT, positionals[1], { force: Boolean(flags.force), note: flags.note,
         hooks: REGISTRY.worldHooks });
@@ -1380,6 +1443,109 @@ function cmdVendor(positionals, flags) {
   }
 }
 
+// Probes the tree and writes its e2e.config.json.
+function cmdInit(flags) {
+  const mode = flags.mode === undefined ? "attach" : String(flags.mode);
+  if (!treeConfig.MODES.includes(mode)) throw new CliError(`--mode takes ${treeConfig.MODES.join(" or ")}`);
+  const { config, notes } = treeConfig.probeTree(REPO_ROOT, { pluginListeners: LISTENERS, mode });
+  let file;
+  try {
+    file = treeConfig.writeTreeConfig(REPO_ROOT, config, { force: Boolean(flags.force) });
+  } catch (error) {
+    throw error instanceof treeConfig.TreeConfigError ? new CliError(error.message) : error;
+  }
+  const listeners = Object.entries(config.listeners);
+  const lines = [
+    `wrote ${relativePath(file)}, mode ${config.mode}`,
+    `  server     ${config.serverDir}: ${config.start.join(" ")}`,
+    `  data       ${config.dataDir}; game store ${config.gameStore}`,
+    `  log        ${config.logFile}`,
+    `  e2e        ${config.e2eDir}; runs ${config.runsDir}; worlds ${config.worldsDir}`,
+    `  market     ${config.daemons.market.enabled ? `on (${config.daemons.market.database})` : "off (no market source and database)"}`,
+    `  listeners  move: ${listeners.filter(([, row]) => row.movable).map(([name]) => name).join(", ") || "none"}` +
+      `${listeners.some(([, row]) => !row.movable) ? `; stay on stock ports: ${listeners.filter(([, row]) => !row.movable).map(([name]) => name).join(", ")}` : ""}`,
+    ...notes.map((note) => `note: ${note}`),
+    config.mode === "managed"
+      ? "next: e2e up --fresh (a new world) or e2e up --world <name>, then e2e login"
+      : "next: start the server with EVEJS_AGENT_BRIDGE=1 set (`npm start` in the server folder, or StartServer.bat " +
+        "from a shell that has it), then e2e login",
+  ];
+  for (const line of lines) console.log(line);
+  return lines.join("\n");
+}
+
+function formatDoctor(report) {
+  const lines = [];
+  const tool = report.tool || {};
+  lines.push(`evejs-e2e  ${tool.version || "?"}${tool.commit ? ` at ${String(tool.commit).slice(0, 8)}` : ""}` +
+    `${tool.vendored ? " (vendored)" : " (checkout)"}`);
+  const config = report.tree && report.tree.config;
+  lines.push(`tree       ${report.tree ? report.tree.root : "?"}; ` +
+    (config && config.exists ? `${treeConfig.CONFIG_NAME}, mode ${config.mode}` : `no ${treeConfig.CONFIG_NAME} (defaults, mode attach; e2e init writes one)`));
+  for (const problem of (config && config.problems) || []) lines.push(`           config problem: ${problem}`);
+  lines.push(`checked    ${report.source || "?"}`);
+  const gateway = report.gateway || {};
+  if (!gateway.known) lines.push(`gateway    unknown: ${gateway.error}`);
+  else if (!gateway.missing.length) lines.push(`gateway    all ${gateway.calls.length} calls the CLI makes are allowed`);
+  else {
+    lines.push(`gateway    ${gateway.missing.length} of ${gateway.calls.length} calls the CLI makes are refused:`);
+    for (const call of gateway.missing) lines.push(`             ${call.service}.${call.method} (${call.usedBy})`);
+  }
+  const destiny = report.destiny || {};
+  lines.push(destiny.ok
+    ? `destiny    the decoder reads this tree's ball layout (${destiny.balls} probe balls); client view on`
+    : `destiny    client view OFF: ${destiny.error}`);
+  lines.push(`patches    ${(report.patches || []).map((patch) => `${patch.id} ${patch.state}${patch.version ? ` v${patch.version}` : ""}`).join(", ") || "none known"}`);
+  const plugins = report.plugins || { active: [], skipped: [] };
+  lines.push(`plugins    ${plugins.active.length ? plugins.active.join(", ") : "none"} active` +
+    `${plugins.skipped.length ? `; skipped ${plugins.skipped.map((row) => `${row.name} (${row.reason})`).join("; ")}` : ""}`);
+  const listeners = Object.entries(report.listeners || {});
+  lines.push(listeners.length
+    ? `listeners  move: ${listeners.filter(([, row]) => row.movable).map(([name]) => name).join(", ") || "none"}` +
+      `${listeners.some(([, row]) => !row.movable) ? `; stay on stock ports: ${listeners.filter(([, row]) => !row.movable).map(([name, row]) => `${name} (${row.via})`).join(", ")}` : ""}`
+    : "listeners  not probed yet (e2e init)");
+  const live = report.live;
+  if (live && live.ports) {
+    lines.push(`server     pid ${live.pid}: game :${live.ports.game || "?"}, gateway :${live.ports.gateway || "?"}, agent bridge :${live.ports.agentBridge || "?"}`);
+  }
+  if (live && live.characterID) {
+    const session = live.session;
+    lines.push(!session ? `session    character ${live.characterID} has no live session`
+      : session.gatewayClientID && session.socket && !session.socketWrites && session.sendNotification
+        ? `session    character ${live.characterID}: a gateway session the client view can attach to`
+        : `session    character ${live.characterID}: not a gateway session the client view knows (${JSON.stringify({ ...session, keys: undefined })})`);
+  }
+  return lines;
+}
+
+// What this tree can do for the tool: from its running server when there is
+// one (GET /capabilities), else read from its files.
+async function cmdDoctor(flags) {
+  const handshake = flags.offline ? null : readHandshake();
+  let report = null;
+  if (handshake) {
+    const state = readState();
+    const query = state.characterID && state.bridgeSessionID ? `?characterID=${state.characterID}` : "";
+    try {
+      report = await callBridge(handshake, "GET", `/capabilities${query}`);
+      report.source = `the running server, pid ${handshake.pid}`;
+    } catch (error) {
+      console.log(`the running server doesn't answer /capabilities (${error.message}); checking the files instead`);
+    }
+  }
+  if (!report) {
+    const probe = capabilities.probeTreeOffline(CONFIG.serverDir);
+    report = capabilities.buildReport({ treeRoot: REPO_ROOT, serverRoot: CONFIG.serverDir, config: CONFIG, registry: REGISTRY, probe });
+    report.source = "the tree's files (no running server)";
+  }
+  console.log(flags.json ? JSON.stringify(report, null, 2) : formatDoctor(report).join("\n"));
+  const config = report.tree && report.tree.config;
+  if ((report.gateway && report.gateway.missing && report.gateway.missing.length) || (config && config.problems && config.problems.length)) {
+    process.exitCode = 1;
+  }
+  return report;
+}
+
 function describePlugins() {
   const active = REGISTRY.plugins.map((plugin) => plugin.name);
   const skipped = REGISTRY.skipped.map((entry) => `${entry.name} (${entry.reason})`);
@@ -1393,7 +1559,8 @@ async function cmdStatus() {
   const handshake = readHandshake();
   const state = readState();
   const ports = activePorts();
-  const [gatewayUp, marketUp] = await Promise.all([gatewayReady(ports), httpOK(marketHealthURL(ports))]);
+  const [gatewayUp, marketUp] = await Promise.all([gatewayReady(ports), ports.marketHttp ? httpOK(marketHealthURL(ports)) : false]);
+  console.log(`mode   ${CONFIG.mode}${CONFIG.exists ? "" : ` (no ${treeConfig.CONFIG_NAME}; e2e init writes one)`}`);
   console.log(`ports  ${describePorts(ports)}`);
   if (run && pidAlive(run.pid)) {
     console.log(run.readyAtMs
@@ -1426,6 +1593,14 @@ function upUsage() {
 // name -> { usage: [lines], run(positionals, flags) }. Plugin commands
 // (registry.commands) run with pluginIO() and can't take a core name.
 const CORE_COMMANDS = {
+  init: {
+    usage: ["init [--mode attach|managed] [--force]"],
+    run: (_positionals, flags) => cmdInit(flags),
+  },
+  doctor: {
+    usage: ["doctor [--offline] [--json]"],
+    run: (_positionals, flags) => cmdDoctor(flags),
+  },
   world: {
     usage: ["world copy --from ../dev [--force]", "world save <name> [--note \"...\"] [--force] | world list"],
     run: cmdWorld,
@@ -1466,7 +1641,7 @@ const CORE_COMMANDS = {
     run: cmdAct,
   },
   view: { usage: ["view [<run>] [--serve] [--port N]"], run: cmdView },
-  run: { usage: ["run [<scenario>] [--check] [--run <id>] [--keep-up]"], run: cmdRun },
+  run: { usage: ["run [<scenario>] [--check] [--run <id>] [--world <name>|fresh] [--keep-up]"], run: cmdRun },
   log: { usage: ["log [--grep NpcController] [--lines 40] [--any-pid]"], run: (_positionals, flags) => cmdLog(flags) },
   help: { usage: ["help"], run: () => { console.log(helpText()); } },
 };
@@ -1488,8 +1663,15 @@ function helpText() {
   return `node tools/evejs-e2e/bin/e2e.js <command>\n${lines.join("\n")}\n${describePlugins()}`;
 }
 
+// Commands that run even when e2e.config.json is broken: they fix or report it.
+const CONFIG_EXEMPT = new Set(["init", "doctor", "help", "vendor"]);
+
 async function main(argv) {
   const { command, positionals, flags } = parseArgs(argv);
+  if (CONFIG.problems.length && !CONFIG_EXEMPT.has(command)) {
+    throw new CliError(`${relativePath(CONFIG.file)}: ${CONFIG.problems.join("; ")}. ` +
+      "Fix it, or write a new one with `e2e init --force`.");
+  }
   const core = CORE_COMMANDS[command];
   if (core) return core.run(positionals, flags);
   const plugin = pluginCommands()[command];

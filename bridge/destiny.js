@@ -254,6 +254,67 @@ function decodeBallState(buffer) {
   return result;
 }
 
+// The balls the layout probe has the tree encode: each shape decodeBallState
+// reads (free balls in four modes, an ID past 2^53, a static ball, a rigid one
+// with miniballs), with the values it must read back.
+const PROBE_STAMP = 4242;
+const PROBE_BIG_ID = 9_007_199_254_740_993n;
+const PROBE_SHIP = { kind: "ship", typeID: 587, radius: 35, mass: 1_000_000, maxVelocity: 400,
+  position: { x: 1000, y: 2000, z: 3000 }, velocity: { x: 0, y: 0, z: 0 }, mode: "STOP" };
+const PROBE_ENTITIES = Object.freeze([
+  { ...PROBE_SHIP, itemID: 1 },
+  { ...PROBE_SHIP, itemID: 2, mode: "GOTO", targetPoint: { x: 5e6, y: 0, z: 0 }, velocity: { x: 120, y: -3, z: 0 } },
+  { ...PROBE_SHIP, itemID: 3, mode: "ORBIT", targetEntityID: 1, orbitDistance: 2500 },
+  { ...PROBE_SHIP, itemID: PROBE_BIG_ID, mode: "WARP", warpState: { targetPoint: { x: 9e9, y: 1, z: 2 }, effectStamp: 7,
+    totalDistance: 9e9, stopDistance: 15_000, warpSpeed: 3000 } },
+  { kind: "station", itemID: 60004603, radius: 20_000, position: { x: 1e9, y: 2e9, z: 3e9 }, destinyBallMode: "STOP",
+    corporationID: 1000049 },
+  { kind: "planet", itemID: 40000001, radius: 6e6, position: { x: -1e11, y: 0, z: 4e10 },
+    miniBalls: [{ x: 1, y: 2, z: 3, radius: 100 }] },
+]);
+const PROBE_EXPECT = Object.freeze([
+  { itemID: "1", modeName: "STOP", position: { x: 1000, y: 2000, z: 3000 }, isFree: true },
+  { itemID: "2", modeName: "GOTO", targetPoint: { x: 5e6, y: 0, z: 0 }, velocity: { x: 120, y: -3, z: 0 } },
+  { itemID: "3", modeName: "ORBIT", followID: "1", followRange: 2500 },
+  { itemID: PROBE_BIG_ID.toString(), modeName: "WARP", targetPoint: { x: 9e9, y: 1, z: 2 }, minimumRange: 15_000 },
+  { itemID: "60004603", modeName: "STOP", position: { x: 1e9, y: 2e9, z: 3e9 }, isFree: false },
+  { itemID: "40000001", modeName: "RIGID", position: { x: -1e11, y: 0, z: 4e10 }, isFree: false },
+]);
+
+// Has the tree's encoder (its buildAddBallsStateBuffer) write the probe
+// balls and reads them back. A mismatch means the decoder would misread the
+// tree's destiny updates, so the client view must stay off rather than report
+// DIVERGEs that aren't there. -> { ok, error, balls }
+function probeDestinyLayout(encode) {
+  let buffer;
+  try {
+    buffer = encode(PROBE_STAMP, PROBE_ENTITIES.map((entity) => ({ ...entity })));
+  } catch (error) {
+    return { ok: false, error: `the tree's ball encoder threw: ${error && error.message ? error.message : error}`, balls: 0 };
+  }
+  const decoded = decodeBallState(buffer);
+  const problems = [];
+  if (decoded.error) problems.push(decoded.error);
+  if (decoded.stamp !== PROBE_STAMP) problems.push(`stamp read as ${decoded.stamp}, written as ${PROBE_STAMP}`);
+  if (decoded.balls.length !== PROBE_EXPECT.length) {
+    problems.push(`${decoded.balls.length} balls read, ${PROBE_EXPECT.length} written`);
+  }
+  PROBE_EXPECT.forEach((expected, index) => {
+    const ball = decoded.balls[index];
+    if (!ball) return;
+    for (const [key, want] of Object.entries(expected)) {
+      if (JSON.stringify(ball[key]) !== JSON.stringify(want)) {
+        problems.push(`ball ${index + 1} ${key} read as ${JSON.stringify(ball[key])}, written as ${JSON.stringify(want)}`);
+      }
+    }
+  });
+  return {
+    ok: problems.length === 0,
+    error: problems.length ? `this tree's destiny ball layout is not the one the decoder reads: ${problems.slice(0, 3).join("; ")}` : null,
+    balls: decoded.balls.length,
+  };
+}
+
 // --- DoDestinyUpdate payloads ------------------------------------------------
 
 // payloadTuple is [list([stamp, [name, args]]...), waitForBubble, delayedTargetEvents?].
@@ -621,14 +682,19 @@ function isGatewaySession(session) {
   );
 }
 
+// off: why the tee must not run (probeDestinyLayout's error). An off tee
+// attaches to nothing and says why, so a watch reports no client view instead
+// of a misread one.
 function createDestinyTee({
   decodePackaged = null,
   now = Date.now,
   perfNow = () => Number(process.hrtime.bigint()) / 1e6,
   ringSize = LIMITS.ringSize,
   maxSessions = LIMITS.maxSessions,
+  off = null,
 } = {}) {
   const states = new Map();
+  const offReason = off ? String(off) : null;
 
   function prune() {
     for (const [session, state] of states) {
@@ -665,6 +731,7 @@ function createDestinyTee({
   }
 
   function attach(session) {
+    if (offReason) return { ok: false, error: `client view off: ${offReason}` };
     if (!isGatewaySession(session)) {
       return { ok: false, error: "Only web gateway sessions can be teed." };
     }
@@ -729,7 +796,7 @@ function createDestinyTee({
     };
   }
 
-  return { attach, drain, describe, isGatewaySession, size: () => states.size };
+  return { attach, drain, describe, isGatewaySession, size: () => states.size, off: offReason };
 }
 
 // --- divergence ---------------------------------------------------------------
@@ -874,7 +941,10 @@ module.exports = {
   createClientModel,
   createDestinyTee,
   createDivergenceChecker,
+  PROBE_ENTITIES,
+  PROBE_STAMP,
   decodeBallState,
   decodeDestinyUpdate,
   isGatewaySession,
+  probeDestinyLayout,
 };
