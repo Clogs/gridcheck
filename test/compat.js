@@ -69,8 +69,11 @@ function skip(lane, name, why) {
   process.stdout.write(`  skip  ${lane}  ${name}: ${why}\n`);
 }
 
+// A long detail keeps its start and its end, where a failing command's error is.
 function cell(text) {
-  return String(text || "").replace(/\r?\n/g, "<br>").replace(/\|/g, "\\|").slice(0, 600);
+  const value = String(text || "");
+  const kept = value.length > 1200 ? `${value.slice(0, 300)}\n...\n${value.slice(-900)}` : value;
+  return kept.replace(/\r?\n/g, "<br>").replace(/\|/g, "\\|");
 }
 
 function writeReport(file, context) {
@@ -509,10 +512,11 @@ async function stockLane(flags, context) {
   if (!await check(lane, "dependencies", () => installDependencies(tree))) return;
   if (!await check(lane, "reference data", () => buildReferenceData(tree, flags))) return;
   if (!await check(lane, "vendor this checkout", () => vendorInto(tree))) return;
+  // Before the tests: they round-trip each patch on stock's own files.
+  await check(lane, "patches absent", () => stockPatchesClean(tree));
   await check(lane, "tests against the tree", () => treeTests(tree));
 
   await check(lane, "init (managed)", () => lastLine(cliIn(tree, ["init", "--mode", "managed", "--force"])));
-  await check(lane, "patches absent", () => stockPatchesClean(tree));
   await check(lane, "doctor (files)", () => requireDoctor(doctorJSON(tree, ["--offline"]), {
     patches: Object.fromEntries(PATCH_IDS.map((id) => [id, "absent"])) }));
   if (await check(lane, "up --fresh (managed)", () => lastLine(cliIn(tree, ["up", "--fresh"])))) {
