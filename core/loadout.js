@@ -109,9 +109,14 @@ function formatLoadoutReply(reply) {
     for (const drone of reply.drones || []) lines.push(`  drone ${drone.name} x${drone.quantity}`);
     for (const stack of reply.cargo || []) lines.push(`  cargo ${stack.name} x${stack.quantity}`);
     lines.push(`  skills: ${reply.skillsChecked} requirement(s) checked, all met`);
+    if (reply.resources) {
+      lines.push(`  fitting: ${Object.entries(reply.resources).filter(([, row]) => row.of > 0)
+        .map(([key, row]) => `${key} ${row.used.toFixed(1)} of ${row.of.toFixed(1)}`).join(", ")}`);
+    }
     return lines.join("\n");
   }
   lines.push(`refused: ${reply.error}`);
+  if (reply.fit) lines.push(`  ${reply.fit}`);
   for (const name of reply.unknown || []) {
     lines.push(`  unknown ${name.list === "ship" ? "ship" : name.list.replace(/s$/, "")} "${name.name}"` +
       `${name.why ? `: ${name.why}` : ""}${name.suggestions && name.suggestions.length ? ` (did you mean ${name.suggestions.join("; ")}?)` : ""}`);

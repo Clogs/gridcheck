@@ -22,7 +22,8 @@ const LOADOUT_EXPORTS = Object.freeze({
   itemTypes: ["services/inventory/itemTypeRegistry", ["resolveItemByName", "resolveItemByTypeID"]],
   shipTypes: ["services/chat/shipTypeRegistry", ["resolveShipByName"]],
   fitting: ["services/fitting/liveFittingState",
-    ["getRequiredSkillRequirements", "listFittedItems", "isChargeCompatibleWithModule", "getModuleChargeCapacity"]],
+    ["getRequiredSkillRequirements", "listFittedItems", "isChargeCompatibleWithModule", "getModuleChargeCapacity",
+      "selectAutoFitFlagForType", "validateFitForShip", "buildShipResourceState"]],
   skills: ["services/skills/skillState", ["getCachedCharacterSkillMap"]],
   character: ["services/character/characterState", ["activateShipForSession", "syncInventoryItemForSession", "getCharacterRecord"]],
   location: ["services/structure/structureLocation", ["getDockedLocationID", "isDockedSession"]],
@@ -115,6 +116,41 @@ function createLoadout(m) {
     return { checked, missing: [...missing.values()].sort((left, right) => left.name.localeCompare(right.name)) };
   }
 
+  // The fit planned on a hull that doesn't exist yet, with the checks stock's
+  // own planner makes (a slot, the item fits there, CPU, power and calibration
+  // after it), so a fit that can't be built is refused before anything is
+  // made. Skills were checked already.
+  function planFit(characterID, shipType, modules) {
+    const hull = { itemID: -1, typeID: toInt(shipType.typeID), groupID: toInt(shipType.groupID), categoryID: CATEGORY.ship,
+      ownerID: characterID, singleton: 1 };
+    const planned = [];
+    let resources = null;
+    for (const entry of modules) {
+      for (let index = 0; index < entry.quantity; index += 1) {
+        const which = `${entry.type.name}${entry.quantity > 1 ? ` #${index + 1}` : ""}`;
+        const flagID = toInt(m.fitting.selectAutoFitFlagForType(hull, planned, toInt(entry.type.typeID)));
+        if (!flagID) return { problem: `${which}: no free slot it fits` };
+        const item = {
+          itemID: -1000 - planned.length, typeID: toInt(entry.type.typeID), groupID: toInt(entry.type.groupID),
+          categoryID: toInt(entry.type.categoryID), flagID, locationID: hull.itemID, ownerID: characterID,
+          singleton: 1, quantity: 1, stacksize: 1, itemName: String(entry.type.name), moduleState: { online: true },
+        };
+        const valid = m.fitting.validateFitForShip(characterID, hull, item, flagID, planned);
+        if (valid && !valid.success && valid.errorMsg !== "SKILL_REQUIRED") return { problem: `${which}: ${valid.errorMsg}` };
+        planned.push(item);
+        resources = m.fitting.buildShipResourceState(characterID, hull, { fittedItems: planned });
+        const over = [["CPU", "cpuLoad", "cpuOutput"], ["power", "powerLoad", "powerOutput"],
+          ["calibration", "upgradeLoad", "upgradeCapacity"]]
+          .find(([, load, output]) => Number(resources[load]) > Number(resources[output]) + 1e-6);
+        if (over) {
+          const [label, load, output] = over;
+          return { problem: `${which}: not enough ${label} (${Number(resources[load]).toFixed(1)} of ${Number(resources[output]).toFixed(1)})` };
+        }
+      }
+    }
+    return { resources };
+  }
+
   function syncChanges(session, changes) {
     for (const change of Array.isArray(changes) ? changes : []) {
       if (!change || !change.item) continue;
@@ -164,6 +200,8 @@ function createLoadout(m) {
     if (skills.missing.length) {
       return failure(409, `missing ${skills.missing.length} skill(s); nothing was changed`, { missingSkills: skills.missing });
     }
+    const plan = planFit(characterID, ship.type, resolved.modules);
+    if (plan.problem) return failure(409, `the fit can't be built on a ${ship.type.name}; nothing was changed`, { fit: plan.problem });
 
     const docked = Boolean(m.location.isDockedSession(session)) || toInt(m.location.getDockedLocationID(session)) > 0;
     const systemID = toInt(session._space && session._space.systemID);
@@ -275,6 +313,11 @@ function createLoadout(m) {
         drones: resolved.drones.map((entry) => ({ typeID: toInt(entry.type.typeID), name: String(entry.type.name), quantity: entry.quantity })),
         cargo: resolved.cargo.map((entry) => ({ typeID: toInt(entry.type.typeID), name: String(entry.type.name), quantity: entry.quantity })),
         skillsChecked: skills.checked,
+        ...(plan.resources ? {
+          resources: Object.fromEntries([["cpu", "cpuLoad", "cpuOutput"], ["power", "powerLoad", "powerOutput"],
+            ["calibration", "upgradeLoad", "upgradeCapacity"]]
+            .map(([key, load, output]) => [key, { used: Number(plan.resources[load]) || 0, of: Number(plan.resources[output]) || 0 }])),
+        } : {}),
       },
     };
   };

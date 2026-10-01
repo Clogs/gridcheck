@@ -38,7 +38,7 @@ const GUN_FLAGS = [27, 28];
 
 // The stock modules as the bridge loads them, recording every call that
 // changes the world.
-function fakeStock({ skills = { 3328: 5, 3302: 5, 3436: 5 }, docked = true } = {}) {
+function fakeStock({ skills = { 3328: 5, 3302: 5, 3436: 5 }, docked = true, cpuOutput = 200 } = {}) {
   const calls = [];
   const fitted = [];
   let nextItemID = 9000;
@@ -59,6 +59,16 @@ function fakeStock({ skills = { 3328: 5, 3302: 5, 3436: 5 }, docked = true } = {
       isChargeCompatibleWithModule: (moduleTypeID, chargeTypeID) => moduleTypeID === 3170 && chargeTypeID === 230,
       getModuleChargeCapacity: () => 40,
       listFittedItems: () => fitted.slice(),
+      // Two high slots for guns, mids for the rest; each module costs 40 CPU.
+      selectAutoFitFlagForType: (_ship, planned, typeID) => {
+        const used = new Set(planned.map((item) => item.flagID));
+        const flags = typeID === 3170 ? GUN_FLAGS : [19, 20, 21];
+        return flags.find((flag) => !used.has(flag)) || null;
+      },
+      validateFitForShip: () => ({ success: false, errorMsg: "SKILL_REQUIRED" }),
+      buildShipResourceState: (_charID, _ship, { fittedItems }) => ({
+        cpuLoad: 40 * fittedItems.length, cpuOutput, powerLoad: 1, powerOutput: 50, upgradeLoad: 0, upgradeCapacity: 400,
+      }),
     },
     location: {
       isDockedSession: () => docked,
@@ -164,7 +174,21 @@ test("docked: the hull is made in the station, fitted, filled, every gun loaded,
   assert.deepStrictEqual(body.modules.map((row) => [row.slot, row.name, row.charge && row.charge.quantity]),
     [["mid", "1MN Afterburner II", undefined], ["high", "Light Neutron Blaster II", 40], ["high", "Light Neutron Blaster II", 40]]);
   assert.strictEqual(body.skillsChecked, 3, "the hull's, the gun's and the drone's; the afterburner and charge need none here");
-  assert.match(formatLoadoutReply(body), /^boarded Tristan 1001 docked in 60004588\n/);
+  assert.deepStrictEqual(body.resources.cpu, { used: 120, of: 200 });
+  assert.match(formatLoadoutReply(body), /^boarded Tristan 1001 docked in 60004588\n[\s\S]*fitting: cpu 120\.0 of 200\.0, power 1\.0 of 50\.0/);
+});
+
+test("a fit that runs out of slots or CPU on the planned hull is refused before anything is made", () => {
+  const cpu = fakeStock({ cpuOutput: 100 });
+  const short = createLoadout(cpu.m)(SESSION_DOCKED, STARTER);
+  assert.strictEqual(short.statusCode, 409);
+  assert.strictEqual(short.body.fit, "1MN Afterburner II: not enough CPU (120.0 of 100.0)");
+  assert.deepStrictEqual(cpu.calls, []);
+  const slots = fakeStock();
+  const three = createLoadout(slots.m)(SESSION_DOCKED, { ship: "Tristan", modules: ["Light Neutron Blaster II x3"] });
+  assert.strictEqual(three.body.fit, "Light Neutron Blaster II #3: no free slot it fits");
+  assert.deepStrictEqual(slots.calls, []);
+  assert.match(formatLoadoutReply(three.body), /can't be built on a Tristan; nothing was changed\n  Light Neutron Blaster II #3/);
 });
 
 test("in space: the hull is staged at the home station and swapped in, and the old ship is named", () => {
