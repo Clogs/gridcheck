@@ -27,7 +27,15 @@ cd evejs-e2e
 
 **2. Prepare the tree.** Unpack the EveJS zip, for example to `F:/EveJS-0.12.9`, then install its
 dependencies and build its reference data. This is the tree's own setup, which its `SetupEveJS.bat`
-and `StartServer.bat` would otherwise do on first run.
+and `StartServer.bat` would otherwise do on first run. The 0.12.9 zip has no wrapper folder: the
+folder you unpack into is the tree, with `server/` directly inside it.
+
+```powershell
+Expand-Archive G:/Downloads/EveJS-v0.12.9.zip -DestinationPath F:/EveJS-0.12.9   # PowerShell
+C:\Windows\System32\tar.exe -xf G:\Downloads\EveJS-v0.12.9.zip -C F:\EveJS-0.12.9  # or Windows' tar
+```
+
+A `tar` from Git Bash is GNU tar, which reads `G:` as a remote host and can't read zips. Then:
 
 ```bash
 cd F:/EveJS-0.12.9
@@ -35,6 +43,9 @@ npm ci
 cd server && npm ci && cd ..
 tools/DatabaseCreator/CreateDatabase.bat        # Windows; downloads the SDE build it names
 ```
+
+Recent npm versions warn that `better-sqlite3` and `protobufjs` have install scripts not covered by
+`allowScripts`. The server boots without approving them.
 
 `CreateDatabase.bat` downloads the EVE static data export (several hundred MB), extracts it to
 `_local/sde/`, and writes `_local/gameStore/data`. If you already have that build extracted, run the
@@ -61,6 +72,10 @@ Open the printed URL if no browser opens. Then, on the **Install** tab:
    mode lets the tool start and stop the server and build worlds.
 3. Check that "What the tree needs to run" is all ticked, and run **e2e doctor**.
 
+An unpacked zip isn't a git checkout, so the GUI can't check its files for uncommitted changes,
+and each preview says so. In a tree that is a git checkout, a change to a file with uncommitted
+edits is refused.
+
 On the **Patches** tab, apply `last-decision`, `slash-success` and `xmpp-port`. They're optional
 and revert byte for byte. Without them stock reports no NPC decisions and no slash-command
 outcomes, and two stock trees can't run at once. Each change shows its preview first.
@@ -83,7 +98,9 @@ node tools/evejs-e2e/bin/e2e.js run loadout-npc-fight      # two rats spawn; dro
 ```
 
 The run boots the server, plays the scenario, stops the server, and prints its verdict and the path
-of its `report.md`. `starter` takes about 20 s to build and the fight about a minute.
+of its `report.md`. In a new tree the first `starter` build took 80 s, most of it the first boot
+seeding a game store; a rebuild takes about 20 s. The fight took about 50 s, boot and shutdown
+included.
 
 **5. Replay it.** In the GUI's **Runs** tab, pick the run to see its report and frames, then
 **Open replay** for the viewer. From a shell, `node tools/evejs-e2e/bin/e2e.js view` prints the
@@ -149,8 +166,8 @@ e2e view | gui
 
 A tree runs a vendored copy: `tools/evejs-e2e/`, the shim at
 `server/src/_secondary/agentBridge/server.js`, and `tools/evejs-e2e/VENDOR.json`, which records the
-commit and a sha256 for every file. Commit all three in the tree. Change the tool here, never in a
-tree's copy:
+commit and a sha256 for every file. In a tree kept in git, commit all three. Change the tool here,
+never in a tree's copy:
 
 ```bash
 node bin/e2e.js vendor update --tree <tree>                # this checkout's HEAD

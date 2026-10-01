@@ -104,13 +104,13 @@ The page uses a small JSON API, and a script or an agent can call it the same wa
 | `GET /gui/api/context` | Checkout or vendored copy, its version and commit. |
 | `GET /gui/api/trees` | The tree list: `id`, `root`, copy version, mode, server up. |
 | `POST /gui/api/trees` `{ "path": "F:/EveJS-0.12.9" }` | Add a tree. |
-| `GET /gui/api/tree?tree=<id>` | The Install tab's summary. |
+| `GET /gui/api/tree?tree=<id>` | The Install tab's summary: `copy`, `shim`, `config`, `prerequisites` (each `{ name, ok, fix }`), `serverUp`, `plugins`. |
 | `GET /gui/api/doctor?tree=<id>` | `e2e doctor --json`, parsed. |
 | `GET /gui/api/patches?tree=<id>` | `e2e patch status --json`, parsed. |
 | `POST /gui/api/preview` `{ "tree": "<id>", "action": "vendor" \| "init" \| "patch-apply" \| "patch-revert", "mode": "managed", "id": "xmpp-port", "force": false }` | The preview: `ok`, `refused`, each step's command and dry-run output, and a `previewID` when `ok`. |
 | `POST /gui/api/run` `{ "previewID": "..." }` | Runs the previewed commands; each step's output and exit code. |
 | `GET /gui/api/runs?tree=<id>` | The runs and their verdicts. |
-| `GET /gui/api/run?tree=<id>&run=<run>` | A run's report, frame names and `result.json`. |
+| `GET /gui/api/run?tree=<id>&run=<run>` | `{ run, dir, report, frames, hasTimeline, result }`: the run's ID, folder, `report.md`, frame names and `result.json`. |
 | `GET /gui/api/frame?tree=<id>&run=<run>&file=<name>.svg` | One frame. |
 
 The replay viewer for a run is `/viewer#token=<token>&tree=<id>&run=<run>`.
