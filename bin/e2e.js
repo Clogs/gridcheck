@@ -19,6 +19,7 @@ const worlds = require("../core/worlds");
 const scenarioTools = require("../core/scenario");
 const frameTools = require("../core/frames");
 const actionTools = require("../core/actions");
+const vendor = require("../core/vendor");
 
 const REPO_ROOT = DEFAULT_TREE_ROOT;
 const REGISTRY = defaultRegistry();
@@ -1361,6 +1362,42 @@ function cmdWorld(positionals, flags) {
   }
 }
 
+const VENDOR_USAGE = "usage: e2e vendor update [--from <checkout|tag>] [--tree <path>] [--force] | vendor check [--tree <path>]";
+
+const slashed = (file) => String(file).split(path.sep).join("/");
+
+// --tree defaults to the tree this copy is vendored into.
+function cmdVendor(positionals, flags) {
+  const action = positionals[0];
+  const tree = flags.tree ? path.resolve(String(flags.tree)) : REPO_ROOT;
+  const target = slashed(path.join(tree, vendor.VENDOR_DIR));
+  try {
+    if (action === "update") {
+      const result = vendor.updateVendored({ tree, from: flags.from, force: Boolean(flags.force) });
+      const { manifest, counts } = result;
+      console.log(`vendored ${manifest.name} ${manifest.version} at ${manifest.commit.slice(0, 8)} (${manifest.ref}) ` +
+        `from ${slashed(result.checkout)}`);
+      console.log(`  ${target}: ${Object.keys(manifest.files).length} files, ${counts.added} added, ` +
+        `${counts.changed} changed, ${counts.removed} removed; shim ${result.shim}`);
+      if (result.dirty) console.log(`  ${slashed(result.checkout)} has uncommitted changes; they were not vendored`);
+      console.log(`  commit ${slashed(vendor.VENDOR_DIR)}/ and ${slashed(vendor.SHIM_PATH)} in ${slashed(tree)}`);
+    } else if (action === "check") {
+      const result = vendor.checkVendored({ tree });
+      if (!result.ok) {
+        throw new CliError([`${target} differs from ${vendor.MANIFEST_NAME}; change the evejs-e2e repo and ` +
+          "run e2e vendor update:", ...vendor.problemLines(result.problems)].join("\n"));
+      }
+      const { manifest } = result;
+      console.log(`${target} matches ${vendor.MANIFEST_NAME}: ${manifest.name} ${manifest.version} at ` +
+        `${String(manifest.commit).slice(0, 8)}, ${Object.keys(manifest.files).length} files and the shim`);
+    } else {
+      throw new CliError(VENDOR_USAGE);
+    }
+  } catch (error) {
+    throw error instanceof vendor.VendorError ? new CliError(error.message) : error;
+  }
+}
+
 function describePlugins() {
   const active = REGISTRY.plugins.map((plugin) => plugin.name);
   const skipped = REGISTRY.skipped.map((entry) => `${entry.name} (${entry.reason})`);
@@ -1410,6 +1447,10 @@ const CORE_COMMANDS = {
   world: {
     usage: ["world copy --from ../dev [--force]", "world save <name> [--note \"...\"] [--force] | world list"],
     run: cmdWorld,
+  },
+  vendor: {
+    usage: ["vendor update [--from <checkout|tag>] [--tree <path>] [--force] | vendor check [--tree <path>]"],
+    run: cmdVendor,
   },
   up: { usage: upUsage(), run: (_positionals, flags) => cmdUp(flags) },
   down: { usage: ["down [--force]"], run: (_positionals, flags) => cmdDown(flags) },
