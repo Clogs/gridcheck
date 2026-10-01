@@ -16,15 +16,17 @@ const {
   shipItems,
 } = require("../core/actions");
 
+// Grid rows as /grid?ext=1 answers: the lu plugin's join at ext.lu and its group key.
+const lu = (flightID, family) => ({ groupKey: `flight:${flightID}`, ext: { lu: { flightID, family } } });
 const ROWS = [
   { itemID: 1, kind: "ship", isSelf: true, name: "Rifter", typeName: "Rifter", distanceMeters: 0, characterID: 9 },
   { itemID: 60004603, kind: "station", name: "Yrmori V - Bureau", typeName: "Trade Post", distanceMeters: 12_000 },
   { itemID: 77, kind: "ship", isNpc: true, name: "Minmatar Patrol 1917", typeName: "Rifter", distanceMeters: 1_800,
-    flightID: "living_flight_0630", family: "police" },
+    ...lu("living_flight_0630", "police") },
   { itemID: 78, kind: "ship", isNpc: true, name: "Minmatar Patrol 1916", typeName: "Slasher", distanceMeters: 3_000,
-    flightID: "living_flight_0630", family: "police" },
+    ...lu("living_flight_0630", "police") },
   { itemID: 90, kind: "ship", isNpc: true, name: "Guristas Scout", typeName: "Worm", distanceMeters: 900,
-    flightID: "living_flight_1100", family: "pirate" },
+    ...lu("living_flight_1100", "pirate") },
   { itemID: 5, kind: "ship", name: "Other Pilot", typeName: "Merlin", distanceMeters: 50_000, characterID: 7 },
 ];
 
@@ -41,7 +43,7 @@ test("a target is the nearest ball that passes every term, never self", () => {
   assert.throws(() => pickTarget(ROWS, "1"), /no ball on grid matches/, "self is never a target");
 });
 
-test("a $name target matches a bound ball or a bound flight", () => {
+test("a $name target matches a bound ball or a bound group; a plugin's terms match its own data", () => {
   assert.strictEqual(pickTarget(ROWS, "$police", { police: ["living_flight_0630", "owner-1"] }).itemID, 77);
   assert.strictEqual(pickTarget(ROWS, "$mark", { mark: ["78"] }).itemID, 78);
   assert.strictEqual(pickTarget(ROWS, "flight=$police", { police: ["living_flight_0630"] }).itemID, 77);
@@ -49,9 +51,13 @@ test("a $name target matches a bound ball or a bound flight", () => {
   assert.throws(() => pickTarget(ROWS, "$later", {}), /\$later is not bound yet/);
   assert.deepStrictEqual(parseTargetSpec("flight=$police npc").bindings, ["police"]);
   for (const [spec, message] of [["", /a target is/], ["colour=red", /unknown field "colour"/], ["within=far", /within=<distance>/],
-    ["name=$x", /only flight=\$name takes a binding/], ["~x", /can't read "~x"/]]) {
+    ["name=$x", /only .*flight=\$name take a binding/], ["~x", /can't read "~x"/]]) {
     assert.throws(() => parseTargetSpec(spec), message, spec);
   }
+  const { emptyRegistry } = require("../core/plugins");
+  assert.throws(() => parseTargetSpec("family=police", emptyRegistry()), /unknown field "family"; use name, type, kind, within/,
+    "without the plugin its terms are unknown");
+  assert.strictEqual(pickTarget(ROWS, "$x", { x: ["78"] }, emptyRegistry()).itemID, 78);
 });
 
 const LISTED = { type: "list", items: [

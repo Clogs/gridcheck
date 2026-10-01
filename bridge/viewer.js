@@ -9,14 +9,20 @@
 //   GET /viewer/viewer.css    its styles
 //   GET /viewer/runs          the runs in _local/e2e/runs/, newest first   token
 //   GET /viewer/timeline?run=<id>&from=<byte>   the next part of a timeline token
+//   GET /viewer/config        the plugins' colours                          token
 //
 // The page reads the token from its URL fragment (`e2e view` prints the URL),
 // so it never reaches a server log. Run IDs are checked against the runs
-// directory, so a request can't read any other file. Guide:
+// directory, so a request can't read any other file. The page knows the core's
+// event kinds; lines of a plugin's kinds come with the plugin's own text
+// (`summaries`), so the page needs no plugin code. Guide:
 // docs/E2E-GRID-TESTING.md "Viewer".
 
 const fs = require("node:fs");
 const path = require("node:path");
+
+const { formatTimelineEvent } = require("../core/timeline");
+const { emptyRegistry } = require("../core/plugins");
 
 const MAX_CHUNK_BYTES = 4 * 1024 * 1024;
 const MAX_RUNS = 200;
@@ -27,10 +33,42 @@ const PAGE_FILES = Object.freeze({
   "/viewer/viewer.css": ["viewer.css", "text/css; charset=utf-8"],
 });
 
+const KIND_IN_LINE = /"kind":"([A-Z_]+)"/;
+// A timeline line's text without its "t+00:00:00  KIND" head.
+const LINE_HEAD = /^t[+-]\d\d:\d\d:\d\d {2}\S+\s+/;
+
+// registry: the plugins' (core/plugins.js), for their colours and the text of
+// their event kinds.
 function createAgentBridgeViewer({ runsDir, pageDir = path.join(__dirname, "viewer"), now = Date.now,
-  maxChunkBytes = MAX_CHUNK_BYTES } = {}) {
+  maxChunkBytes = MAX_CHUNK_BYTES, registry = emptyRegistry() } = {}) {
   if (!runsDir) throw new TypeError("createAgentBridgeViewer needs runsDir");
   const root = path.resolve(runsDir);
+
+  // [lineIndex, text] for each line of a plugin's kind in `text`.
+  function summaries(text) {
+    const out = [];
+    text.split("\n").forEach((line, index) => {
+      const kind = KIND_IN_LINE.exec(line);
+      if (!kind || !registry.formatters[kind[1]]) return;
+      try {
+        out.push([index, formatTimelineEvent(JSON.parse(line), registry).replace(LINE_HEAD, "").replace(/\s{2,}/g, "  ")]);
+      } catch (_error) {
+        // A line cut off by a watch still writing.
+      }
+    });
+    return out;
+  }
+
+  function config() {
+    return {
+      statusCode: 200,
+      body: {
+        ok: true,
+        colours: registry.colours.map(({ plugin, match, colour, label }) => ({ plugin, match, colour, label })),
+        plugins: registry.plugins.map((plugin) => plugin.name),
+      },
+    };
+  }
 
   function handlePublic(method, route) {
     const file = method === "GET" ? PAGE_FILES[route] : null;
@@ -125,6 +163,7 @@ function createAgentBridgeViewer({ runsDir, pageDir = path.join(__dirname, "view
         next,
         size,
         text,
+        summaries: summaries(text),
         mtimeMs: Math.round(stat.mtimeMs),
         nowMs: now(),
         result: readResult(dir),
@@ -135,6 +174,7 @@ function createAgentBridgeViewer({ runsDir, pageDir = path.join(__dirname, "view
   function handle(method, route, query) {
     if (method === "GET" && route === "/viewer/runs") return listRuns();
     if (method === "GET" && route === "/viewer/timeline") return timeline(query || {});
+    if (method === "GET" && route === "/viewer/config") return config();
     return { statusCode: 404, body: { ok: false, error: `no such route: ${method} ${route}` } };
   }
 

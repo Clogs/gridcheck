@@ -15,9 +15,9 @@ const { renderReport } = require("../core/scenario");
 
 const MCP_PATH = path.resolve(__dirname, "..", "bin", "mcp.js");
 
-test("the spec's eight tools are listed, each with an object schema", () => {
+test("the spec's tools are listed, plugin tools named for their plugin, each with an object schema", () => {
   const names = mcp.TOOLS.map((tool) => tool.name);
-  for (const name of ["e2e_up", "e2e_down", "e2e_grid", "e2e_slash", "e2e_watch", "e2e_trigger", "e2e_run_scenario", "e2e_report"]) {
+  for (const name of ["e2e_up", "e2e_down", "e2e_grid", "e2e_slash", "e2e_watch", "e2e_lu_trigger", "e2e_run_scenario", "e2e_report"]) {
     assert.ok(names.includes(name), `${name} is listed`);
   }
   for (const tool of mcp.TOOLS) {
@@ -28,11 +28,10 @@ test("the spec's eight tools are listed, each with an object schema", () => {
 
 test("tools map onto CLI arguments; free text goes after --", () => {
   assert.deepStrictEqual(mcp.cliArgs("e2e_up", { world: "lowsec-docked", realClock: true, market: false, offgridTravel: 5 }),
-    ["up", "--world=lowsec-docked", "--real-clock", "--no-market", "--offgrid-travel=5"]);
+    ["up", "--world=lowsec-docked", "--no-market", "--real-clock", "--offgrid-travel=5"], "the lu plugin's up flags too");
   assert.deepStrictEqual(mcp.cliArgs("e2e_up", {}), ["up"]);
   assert.deepStrictEqual(mcp.cliArgs("e2e_slash", { command: "/tr me --weird Amamake" }), ["slash", "--", "/tr me --weird Amamake"]);
-  assert.deepStrictEqual(mcp.cliArgs("e2e_teleport", { system: "New Caldari", flight: "living_flight_0908" }),
-    ["teleport", "--flight=living_flight_0908", "--", "New Caldari"]);
+  assert.deepStrictEqual(mcp.cliArgs("e2e_teleport", { system: "New Caldari" }), ["teleport", "--", "New Caldari"]);
   assert.deepStrictEqual(mcp.cliArgs("e2e_watch", {}), ["watch", "--for=60"], "a shorter default than the CLI's 600 s");
   assert.deepStrictEqual(mcp.cliArgs("e2e_watch", { seconds: 30, log: false, client: "diverge", grep: "--x" }),
     ["watch", "--for=30", "--grep=--x", "--no-log", "--client=diverge"]);
@@ -42,17 +41,27 @@ test("tools map onto CLI arguments; free text goes after --", () => {
   assert.deepStrictEqual(mcp.cliArgs("e2e_down", { force: true }), ["down", "--force"]);
 });
 
-test("trigger arguments use the scenario step's names", () => {
-  assert.deepStrictEqual(mcp.cliArgs("e2e_trigger", { name: "scout", system: "Amamake", flight: "f1" }),
+test("the lu plugin's trigger tool uses the scenario step's names", () => {
+  assert.deepStrictEqual(mcp.cliArgs("e2e_lu_trigger", { name: "scout", system: "Amamake", flight: "f1" }),
     ["trigger", "--flight=f1", "--", "scout", "Amamake"]);
-  assert.deepStrictEqual(mcp.cliArgs("e2e_trigger", { name: "hunt", phase: "committed" }),
+  assert.deepStrictEqual(mcp.cliArgs("e2e_lu_trigger", { name: "hunt", phase: "committed" }),
     ["trigger", "--phase=committed", "--", "hunt"]);
-  assert.deepStrictEqual(mcp.cliArgs("e2e_trigger", { name: "fleet", family: "pirate", doctrine: "sanshas", to: "self", count: 2 }),
+  assert.deepStrictEqual(mcp.cliArgs("e2e_lu_trigger", { name: "fleet", family: "pirate", doctrine: "sanshas", to: "self", count: 2 }),
     ["trigger", "--doctrine=sanshas", "--to=self", "--count=2", "--", "fleet", "pirate"]);
-  assert.deepStrictEqual(mcp.cliArgs("e2e_trigger", { name: "materialize", flight: "f7", go: true }),
+  assert.deepStrictEqual(mcp.cliArgs("e2e_lu_trigger", { name: "materialize", flight: "f7", go: true }),
     ["trigger", "--go", "--", "materialize", "f7"], "materialize takes the flight as its positional");
-  assert.deepStrictEqual(mcp.cliArgs("e2e_trigger", { name: "skirmish", count: 5, shipClass: "cruiser", gap: 10000 }),
+  assert.deepStrictEqual(mcp.cliArgs("e2e_lu_trigger", { name: "skirmish", count: 5, shipClass: "cruiser", gap: 10000 }),
     ["trigger", "--count=5", "--class=cruiser", "--gap=10000", "--", "skirmish"]);
+  assert.throws(() => mcp.cliArgs("e2e_trigger", {}), /no CLI command for e2e_trigger/, "no core trigger tool");
+});
+
+test("the instructions are the core's, then each plugin's primer", () => {
+  const { emptyRegistry } = require("../core/plugins");
+  const core = mcp.instructions(emptyRegistry());
+  assert.match(core, /e2e_run_scenario/);
+  assert.doesNotMatch(core, /Living Universe|trigger|HUNT/);
+  assert.match(mcp.INSTRUCTIONS, /Living Universe \(plugin lu\)[\s\S]*e2e_lu_trigger/);
+  assert.match(mcp.INSTRUCTIONS, /Kinds: GRID PRESENT .*SIGHTING HUNT/);
 });
 
 test("player actions use the scenario step's names, and the CLI reads them back as the same action", () => {
@@ -83,7 +92,7 @@ test("arguments are checked against each tool's schema before the CLI runs", () 
   assert.deepStrictEqual(mcp.checkParams(tool("e2e_slash"), {}), ["command is required"]);
   assert.match(mcp.checkParams(tool("e2e_grid"), { range: "far" })[0], /range must be a number/);
   assert.match(mcp.checkParams(tool("e2e_grid"), { radius: 5 })[0], /unknown argument radius; e2e_grid takes range, all, json/);
-  assert.match(mcp.checkParams(tool("e2e_trigger"), { name: "nuke" })[0], /name must be one of scout, hunt/);
+  assert.match(mcp.checkParams(tool("e2e_lu_trigger"), { name: "nuke" })[0], /name must be one of scout, hunt/);
   assert.match(mcp.checkParams(tool("e2e_watch"), { seconds: 1.5 })[0], /seconds must be an integer/);
   assert.match(mcp.checkParams(tool("e2e_watch"), { seconds: 4000 })[0], /at most 3000/);
   assert.match(mcp.checkParams(tool("e2e_up"), { offgridTravel: 0 })[0], /at least 1/);
@@ -98,10 +107,14 @@ test("a bad scenario name is refused before anything is written", async () => {
   assert.match(missing.content[0].text, /pass name \(a scenario file\), or name and scenario/);
 });
 
-test("a bare scenario name is the tree's file; a path is a path", () => {
+test("a bare scenario name is the tree's file, the core's or a plugin's; a path is a path", () => {
   const tree = path.resolve(__dirname, "..", "scenarios");
   assert.strictEqual(mcp.resolveScenario("smoke-undock"), path.join(tree, "smoke-undock.json"));
+  assert.strictEqual(mcp.resolveScenario("fleet-to-grid"),
+    path.resolve(__dirname, "..", "plugins", "lu", "scenarios", "fleet-to-grid.json"));
   assert.strictEqual(mcp.resolveScenario("tools/evejs-e2e/scenarios/x.json"), path.join(tree, "x.json"));
+  assert.ok(mcp.committedScenario("tools/evejs-e2e/plugins/lu/scenarios/fleet-to-grid.json"));
+  assert.ok(!mcp.committedScenario("_local/e2e/scenarios/fleet-to-grid.json"));
 });
 
 function protocol() {

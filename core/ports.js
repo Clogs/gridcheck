@@ -14,7 +14,8 @@ const BLOCK_SIZE = 20;
 const SLOT_COUNT = 800;
 
 // Offsets inside a block. gatewayTls is not configurable: the gateway always
-// opens its local TLS responder on its own port + 1.
+// opens its local TLS responder on its own port + 1. Plugins add their own
+// listeners at free offsets (core/plugins.js registry.listeners).
 const OFFSETS = Object.freeze({
   game: 0,
   image: 1,
@@ -22,12 +23,26 @@ const OFFSETS = Object.freeze({
   gatewayTls: 3,
   cdn: 4,
   redshift: 5,
-  luMonitor: 6,
   agentBridge: 7,
   marketHttp: 8,
   marketRpc: 9,
   xmpp: 10,
 });
+
+// The plugin listeners that fit: inside the block, on an offset nothing else
+// has, under a name nothing else has.
+function usableListeners(listeners = []) {
+  const taken = new Set(Object.values(OFFSETS));
+  const names = new Set(Object.keys(OFFSETS));
+  const usable = [];
+  for (const listener of listeners) {
+    if (!(listener.offset >= 0 && listener.offset < BLOCK_SIZE) || taken.has(listener.offset) || names.has(listener.name)) continue;
+    taken.add(listener.offset);
+    names.add(listener.name);
+    usable.push(listener);
+  }
+  return usable;
+}
 
 function slotForTree(treeRoot, env = process.env) {
   const override = String(env.EVEJS_E2E_PORT_SLOT || "").trim();
@@ -45,33 +60,37 @@ function slotForTree(treeRoot, env = process.env) {
   return digest.readUInt32BE(0) % SLOT_COUNT;
 }
 
-function portsForSlot(slot) {
+function portsForSlot(slot, listeners = []) {
   const base = BLOCK_BASE + slot * BLOCK_SIZE;
   const ports = { slot };
   for (const [name, offset] of Object.entries(OFFSETS)) ports[name] = base + offset;
+  for (const listener of usableListeners(listeners)) ports[listener.name] = base + listener.offset;
   return Object.freeze(ports);
 }
 
-function portsForTree(treeRoot, env = process.env) {
-  return portsForSlot(slotForTree(treeRoot, env));
+function portsForTree(treeRoot, env = process.env, listeners = []) {
+  return portsForSlot(slotForTree(treeRoot, env), listeners);
 }
 
 // The environment that moves every listener of `npm start` onto the block.
 // The public URL carries the gateway port too: store and CDN links are built
 // from it, and the config loader derives the listen port from it.
-function serverEnvironment(ports) {
-  return {
+function serverEnvironment(ports, listeners = []) {
+  const env = {
     EVEJS_SERVER_PORT: String(ports.game),
     EVEJS_IMAGE_SERVER_URL: `http://127.0.0.1:${ports.image}/`,
     EVEJS_MICROSERVICES_PORT: String(ports.gateway),
     EVEJS_MICROSERVICES_PUBLIC_URL: `http://127.0.0.1:${ports.gateway}/`,
     EVEJS_PROXY_LOOPBACK_CDN_LISTEN_PORT: String(ports.cdn),
     EVEJS_REDSHIFT_MONITOR_PORT: String(ports.redshift),
-    EVEJS_LU_MONITOR_BRIDGE_PORT: String(ports.luMonitor),
     EVEJS_AGENT_BRIDGE_PORT: String(ports.agentBridge),
     EVEJS_MARKET_DAEMON_PORT: String(ports.marketRpc),
     EVEJS_XMPP_SERVER_PORT: String(ports.xmpp),
   };
+  for (const listener of usableListeners(listeners)) {
+    if (listener.env && ports[listener.name]) env[listener.env] = String(ports[listener.name]);
+  }
+  return env;
 }
 
 // The market daemon reads its ports only from TOML. Rewrites the two port
@@ -105,10 +124,10 @@ function portFree(port, host = "127.0.0.1") {
   });
 }
 
-async function busyPorts(ports) {
+async function busyPorts(ports, listeners = []) {
   const busy = [];
-  for (const name of Object.keys(OFFSETS)) {
-    if (!await portFree(ports[name])) busy.push({ name, port: ports[name] });
+  for (const name of [...Object.keys(OFFSETS), ...usableListeners(listeners).map((listener) => listener.name)]) {
+    if (ports[name] && !await portFree(ports[name])) busy.push({ name, port: ports[name] });
   }
   return busy;
 }
@@ -124,4 +143,5 @@ module.exports = {
   portsForTree,
   serverEnvironment,
   slotForTree,
+  usableListeners,
 };

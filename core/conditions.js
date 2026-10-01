@@ -4,32 +4,24 @@
 // against the events `e2e watch` writes to timeline.jsonl. A condition is an
 // event kind and field tests, in the names the watch prints:
 //
-//   ARRIVE family=pirate count>=3
+//   ARRIVE who=npc count>=3
 //   DESTROYED self
-//   HUNT reason~scout-discovery t<=5min
-//   INCOMING flightID=$scout
+//   TARGET self locked t<=5min
+//   DAMAGE itemID=$mark
 //
-// Every kind and field is checked against EVENT_FIELDS when the scenario
-// loads, so a typo fails before a ten-minute run instead of after it. Keep
-// EVENT_FIELDS in step with what bridge/watch.js and bridge/destiny.js
-// emit; test/e2eScenario.test.js runs the differ against it.
+// Every kind and field is checked when the scenario loads, so a typo fails
+// before a ten-minute run instead of after it. The kinds here are the core's;
+// plugins add theirs (and their data on core events) through the registry
+// (core/plugins.js). Keep EVENT_FIELDS in step with what bridge/watch.js and
+// bridge/destiny.js emit; test/e2eScenario.test.js runs the differ against it.
+
+const { defaultRegistry } = require("./plugins");
 
 // Scalar field types. `m` and `ms` take unit suffixes (30km, 90s, 5min).
 const SCALAR_TYPES = new Set(["str", "id", "num", "m", "ms", "bool"]);
 
-const LU = {
-  flightID: "id", actorID: "id", family: "str", faction: "str", corporation: "str", pirateRole: "str",
-  phase: "str", journeyKind: "str", journeyStage: "str", huntID: "id", huntRole: "str", huntPhase: "str",
-  huntReason: "str", decision: "str", order: { obj: { mode: "str", role: "str" } },
-};
 const MEMBER = { itemID: "id", label: "str", typeName: "str", kind: "str", who: "str", mode: "str", distanceMeters: "m" };
-const FLIGHT = {
-  flightID: "id", family: "str", faction: "str", corporation: "str", pirateRole: "str", phase: "str",
-  count: "num", systemID: "id", systemName: "str",
-};
-const GROUP = {
-  flightID: "id", count: "num", who: "str", distanceMeters: "m", members: { list: MEMBER }, lu: { obj: LU },
-};
+const GROUP = { flightID: "id", count: "num", who: "str", distanceMeters: "m", members: { list: MEMBER } };
 const COMMON = { t: "ms", atMs: "ms", seq: "num", source: "str" };
 
 const EVENT_FIELDS = Object.freeze({
@@ -43,46 +35,21 @@ const EVENT_FIELDS = Object.freeze({
   LEAVE: { ...GROUP, warped: "bool" },
   MODE: {
     itemID: "id", label: "str", from: "str", to: "str", targetID: "id", targetLabel: "str", distanceMeters: "m",
-    flightID: "id", lu: { obj: LU },
+    flightID: "id",
   },
   TARGET: {
     sourceID: "id", sourceLabel: "str", targetID: "id", targetLabel: "str", locked: "bool", flightID: "id",
-    lu: { obj: LU },
   },
-  DAMAGE: { itemID: "id", label: "str", layer: "str", fromPct: "num", toPct: "num", flightID: "id", lu: { obj: LU } },
+  DAMAGE: { itemID: "id", label: "str", layer: "str", fromPct: "num", toPct: "num", flightID: "id" },
   DESTROYED: {
     itemID: "id", label: "str", typeName: "str", typeID: "id", corporationID: "id", characterID: "id", self: "bool",
-    who: "str", wreckID: "id", wreckLabel: "str", distanceMeters: "m", flightID: "id", lu: { obj: LU },
+    who: "str", wreckID: "id", wreckLabel: "str", distanceMeters: "m", flightID: "id",
   },
   KILLMAIL: { killID: "id", itemID: "id", label: "str", typeName: "str", flightID: "id" },
-  SIGHTING: {
-    observerID: "id", observerLabel: "str", observerFlightID: "id", source: "str", certainty: "str",
-    observedAtMs: "ms", distanceMeters: "m", lu: { obj: LU },
-  },
   SELF: { fromItemID: "id", fromTypeName: "str", toItemID: "id", toTypeName: "str" },
   DOCKED: { systemID: "id", systemName: "str", stationID: "id" },
   SYSTEM: { fromSystemID: "id", toSystemID: "id", toSystemName: "str", security: "num" },
   MOVED: { distanceMeters: "m", systemName: "str" },
-  HUNT: {
-    huntID: "id", phase: "str", reason: "str", source: "str", targetSelf: "bool", targetLabel: "str",
-    observerID: "id", observerLabel: "str", contactSystemID: "id", contactSystemName: "str", distanceMeters: "m",
-    supportFlightIDs: { list: "id" }, leader: { obj: FLIGHT }, initial: "bool",
-  },
-  HERE: { systemID: "id", systemName: "str", count: "num", byFamily: { map: "num" }, flights: { list: FLIGHT } },
-  INCOMING: {
-    ...FLIGHT, toSystemID: "id", toSystemName: "str", journeyKind: "str", stage: "str", ownerID: "id",
-    dueAtMs: "ms", etaMs: "ms", jumpsRemaining: "num", initial: "bool",
-  },
-  ENTER: FLIGHT,
-  EXIT: { ...FLIGHT, fromSystemName: "str" },
-  ENGAGEMENT: {
-    status: "str", encounterID: "id", flightIDs: { list: "id" }, shipCount: "num", phase: "str",
-    encounterKind: "str", battleClass: "str",
-  },
-  LOSS: {
-    actorID: "id", pilotName: "str", shipName: "str", corporation: "str", cause: "str", encounterID: "id",
-    opponentName: "str",
-  },
   LOG: { level: "str", text: "str" },
   CLIENT: {
     op: "str", itemID: "id", label: "str", targetID: "id", targetLabel: "str", mode: "str", rangeMeters: "m",
@@ -104,13 +71,50 @@ const EVENT_FIELDS = Object.freeze({
 
 const KINDS = Object.freeze(Object.keys(EVENT_FIELDS));
 
+// The core kinds the grid differ joins plugin data to (a row's annotations).
+const EXT_KINDS = Object.freeze(["PRESENT", "ARRIVE", "LEAVE", "MODE", "TARGET", "DAMAGE", "DESTROYED"]);
+
+// Per registry: every kind's fields, plugin kinds and plugin data included.
+const TABLES = new WeakMap();
+
+function tablesFor(registry) {
+  const cached = TABLES.get(registry);
+  if (cached) return cached;
+  const fields = {};
+  for (const [kind, spec] of Object.entries(EVENT_FIELDS)) fields[kind] = { ...spec };
+  for (const kind of EXT_KINDS) {
+    for (const [plugin, extFields] of Object.entries(registry.extFields)) {
+      if (fields[kind][plugin] === undefined) fields[kind][plugin] = { obj: extFields };
+    }
+  }
+  const owners = {};
+  for (const [kind, entry] of Object.entries(registry.kinds)) {
+    if (fields[kind]) {
+      registry.warn(`plugin ${entry.plugin}: event kind ${kind} is a core kind`);
+      continue;
+    }
+    fields[kind] = entry.fields || {};
+    owners[kind] = entry.plugin;
+  }
+  const tables = { fields, owners, kinds: Object.keys(fields) };
+  TABLES.set(registry, tables);
+  return tables;
+}
+
+function eventFields(registry = defaultRegistry()) {
+  return tablesFor(registry).fields;
+}
+
+function kindsOf(registry = defaultRegistry()) {
+  return tablesFor(registry).kinds;
+}
+
 // What `self` means for each kind: the event is about the player's own ship.
-function selfTest(kind) {
+function selfTest(kind, registry) {
+  if (registry.selfTests[kind]) return registry.selfTests[kind];
   if (kind === "DESTROYED") return (event) => event.self === true;
-  if (kind === "HUNT") return (event) => event.targetSelf === true;
   if (kind === "TARGET") return (event) => event.targetLabel === "self";
-  if (kind === "SIGHTING") return () => true;
-  if (EVENT_FIELDS[kind].label) return (event) => event.label === "self";
+  if (tablesFor(registry).fields[kind].label) return (event) => event.label === "self";
   return null;
 }
 
@@ -164,8 +168,9 @@ function nestedFields(spec) {
 
 // A field name resolves to a path in the event: the kind's own field first,
 // then a field one level down (lu.family, leader.flightID, members.typeName).
-function resolveField(kind, name) {
-  const root = EVENT_FIELDS[kind];
+function resolveField(kind, name, registry = defaultRegistry()) {
+  const root = tablesFor(registry).fields[kind];
+  if (!root) return null;
   const parts = name.split(".");
   if (parts.length === 1) {
     if (root[name] !== undefined) return { path: [name], spec: root[name] };
@@ -201,8 +206,8 @@ function resolveField(kind, name) {
   return null;
 }
 
-function fieldNames(kind) {
-  const root = EVENT_FIELDS[kind];
+function fieldNames(kind, registry = defaultRegistry()) {
+  const root = tablesFor(registry).fields[kind];
   const names = Object.keys(root).filter((key) => !isNested(root[key]) || typeof root[key].list === "string");
   for (const [key, spec] of Object.entries(root)) {
     const inner = nestedFields(spec);
@@ -247,18 +252,18 @@ function truthy(value) {
 const OPERATOR = /^(!?)([A-Za-z_][\w.]*)(?:(!=|>=|<=|=|>|<|~)([\s\S]*))?$/;
 
 // One field test, compiled. Returns (event, ctx) => boolean.
-function compileTerm(kind, token, { bindings }) {
+function compileTerm(kind, token, { bindings, registry }) {
   if (token === "self" || token === "!self") {
-    const test = selfTest(kind);
+    const test = selfTest(kind, registry);
     if (!test) throw new Error(`"self" has no meaning for ${kind}`);
     return token === "self" ? test : (event) => !test(event);
   }
   const match = OPERATOR.exec(token);
   if (!match) throw new Error(`can't read "${token}"; write field=value, field>=number, field~regex or a bare field`);
   const [, bang, name, op, rawValue] = match;
-  const resolved = resolveField(kind, name);
+  const resolved = resolveField(kind, name, registry);
   if (!resolved) {
-    throw new Error(`${kind} has no field "${name}". Fields: ${fieldNames(kind).join(", ")}`);
+    throw new Error(`${kind} has no field "${name}". Fields: ${fieldNames(kind, registry).join(", ")}`);
   }
   const type = scalarType(resolved.spec);
   if (!type || !SCALAR_TYPES.has(type)) {
@@ -278,7 +283,7 @@ function compileTerm(kind, token, { bindings }) {
       throw new Error(`"${token}": a $name compares IDs or text with = or !=`);
     }
     if (!bindings.has(binding)) {
-      throw new Error(`"${token}": no setup step binds $${binding}; add "as": "${binding}" to the trigger that makes it`);
+      throw new Error(`"${token}": no setup step binds $${binding}; add "as": "${binding}" to the step that makes it`);
     }
     const test = (event, ctx) => {
       const bound = ctx && ctx.bindings ? ctx.bindings[binding] : null;
@@ -333,19 +338,22 @@ function compileTerm(kind, token, { bindings }) {
   return op === "=" ? test : (event) => !test(event);
 }
 
-// text -> { text, kind, test(event, ctx) }. Throws with a message naming the
-// problem. `bindings` is the set of $names setup steps declare.
-function parseCondition(text, { bindings = new Set() } = {}) {
+// text -> { text, kind, plugin, test(event, ctx) }. Throws with a message
+// naming the problem. `bindings` is the set of $names setup steps declare;
+// `plugin` names the plugin that owns the kind, or null for a core kind.
+function parseCondition(text, { bindings = new Set(), registry = defaultRegistry() } = {}) {
   if (typeof text !== "string" || !text.trim()) throw new Error("a condition is a non-empty string");
   const tokens = tokenize(text.trim());
   const kind = tokens.shift();
-  if (!EVENT_FIELDS[kind]) {
-    throw new Error(`unknown event kind "${kind}". Kinds: ${KINDS.join(", ")}`);
+  const tables = tablesFor(registry);
+  if (!tables.fields[kind]) {
+    throw new Error(`unknown event kind "${kind}". Kinds: ${tables.kinds.join(", ")}`);
   }
-  const terms = tokens.map((token) => compileTerm(kind, token, { bindings }));
+  const terms = tokens.map((token) => compileTerm(kind, token, { bindings, registry }));
   return {
     text: text.trim(),
     kind,
+    plugin: tables.owners[kind] || null,
     test(event, ctx = {}) {
       return Boolean(event) && event.kind === kind && terms.every((term) => term(event, ctx));
     },
@@ -354,8 +362,11 @@ function parseCondition(text, { bindings = new Set() } = {}) {
 
 module.exports = {
   EVENT_FIELDS,
+  EXT_KINDS,
   KINDS,
+  eventFields,
   fieldNames,
+  kindsOf,
   parseCondition,
   resolveField,
   tokenize,

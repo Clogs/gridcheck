@@ -111,6 +111,31 @@ test("a timeline comes in whole lines from a byte offset, and a run ID can't lea
   }
 });
 
+test("the page gets the plugins' colours, and a plugin kind's line comes with the plugin's own text", async () => {
+  const { runs } = tempRuns();
+  fs.mkdirSync(path.join(runs, "plugin-run"));
+  fs.writeFileSync(path.join(runs, "plugin-run", "timeline.jsonl"), [
+    { seq: 1, t: 0, kind: "START", atMs: 1000 },
+    { seq: 2, t: 500, kind: "RAID", atMs: 1500, gang: "g1", size: 3 },
+  ].map((line) => `${JSON.stringify(line)}\n`).join(""));
+  const { createToolRegistry } = require("../core/plugins");
+  const registry = createToolRegistry({ active: [{ name: "demo", plugin: { tool: {
+    kinds: { RAID: { gang: "id", size: "num" } },
+    format: { RAID: (event) => [`${event.gang} x${event.size}`, "raiding"] },
+    colours: [{ match: { side: "raiders" }, colour: "#aa0000", label: "dark red raiders" }],
+  } } }] });
+  const { http, base, auth } = await startBridge(createAgentBridgeViewer({ runsDir: runs, registry }));
+  try {
+    const config = await (await fetch(`${base}/viewer/config`, { headers: auth })).json();
+    assert.deepStrictEqual(config.colours, [{ plugin: "demo", match: { side: "raiders" }, colour: "#aa0000", label: "dark red raiders" }]);
+    assert.strictEqual((await fetch(`${base}/viewer/config`)).status, 401);
+    const body = await (await fetch(`${base}/viewer/timeline?run=plugin-run&from=0`, { headers: auth })).json();
+    assert.deepStrictEqual(body.summaries, [[1, "g1 x3  raiding"]], "line 1 is the RAID; START is the page's own");
+  } finally {
+    await http.stop();
+  }
+});
+
 test("without a viewer the bridge answers as before", async () => {
   const { http, base, auth } = await startBridge(null);
   try {

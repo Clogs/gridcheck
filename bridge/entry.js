@@ -13,7 +13,6 @@
 
 "use strict";
 
-const fs = require("fs");
 const path = require("path");
 
 const { createAgentBridgeHttp, removeHandshake } = require("./http");
@@ -24,6 +23,7 @@ const { createDestinyTee } = require("./destiny");
 const { createAgentBridgeViewer } = require("./viewer");
 const { createStock, serverRequire } = require("./stock");
 const { DEFAULT_PLUGINS_DIR, loadPlugins, startPlugins, stopPlugins } = require("./plugins");
+const { createToolRegistry, treeAt } = require("../core/plugins");
 
 const DEFAULT_PORT = 26052;
 
@@ -57,18 +57,6 @@ function quietLogger() {
   return { debug() {}, info() {}, warn() {}, err() {} };
 }
 
-// A module path under server/src, as a file, a .js file or a folder; null when
-// the tree has none. Plugins decide whether they apply with it.
-function resolveUnder(serverRoot) {
-  const srcRoot = path.join(serverRoot, "src");
-  return (relativePath) => {
-    const base = path.join(srcRoot, relativePath);
-    for (const candidate of [base, `${base}.js`, path.join(base, "index.js")]) {
-      if (fs.existsSync(candidate) && fs.statSync(candidate).isFile()) return candidate;
-    }
-    return null;
-  };
-}
 
 function buildSeams(stock) {
   const itemTypes = stock.itemTypeRegistry;
@@ -104,7 +92,7 @@ function createService({ serverRoot, stock: givenStock = null, pluginsDir = DEFA
     const stock = givenStock || createStock(serverRoot);
     const log = optional(() => stock.logger) || quietLogger();
     const seams = buildSeams(stock);
-    const tree = { treeRoot, serverRoot, resolve: resolveUnder(serverRoot) };
+    const tree = treeAt(treeRoot, serverRoot);
     const loaded = loadPlugins({ pluginsDir, tree, log });
     const { hooks, skipped } = startPlugins(loaded, {
       stock, require: serverRequire(serverRoot), log, treeRoot, serverRoot, seams,
@@ -144,7 +132,8 @@ function createService({ serverRoot, stock: givenStock = null, pluginsDir = DEFA
         characterID: session && session.characterID,
       }),
       extraRoutes: hooks.map((hook) => ({ owner: `plugin ${hook.name}`, routes: hook.routes })),
-      viewer: createAgentBridgeViewer({ runsDir: path.join(treeRoot, "_local", "e2e", "runs") }),
+      viewer: createAgentBridgeViewer({ runsDir: path.join(treeRoot, "_local", "e2e", "runs"),
+        registry: createToolRegistry({ active: loaded.active.filter((entry) => hooks.some((hook) => hook.name === entry.name)), skipped }) }),
     });
     bridge = createAgentBridgeHttp({
       routes,

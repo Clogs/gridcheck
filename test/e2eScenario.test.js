@@ -10,7 +10,7 @@ const assert = require("node:assert");
 const fs = require("fs");
 const path = require("path");
 
-const { EVENT_FIELDS, parseCondition, resolveField } = require("../core/conditions");
+const { EVENT_FIELDS, eventFields, parseCondition, resolveField } = require("../core/conditions");
 const {
   ScenarioError,
   bindStep,
@@ -20,9 +20,10 @@ const {
   renderReport,
   resultRecord,
   runScenario,
-  triggerIDs,
   validateScenario,
 } = require("../core/scenario");
+const { createToolRegistry, emptyRegistry } = require("../core/plugins");
+const { triggerIDs } = require("../plugins/lu/tool/triggers");
 const { createGridDiffer } = require("../bridge/watch");
 const { createOffGridTracker } = require("../plugins/lu/server/offGrid");
 
@@ -173,8 +174,9 @@ test("every field the grid differ and off-grid tracker emit can be named in a co
     assert.ok(kinds.has(kind), `the fixture should produce ${kind}`);
   }
   const unknown = new Set();
+  const fields = eventFields();
   for (const event of events) {
-    assert.ok(EVENT_FIELDS[event.kind], `kind ${event.kind}`);
+    assert.ok(fields[event.kind], `kind ${event.kind}`);
     for (const name of leafPaths(event)) if (!resolveField(event.kind, name)) unknown.add(`${event.kind} ${name}`);
   }
   assert.deepStrictEqual([...unknown], []);
@@ -272,6 +274,54 @@ test("every shipped scenario loads", () => {
     const raw = JSON.parse(fs.readFileSync(row.file, "utf8"));
     assert.doesNotThrow(() => validateScenario(raw, { ...STUBS, worldExists: () => true, defaultName: row.name }), row.name);
   }
+});
+
+test("without a plugin, its kinds, data, steps and up keys are unknown, and the core still loads", () => {
+  const registry = emptyRegistry();
+  assert.throws(() => parseCondition("HUNT self", { registry }), /unknown event kind "HUNT"/);
+  assert.throws(() => parseCondition("ARRIVE family=pirate", { registry }), /ARRIVE has no field "family"/);
+  assert.ok(parseCondition("ARRIVE who=npc count>=2", { registry }).test({ kind: "ARRIVE", who: "npc", count: 3 }));
+  assert.strictEqual(EVENT_FIELDS.HUNT, undefined, "the core's own table names no plugin kind");
+  let error;
+  try {
+    validateScenario({ world: "lowsec-docked", up: { offgridTravel: 5 }, setup: ["undock", { trigger: "scout" }], until: { timeout: 5 },
+      expect: ["GRID"] }, { ...STUBS, registry, defaultName: "t" });
+  } catch (caught) {
+    error = caught;
+  }
+  assert.match(error.problems.join("\n"), /up.offgridTravel: unknown key; up takes market, timeout/);
+  assert.match(error.problems.join("\n"), /setup\[1\]: unknown step; steps are login, undock/);
+  const scenario = validateScenario({ world: "lowsec-docked", setup: ["undock"], until: { timeout: 5 }, expect: ["GRID"] }, { ...STUBS, registry, defaultName: "t" });
+  assert.deepStrictEqual(scenario.up, { market: true, timeout: null });
+});
+
+test("a plugin's step validates, describes, binds and runs through the registry", () => {
+  const registry = createToolRegistry({ active: [{ name: "demo", dir: null, plugin: { tool: {
+    kinds: { RAID: { gang: "id", size: "num" } },
+    steps: {
+      raid: {
+        binds: true,
+        keys: () => ["size", "gang"],
+        parse(raw, ctx) {
+          if (!(raw.size >= 1)) ctx.problem("size", "1 or more");
+          ctx.bound(raw.gang, "gang");
+          return { size: raw.size, gang: raw.gang };
+        },
+        describe: (step) => `raid x${step.size}${step.gang ? ` with ${step.gang}` : ""}`,
+        run: async () => ({ ok: true, ids: ["g1"] }),
+      },
+    },
+  } } }] });
+  const scenario = validateScenario({ world: "lowsec-docked", setup: [{ raid: true, size: 3, as: "gang" }, { raid: true, size: 1, gang: "$gang" }],
+    until: { any: ["RAID gang=$gang"], timeout: 5 }, expect: ["RAID size>=2"] }, { ...STUBS, registry, defaultName: "t" });
+  assert.deepStrictEqual(scenario.setup.map((step) => step.type), ["login", "raid", "raid"]);
+  assert.strictEqual(scenario.setup[1].plugin, "demo");
+  assert.strictEqual(describeStep(scenario.setup[1], registry), "raid x3 as $gang");
+  assert.strictEqual(bindStep(scenario.setup[2], { gang: ["g1"] }).gang, "g1");
+  assert.throws(() => validateScenario({ world: "lowsec-docked", setup: [{ raid: true, size: 0, colour: "red", gang: "$later" }],
+    until: { timeout: 5 }, expect: ["GRID"] }, { ...STUBS, registry, defaultName: "t" }),
+  (error) => /setup\[0\].size: 1 or more/.test(error.message) && /setup\[0\].colour: unknown key for raid/.test(error.message) &&
+    /setup\[0\].gang: no earlier step binds \$later/.test(error.message));
 });
 
 test("trigger replies bind the IDs a timeline names them by", () => {

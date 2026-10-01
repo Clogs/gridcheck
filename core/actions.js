@@ -10,6 +10,7 @@
 
 const { tokenize } = require("./conditions");
 const { formatDistance } = require("./format");
+const { defaultRegistry, extOf } = require("./plugins");
 
 // Step name -> what it takes. `target` is a ball on grid, `modules` a module
 // selection on the player's own ship.
@@ -85,11 +86,30 @@ function regex(text, where) {
 
 // ---------- targets ----------
 
-// "nearest npc", "name~Scout family=pirate within=50km", "980050000108",
-// "$mark" (a ball or flight an earlier step bound). Throws on a term it can't read.
-function parseTargetSpec(text) {
+// A row's group ID: the part of its groupKey after the first ":"
+// ("gang:raid_7" -> "raid_7").
+function groupIDOf(row) {
+  const key = row && row.groupKey ? String(row.groupKey) : "";
+  return key ? key.slice(key.indexOf(":") + 1) : "";
+}
+
+// A plugin term's value on a grid row: the plugin's data at row.ext.<plugin>.
+function pluginValue(row, term) {
+  const ext = extOf(row, term.plugin);
+  return ext && ext[term.field] !== undefined && ext[term.field] !== null ? String(ext[term.field]) : "";
+}
+
+const CORE_TERMS = ["name", "type", "kind", "within"];
+
+// "nearest npc", "name~Scout within=50km", "980050000108", "$mark" (a ball or
+// group an earlier step bound). Plugins add terms that read their own data
+// (registry.targetFields), e.g. side=raiders or gang=$raid. Throws on a
+// term it can't read.
+function parseTargetSpec(text, registry = defaultRegistry()) {
   const source = String(text === undefined || text === null ? "" : text).trim();
   if (!source) throw new Error("a target is a ball ID, $name or filters such as \"nearest npc\"");
+  const pluginTerms = registry.targetFields;
+  const termList = [...CORE_TERMS, ...Object.keys(pluginTerms).filter((term) => !CORE_TERMS.includes(term))];
   const tests = [];
   const bindings = [];
   for (const token of tokenize(source)) {
@@ -101,7 +121,7 @@ function parseTargetSpec(text) {
     if (/^\$[A-Za-z_]\w*$/.test(token)) {
       const name = token.slice(1);
       bindings.push(name);
-      tests.push({ what: token, binding: name });
+      tests.push({ what: token, binding: name, values: (row) => [String(row.itemID), groupIDOf(row)].filter(Boolean) });
       continue;
     }
     const lower = token.toLowerCase();
@@ -109,13 +129,19 @@ function parseTargetSpec(text) {
     if (lower === "npc") { tests.push({ what: token, test: (row) => row.isNpc === true }); continue; }
     if (lower === "player") { tests.push({ what: token, test: (row) => !row.isNpc && Boolean(row.characterID) }); continue; }
     const match = /^([A-Za-z]+)(=|~)(.+)$/.exec(token);
-    if (!match) throw new Error(`target: can't read "${token}"; use npc, player, name~, type~, kind=, family=, flight=, within=`);
+    if (!match) throw new Error(`target: can't read "${token}"; use npc, player, ${termList.map((term) => `${term}${term === "name" || term === "type" ? "~" : "="}`).join(", ")}`);
     const [, field, op, value] = match;
+    const plugin = CORE_TERMS.includes(field) ? null : pluginTerms[field];
     if (value.startsWith("$")) {
-      if (field !== "flight" || op !== "=") throw new Error(`target: "${token}": only flight=$name takes a binding`);
+      if (!plugin || op !== "=") throw new Error(`target: "${token}": only ${Object.keys(pluginTerms).map((term) => `${term}=$name`).join(", ") || "a plugin's terms"} take a binding`);
       const name = value.slice(1);
       bindings.push(name);
-      tests.push({ what: token, binding: name, flightOnly: true });
+      tests.push({ what: token, binding: name, values: (row) => [pluginValue(row, plugin)].filter(Boolean) });
+      continue;
+    }
+    if (plugin) {
+      if (op !== "=") throw new Error(`target: "${token}": ${field} takes =`);
+      tests.push({ what: token, test: (row) => pluginValue(row, plugin).toLowerCase() === value.toLowerCase() });
       continue;
     }
     switch (field) {
@@ -129,13 +155,9 @@ function parseTargetSpec(text) {
         }
         break;
       }
-      case "kind": case "family":
+      case "kind":
         if (op !== "=") throw new Error(`target: "${token}": ${field} takes =`);
         tests.push({ what: token, test: (row) => String(row[field] || "").toLowerCase() === value.toLowerCase() });
-        break;
-      case "flight":
-        if (op !== "=") throw new Error(`target: "${token}": flight takes =`);
-        tests.push({ what: token, test: (row) => String(row.flightID || "") === value });
         break;
       case "within": {
         const meters = op === "=" ? parseMeters(value) : null;
@@ -144,21 +166,22 @@ function parseTargetSpec(text) {
         break;
       }
       default:
-        throw new Error(`target: unknown field "${field}"; use name, type, kind, family, flight or within`);
+        throw new Error(`target: unknown field "${field}"; use ${termList.join(", ")}`);
     }
   }
   return { text: source, tests, bindings };
 }
 
-// The nearest grid row (never self) that passes every test. A binding matches
-// a ball's own ID or its LU flight, so a fleet trigger's `as` works as a target.
-function pickTarget(rows, spec, bindings = {}) {
-  const parsed = typeof spec === "string" ? parseTargetSpec(spec) : spec;
+// The nearest grid row (never self) that passes every test. A bare binding
+// matches a ball's own ID or its group's, so a step that bound a group (a
+// plugin trigger's `as`) works as a target.
+function pickTarget(rows, spec, bindings = {}, registry = defaultRegistry()) {
+  const parsed = typeof spec === "string" ? parseTargetSpec(spec, registry) : spec;
   const passes = (row) => parsed.tests.every((term) => {
     if (!term.binding) return term.test(row);
     const ids = (bindings[term.binding] || []).map(String);
     if (!ids.length) throw new Error(`$${term.binding} is not bound yet`);
-    return ids.includes(String(row.flightID || "")) || (!term.flightOnly && ids.includes(String(row.itemID)));
+    return term.values(row).some((value) => ids.includes(value));
   });
   const candidates = rows.filter((row) => row && !row.isSelf && passes(row));
   candidates.sort((a, b) => (a.distanceMeters === null ? Infinity : a.distanceMeters) -
@@ -282,7 +305,7 @@ function errorText(error) {
 // action: { type, target?, modules?, range?, once?, timeout?, charge?, drones?, count? }
 // io: {
 //   call(service, method, args, kwargs) -> result      a gateway /call; throws with the server's reason
-//   grid() -> { self, entities }                       the player's grid, rows with flightID and family
+//   grid() -> { self, entities }                       the player's grid, rows with groupKey and ext
 //   listShip(shipID) -> items                           shipItems() of the ship's slots, cargo and drone bay
 //   bindings, sleep(ms), now()
 // }

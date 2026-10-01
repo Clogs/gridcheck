@@ -2,9 +2,11 @@
 
 // Pure pieces of `e2e watch`: one text line per timeline event, the server
 // log line parser, and a short reorder buffer that merges the bridge stream
-// with log lines by server time. No IO, so tests can pin the output.
+// with log lines by server time. No IO, so tests can pin the output. Plugin
+// kinds are formatted by their plugin (core/plugins.js registry.formatters).
 
 const { formatDistance } = require("./format");
+const { defaultRegistry, extOf } = require("./plugins");
 
 const KIND_WIDTH = 10;
 const BODY_WIDTH = 58;
@@ -24,48 +26,50 @@ function formatSeconds(ms) {
   return seconds >= 120 ? `${Math.floor(seconds / 60)}m${String(seconds % 60).padStart(2, "0")}s` : `${seconds}s`;
 }
 
-// A journey's dueAtMs is set leg by leg, so a flight several jumps out can be
-// "due" already. Jumps are the honest number then.
-function etaText(event) {
-  const jumps = event.jumpsRemaining ? `${event.jumpsRemaining} jump${event.jumpsRemaining === 1 ? "" : "s"}` : "";
-  if (event.etaMs > 0) return `eta ${formatSeconds(event.etaMs)}${jumps ? ` (${jumps})` : ""}`;
-  return jumps ? `${jumps} out, no ETA` : "due now";
-}
-
 function distanceText(meters) {
   return meters === null || meters === undefined ? null : formatDistance(meters);
 }
 
-function owner(lu) {
-  return lu ? lu.corporation || lu.faction || lu.family || null : null;
-}
+// What plugin formatters get to format with.
+const HELP = Object.freeze({ distance: (meters) => distanceText(meters) || "?", seconds: formatSeconds });
 
-// flight, phase, decision: the three answers to "why is it doing that".
-function luTag(lu) {
-  if (!lu) return "";
+// The plugins' tags for a core event's line: who a ball belongs to and why
+// it acts, from each plugin's data on the event.
+function pluginTags(event, registry) {
   const parts = [];
-  if (lu.flightID) parts.push(lu.flightID);
-  const phase = lu.huntPhase || lu.journeyStage || lu.phase;
-  if (phase) parts.push(`phase=${phase}`);
-  if (lu.decision) parts.push(`why=${lu.decision}`);
-  if (lu.huntPhase && lu.huntReason) parts.push(`hunt=${lu.huntReason}`);
+  for (const { plugin, tag } of registry.tags) {
+    const ext = extOf(event, plugin);
+    if (ext === undefined || ext === null) continue;
+    try {
+      const text = tag(ext);
+      if (text) parts.push(String(text));
+    } catch (_error) {
+      // A broken tag costs the tag, not the line.
+    }
+  }
   return parts.join(" ");
 }
 
-function groupLabel(event) {
+function groupOwner(event, registry) {
+  for (const { plugin, owner } of registry.owners) {
+    const ext = extOf(event, plugin);
+    if (ext === undefined || ext === null) continue;
+    try {
+      const text = owner(ext);
+      if (text) return String(text);
+    } catch (_error) {
+      // Fall back on the first member's label.
+    }
+  }
+  return null;
+}
+
+function groupLabel(event, registry) {
   const members = Array.isArray(event.members) ? event.members : [];
   if (members.length <= 1) return members[0] ? members[0].label : `#${event.itemID || "?"}`;
   const types = [...new Set(members.map((member) => member.typeName).filter(Boolean))].join("/");
-  const who = owner(event.lu) || members[0].label;
+  const who = groupOwner(event, registry) || members[0].label;
   return `${who} x${members.length}${types ? ` (${types})` : ""}`;
-}
-
-function flightText(flight) {
-  if (!flight) return "?";
-  const who = flight.corporation || flight.faction || flight.family || "";
-  const role = flight.pirateRole || "";
-  const count = flight.count > 1 ? ` x${flight.count}` : "";
-  return [flight.flightID, who, role].filter(Boolean).join(" ") + count;
 }
 
 function labelList(labels, limit = 4) {
@@ -127,7 +131,8 @@ function divergeBody(event) {
   return [`${event.reason} ${who}: ${detail}`, event.status === "open" ? `for ${formatSeconds(event.sinceMs)}` : ""];
 }
 
-function eventBody(event) {
+function eventBody(event, registry) {
+  const tags = () => pluginTags(event, registry);
   switch (event.kind) {
     case "START":
       return [`character ${event.characterID}, ${Math.round(event.forMs / 1000)}s, sample every ` +
@@ -153,65 +158,28 @@ function eventBody(event) {
         `(${self.mode || "?"}${protection}), ${event.tracked} ball(s)`, ""];
     }
     case "PRESENT":
-      return [`${groupLabel(event)} at ${distanceText(event.distanceMeters) || "?"}` +
+      return [`${groupLabel(event, registry)} at ${distanceText(event.distanceMeters) || "?"}` +
         `${event.members && event.members.length === 1 && event.members[0].mode ? ` ${event.members[0].mode}` : ""}`,
-      luTag(event.lu)];
+      tags()];
     case "ARRIVE":
-      return [`${groupLabel(event)}  ${event.warpIn ? "warp-in" : "at"} ${distanceText(event.distanceMeters) || "?"} ` +
-        `from self${event.stillWarping ? " (still in warp)" : ""}`, luTag(event.lu)];
+      return [`${groupLabel(event, registry)}  ${event.warpIn ? "warp-in" : "at"} ${distanceText(event.distanceMeters) || "?"} ` +
+        `from self${event.stillWarping ? " (still in warp)" : ""}`, tags()];
     case "LEAVE":
-      return [`${groupLabel(event)}  ${event.warped ? "warped off" : "left grid"} at ` +
-        `${distanceText(event.distanceMeters) || "?"}`, luTag(event.lu)];
+      return [`${groupLabel(event, registry)}  ${event.warped ? "warped off" : "left grid"} at ` +
+        `${distanceText(event.distanceMeters) || "?"}`, tags()];
     case "MODE":
       return [`${event.label}  ${event.from || "-"} -> ${event.to || "-"}` +
         `${event.targetLabel ? ` on ${event.targetLabel}` : ""}` +
-        `${event.distanceMeters ? `  ${distanceText(event.distanceMeters)}` : ""}`, luTag(event.lu)];
+        `${event.distanceMeters ? `  ${distanceText(event.distanceMeters)}` : ""}`, tags()];
     case "TARGET":
-      return [`${event.sourceLabel} -> ${event.targetLabel} (${event.locked ? "locked" : "unlocked"})`, luTag(event.lu)];
+      return [`${event.sourceLabel} -> ${event.targetLabel} (${event.locked ? "locked" : "unlocked"})`, tags()];
     case "DAMAGE":
-      return [`${event.label} ${event.layer} ${event.fromPct} -> ${event.toPct}`, luTag(event.lu)];
+      return [`${event.label} ${event.layer} ${event.fromPct} -> ${event.toPct}`, tags()];
     case "DESTROYED":
       return [`${event.label}${event.typeName && event.label !== event.typeName ? ` (${event.typeName})` : ""} ` +
-        `wreck #${event.wreckID}`, luTag(event.lu)];
+        `wreck #${event.wreckID}`, tags()];
     case "KILLMAIL":
       return [`${event.label} killmail ${event.killID}`, event.flightID || ""];
-    case "SIGHTING":
-      return [`${event.observerLabel} sighted self` +
-        `${event.distanceMeters !== null && event.distanceMeters !== undefined ? ` at ${distanceText(event.distanceMeters)}` : ""}` +
-        ` (${[event.source, event.certainty].filter(Boolean).join(", ") || "sensor"})`, luTag(event.lu)];
-    case "HUNT": {
-      const target = event.targetSelf ? "self" : event.targetLabel;
-      const where = event.distanceMeters !== null && event.distanceMeters !== undefined
-        ? ` at ${distanceText(event.distanceMeters)}`
-        : event.contactSystemName ? ` in ${event.contactSystemName}` : "";
-      const support = event.supportFlightIDs && event.supportFlightIDs.length
-        ? ` support=${event.supportFlightIDs.length}` : "";
-      return [`${flightText(event.leader)}  ${event.reason || "-"}${target ? ` target=${target}` : ""}${where}`,
-        `phase=${event.phase || "?"}${support}${event.initial ? " (running at start)" : ""}`];
-    }
-    case "INCOMING":
-      return [`${flightText(event)} ${event.systemName || event.systemID || "?"} -> ` +
-        `${event.toSystemName || event.toSystemID}  ${etaText(event)}`,
-      [event.journeyKind, event.stage, event.ownerID].filter(Boolean).join(" ")];
-    case "HERE": {
-      const families = Object.entries(event.byFamily || {}).sort((a, b) => b[1] - a[1])
-        .map(([family, count]) => `${family} ${count}`).join(", ");
-      const pirates = (event.flights || []).filter((flight) => flight.family === "pirate").map(flightText);
-      return [`${event.count} flight(s) in ${event.systemName || event.systemID} off grid: ${families}`,
-        pirates.length ? `pirates: ${pirates.join("; ")}` : ""];
-    }
-    case "ENTER":
-      return [`${flightText(event)} entered the system (off grid)`, event.phase ? `phase=${event.phase}` : ""];
-    case "EXIT":
-      return [`${flightText(event)} left the system`, event.phase ? `phase=${event.phase}` : ""];
-    case "ENGAGEMENT":
-      return [`${event.encounterID} ${event.status}` +
-        `${event.encounterKind ? ` ${event.encounterKind}` : ""}${event.battleClass ? ` ${event.battleClass}` : ""}` +
-        `${event.shipCount ? ` ${event.shipCount} ships` : ""}`, event.phase ? `phase=${event.phase}` : ""];
-    case "LOSS":
-      return [`${event.shipName || "ship"}${event.pilotName ? ` (${event.pilotName})` : ""} of ` +
-        `${event.corporation || "?"} lost${event.opponentName ? ` to ${event.opponentName}` : ""}`,
-      event.cause ? `cause=${event.cause}` : ""];
     case "MOVED":
       return [`self moved ${distanceText(event.distanceMeters)} to a new grid`, ""];
     case "SYSTEM":
@@ -237,17 +205,36 @@ function eventBody(event) {
         ? `; client ${event.client.notifications} updates, decode ${event.client.decodeMsAvg}/` +
           `${event.client.decodeMsMaxSinceAttach} ms`
         : "";
+      const extra = registry.costTexts.map((costText) => {
+        try {
+          return costText(costs);
+        } catch (_error) {
+          return null;
+        }
+      }).filter(Boolean).map((text) => `${text} `).join("");
       return [`${event.reason}: ${event.samples} samples, ${event.events} events`,
         `sample ${costs.sampleMsAvg}/${costs.sampleMsMax} ms, off grid ${costs.offGridMsAvg}/${costs.offGridMsMax} ms ` +
-        `${costs.flightsScanned === undefined ? "" : `over ${costs.flightsScanned} flights `}(avg/max)${client}`];
+        `${extra}(avg/max)${client}`];
     }
-    default:
+    default: {
+      const format = registry.formatters[event.kind];
+      if (format) {
+        try {
+          const [body, tail] = format(event, HELP);
+          return [String(body === undefined || body === null ? "" : body), tail ? String(tail) : ""];
+        } catch (_error) {
+          // A broken formatter falls back on the raw event.
+        }
+      }
       return [JSON.stringify(event), ""];
+    }
   }
 }
 
-function formatTimelineEvent(event) {
-  const [body, tail] = eventBody(event);
+// One line per event. `registry` is the plugins' (core/plugins.js); the
+// default is this tree's, also when called from .map() with an index.
+function formatTimelineEvent(event, registry) {
+  const [body, tail] = eventBody(event, registry && registry.formatters ? registry : defaultRegistry());
   const kind = String(event.kind);
   const head = `${formatOffset(event.t)}  ${kind.padEnd(KIND_WIDTH)}${kind.length >= KIND_WIDTH ? " " : ""}`;
   if (!tail) return `${head}${body}`;
@@ -264,21 +251,23 @@ function parseLogLine(line) {
 }
 
 // Every ID the watch has named, so a log line can be kept because it is about
-// something on this timeline rather than about any hunt in the universe.
-function collectIDs(event, into) {
+// something on this timeline rather than anything in the universe. Plugins
+// name the IDs their own data carries.
+function collectIDs(event, into, registry = defaultRegistry()) {
   const add = (value) => { if (value) into.add(String(value)); };
   add(event.flightID);
   add(event.itemID);
-  add(event.observerID);
-  add(event.observerFlightID);
-  add(event.huntID);
   add(event.sourceID);
   add(event.targetID);
-  if (event.lu) add(event.lu.flightID);
-  if (event.leader) add(event.leader.flightID);
   for (const member of event.members || []) add(member.itemID);
-  for (const flight of event.flights || []) add(flight.flightID);
-  for (const id of event.supportFlightIDs || []) add(id);
+  registry.plugins.forEach(({ name, tool }) => {
+    if (typeof tool.ids !== "function") return;
+    try {
+      for (const id of tool.ids(event, extOf(event, name)) || []) add(id);
+    } catch (_error) {
+      // A broken ids hook costs log lines, not the watch.
+    }
+  });
   return into;
 }
 
@@ -312,8 +301,8 @@ module.exports = {
   collectIDs,
   createReorderBuffer,
   formatOffset,
+  formatSeconds,
   formatTimelineEvent,
-  luTag,
   mentionsAny,
   parseLogLine,
 };

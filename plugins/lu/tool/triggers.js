@@ -1,31 +1,8 @@
 "use strict";
 
-// `e2e trigger` and the off-grid time flags of `e2e up`: argument parsing and
+// `e2e trigger` and the scenario step of the same name: argument parsing and
 // the line each trigger prints. The bridge owns every rule; this only shapes
 // requests and replies. Guide: docs/E2E-GRID-TESTING.md "Triggers".
-
-// xeve.js: both settings take 1 through 100. They change the ratios between
-// timers, so they suit smoke tests only; `e2e warp` keeps the ratios.
-const OFFGRID_FLAGS = Object.freeze([
-  { flag: "offgrid-travel", envVar: "EVEJS_LIVING_UNIVERSE_OFFGRID_TRAVEL_TIME_MULTIPLIER", name: "travel" },
-  { flag: "offgrid-activity", envVar: "EVEJS_LIVING_UNIVERSE_OFFGRID_ACTIVITY_TIME_MULTIPLIER", name: "activity" },
-]);
-
-function offGridMultipliers(flags = {}) {
-  const env = {};
-  const values = {};
-  for (const { flag, envVar, name } of OFFGRID_FLAGS) {
-    if (flags[flag] === undefined) continue;
-    const value = Number(flags[flag]);
-    if (!Number.isFinite(value) || value < 1 || value > 100) {
-      throw new Error(`--${flag} takes a number from 1 through 100`);
-    }
-    env[envVar] = String(value);
-    values[name] = value;
-  }
-  const text = Object.entries(values).map(([name, value]) => `${name} x${value}`).join(", ");
-  return { env, values: Object.keys(values).length ? values : null, text };
-}
 
 const TRIGGER_USAGE = [
   "e2e trigger scout [<system>] [--flight <flightID>]",
@@ -112,10 +89,119 @@ function formatTriggerReply(reply) {
   }
 }
 
+// ---------- the scenario step ----------
+
+// The keys a trigger step takes besides "trigger", "as", "retry" and "note".
+const TRIGGER_KEYS = Object.freeze({
+  scout: ["system", "flight"],
+  hunt: ["flight", "phase"],
+  fleet: ["family", "doctrine", "to", "count", "anchor"],
+  materialize: ["flight", "go"],
+  skirmish: ["count", "shipClass", "gap"],
+});
+
+// The flight or hunt IDs a trigger's reply names, for its `as` binding. A
+// fleet binds its flights first, then its owner ID (INCOMING ownerID=$fleet);
+// a hunt binds its hunt ID and its leader's flight.
+function triggerIDs(reply) {
+  if (!reply) return [];
+  switch (reply.trigger) {
+    case "scout":
+    case "materialize":
+      return [reply.flightID].filter(Boolean).map(String);
+    case "hunt":
+      return [reply.huntID, reply.flight && reply.flight.flightID].filter(Boolean).map(String);
+    case "fleet":
+      return [...(reply.flights || []).map((flight) => flight.flightID), reply.ownerID].filter(Boolean).map(String);
+    default:
+      return [];
+  }
+}
+
+// raw: { "trigger": "fleet", "family": "pirate", ... } -> { name, positionals, flags },
+// the same arguments `e2e trigger` takes. ctx (scenario.js): problem(key, message),
+// bound(value, key), resolveSystemID(text).
+function parseTriggerStep(raw, ctx) {
+  const name = raw.trigger;
+  if (!TRIGGER_KEYS[name]) {
+    ctx.problem(null, `unknown trigger "${name}"; triggers are ${Object.keys(TRIGGER_KEYS).join(", ")}`);
+    return null;
+  }
+  const positionals = [];
+  const flags = {};
+  if (name === "scout" && raw.system !== undefined) positionals.push(String(raw.system));
+  if (name === "fleet" && raw.family !== undefined) positionals.push(String(raw.family));
+  if (name === "materialize" && raw.flight !== undefined) positionals.push(String(raw.flight));
+  if (name !== "materialize" && raw.flight !== undefined) flags.flight = String(raw.flight);
+  if (raw.phase !== undefined) {
+    if (!["stalking", "committed"].includes(raw.phase)) ctx.problem("phase", "stalking or committed");
+    flags.phase = String(raw.phase);
+  }
+  for (const key of ["doctrine", "to"]) if (raw[key] !== undefined) flags[key] = String(raw[key]);
+  if (raw.count !== undefined) {
+    const most = name === "skirmish" ? 20 : 8;
+    if (!(Number.isInteger(raw.count) && raw.count >= 1 && raw.count <= most)) ctx.problem("count", `1 through ${most}`);
+    flags.count = raw.count;
+  }
+  if (raw.shipClass !== undefined) flags.class = String(raw.shipClass);
+  if (raw.gap !== undefined) {
+    if (!(typeof raw.gap === "number" && raw.gap >= 500 && raw.gap <= 200_000)) ctx.problem("gap", "500 through 200000 metres");
+    flags.gap = raw.gap;
+  }
+  if (raw.anchor !== undefined) flags.anchor = raw.anchor;
+  if (raw.go !== undefined) {
+    if (typeof raw.go !== "boolean") ctx.problem("go", "true or false");
+    else if (raw.go) flags.go = true;
+  }
+  ctx.bound(raw.flight, "flight");
+  try {
+    const flight = typeof raw.flight === "string" && raw.flight.startsWith("$") ? "living_flight_0" : null;
+    triggerRequest(name, flight && name === "materialize" ? [flight] : positionals,
+      flight && name !== "materialize" ? { ...flags, flight } : flags, { characterID: 0, resolveSystemID: ctx.resolveSystemID });
+  } catch (error) {
+    ctx.problem(null, error.message.split("\n")[0]);
+  }
+  return { name, positionals, flags };
+}
+
+function describeTriggerStep(step) {
+  const args = [...step.positionals, ...Object.entries(step.flags)
+    .map(([key, value]) => (value === true ? `--${key}` : `--${key} ${value}`))];
+  return `trigger ${step.name}${args.length ? ` ${args.join(" ")}` : ""}`;
+}
+
+// The e2e_lu_trigger MCP tool's arguments, in the scenario step's names.
+function triggerCliArgs(p) {
+  const args = ["trigger"];
+  const flag = (name, value) => {
+    if (value === undefined || value === null || value === false || value === "") return;
+    args.push(value === true ? `--${name}` : `--${name}=${value}`);
+  };
+  const positionals = [p.name];
+  if (p.name === "scout" && p.system !== undefined) positionals.push(String(p.system));
+  if (p.name === "fleet" && p.family !== undefined) positionals.push(String(p.family));
+  if (p.name === "materialize" && p.flight !== undefined) positionals.push(String(p.flight));
+  if (p.name !== "materialize") flag("flight", p.flight);
+  flag("phase", p.phase);
+  flag("doctrine", p.doctrine);
+  flag("to", p.to);
+  flag("count", p.count);
+  flag("anchor", p.anchor);
+  flag("go", p.go);
+  flag("class", p.shipClass);
+  flag("gap", p.gap);
+  flag("json", p.json);
+  args.push("--", ...positionals);
+  return args;
+}
+
 module.exports = {
-  OFFGRID_FLAGS,
+  TRIGGER_KEYS,
   TRIGGER_USAGE,
+  describeTriggerStep,
   formatTriggerReply,
-  offGridMultipliers,
+  parseTriggerStep,
+  triggerCliArgs,
+  triggerIDs,
   triggerRequest,
 };

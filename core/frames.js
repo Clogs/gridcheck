@@ -14,6 +14,7 @@ const path = require("node:path");
 
 const { formatDistance } = require("./format");
 const { formatOffset, formatTimelineEvent } = require("./timeline");
+const { defaultRegistry, extOf } = require("./plugins");
 
 const MAX_FRAMES = 40;
 // A key event uses the newest POS at or before it, else the first after it
@@ -25,9 +26,10 @@ const TRACKED = new Set(["ship", "drone", "fighter", "wreck", "container", "stru
 const MOVING_MODES = new Set(["ORBIT", "FOLLOW", "APPROACH"]);
 
 const SIZE = Object.freeze({ width: 1100, height: 760, plot: 640, left: 20, top: 74, legendX: 684 });
+// Plugins add colours for their own balls (registry.colours).
 const COLOURS = Object.freeze({
   self: "#1f6feb",
-  pirate: "#d1242f",
+  hostile: "#d1242f",
   concord: "#bf8700",
   drifter: "#8250df",
   player: "#1a7f37",
@@ -143,19 +145,39 @@ function positionsFor(positions, atMs) {
   return null;
 }
 
-function colourFor(ball, palette) {
+// A plugin's data on a POS ball, at ball.ext.<plugin>; balls written before
+// the watch wrote ext carry it flat.
+function ballData(ball, plugin) {
+  return extOf(ball, plugin) || ball;
+}
+
+// A colour rule matches when every field it names has that value in the
+// plugin's data on the ball.
+function ruleMatches(rule, ball) {
+  const data = ballData(ball, rule.plugin);
+  return Object.entries(rule.match).every(([field, value]) => data && String(data[field]) === String(value));
+}
+
+function colourFor(ball, palette, registry) {
   if (ball.who === "self") return COLOURS.self;
-  if (ball.who === "concord" || ball.family === "concord") return COLOURS.concord;
+  if (ball.who === "concord") return COLOURS.concord;
   if (ball.who === "drifter") return COLOURS.drifter;
   if (ball.who === "player") return COLOURS.player;
-  if (ball.family === "pirate") return COLOURS.pirate;
+  const rule = registry.colours.find((entry) => ruleMatches(entry, ball));
+  if (rule) return rule.colour;
   if (!ball.who) return COLOURS.neutral;
-  // Any other NPC: one colour per flight, so two sides of a fight differ.
-  // With no flight, family or corporation (a skirmish wing spawned with the war
-  // off), the name's first word is the side: "OTSC Raider", "UEMD Defender".
+  // Any other NPC: one colour per group, so two sides of a fight differ.
+  // With no group or corporation (a skirmish wing spawned with the war off),
+  // the name's first word is the side: "OTSC Raider", "UEMD Defender".
   const key = ball.flightID || ball.family || (ball.corp ? `corp:${ball.corp}` : `name:${String(ball.label || "").split(" ")[0]}`);
   if (!palette.has(key)) palette.set(key, COLOURS.others[palette.size % COLOURS.others.length]);
   return palette.get(key);
+}
+
+// The legend's colour line: the core's, then each plugin's labelled colours.
+function colourKey(registry) {
+  const labels = registry.colours.map((rule) => rule.label).filter(Boolean);
+  return ["Blue self", ...labels, "gold CONCORD", "green player", "other NPCs"].join(", ");
 }
 
 function niceLength(target) {
@@ -181,7 +203,7 @@ function shipShape(x, y, r, colour, ball) {
 }
 
 // One frame as SVG text. key: { reason, event, stop?, alsoStop? }.
-function renderFrame(pos, key, { index = 1, system = null } = {}) {
+function renderFrame(pos, key, { index = 1, system = null, registry = defaultRegistry() } = {}) {
   const balls = Array.isArray(pos.balls) ? pos.balls : [];
   const byID = new Map(balls.map((ball) => [ball.id, ball]));
   const self = byID.get(pos.selfID) || null;
@@ -216,7 +238,7 @@ function renderFrame(pos, key, { index = 1, system = null } = {}) {
   const round = (value) => Math.round(value * 10) / 10;
 
   const palette = new Map();
-  const colour = new Map(balls.map((ball) => [ball.id, colourFor(ball, palette)]));
+  const colour = new Map(balls.map((ball) => [ball.id, colourFor(ball, palette, registry)]));
   const tracked = balls.filter((ball) => TRACKED.has(ball.kind));
   const order = [...tracked].sort((a, b) => (focus.has(b.id) - focus.has(a.id)) ||
     (a.who === "self" ? -1 : b.who === "self" ? 1 : 0) || planar(a) - planar(b));
@@ -232,12 +254,12 @@ function renderFrame(pos, key, { index = 1, system = null } = {}) {
   out.push(`<text x="${left}" y="24" font-size="15" font-weight="bold">${escapeXml(clip(
     `${String(index).padStart(2, "0")}  ${where}  ${formatOffset(key.event.t)}  ${why}`, 110))}</text>`);
   const line = key.reason === "stop" && key.stop && key.event === key.stop
-    ? formatTimelineEvent(key.stop)
-    : `${formatTimelineEvent(key.event)}${key.also && key.also.length ? `  (+${key.also.length} more arriving)` : ""}`;
+    ? formatTimelineEvent(key.stop, registry)
+    : `${formatTimelineEvent(key.event, registry)}${key.also && key.also.length ? `  (+${key.also.length} more arriving)` : ""}`;
   out.push(`<text x="${left}" y="44">${escapeXml(clip(line, 150))}</text>`);
   const stopEvent = key.stop || key.alsoStop;
   if (stopEvent && stopEvent !== key.event) {
-    out.push(`<text x="${left}" y="60">${escapeXml(clip(formatTimelineEvent(stopEvent), 150))}</text>`);
+    out.push(`<text x="${left}" y="60">${escapeXml(clip(formatTimelineEvent(stopEvent, registry), 150))}</text>`);
   }
 
   out.push(`<rect x="${left}" y="${top}" width="${plot}" height="${plot}" fill="#f6f8fa" stroke="#d0d7de"/>`);
@@ -264,7 +286,7 @@ function renderFrame(pos, key, { index = 1, system = null } = {}) {
       const keyLock = key.event.kind === "TARGET" && key.event.sourceID === ball.id && key.event.targetID === lockID;
       const onSelf = lockID === pos.selfID;
       out.push(`<line x1="${round(from.x)}" y1="${round(from.y)}" x2="${round(to.x)}" y2="${round(to.y)}" ` +
-        `stroke="${onSelf ? COLOURS.pirate : colour.get(ball.id)}" stroke-width="${keyLock ? 2.6 : 1.1}" stroke-opacity="${keyLock ? 0.95 : 0.7}"/>`);
+        `stroke="${onSelf ? COLOURS.hostile : colour.get(ball.id)}" stroke-width="${keyLock ? 2.6 : 1.1}" stroke-opacity="${keyLock ? 0.95 : 0.7}"/>`);
     }
   }
   // Labels step down until they clear the ones already placed.
@@ -383,8 +405,8 @@ function renderFrame(pos, key, { index = 1, system = null } = {}) {
     }
   }
   const keyY = top + plot - 44;
-  out.push(`<text x="${legendX}" y="${keyY}" fill="#57606a">Blue self, red pirate, gold CONCORD, green player, other NPCs</text>`);
-  out.push(`<text x="${legendX}" y="${keyY + 14}" fill="#57606a">one colour per flight; grey squares are celestials. Ringed: what</text>`);
+  out.push(`<text x="${legendX}" y="${keyY}" fill="#57606a">${escapeXml(clip(colourKey(registry), 66))}</text>`);
+  out.push(`<text x="${legendX}" y="${keyY + 14}" fill="#57606a">one colour per group; grey squares are celestials. Ringed: what</text>`);
   out.push(`<text x="${legendX}" y="${keyY + 28}" fill="#57606a">the frame is about. Solid line: a lock; dashed: orbit or follow.</text>`);
 
   const lagMs = pos.atMs - (key.event.atMs || pos.atMs);
@@ -402,8 +424,10 @@ function renderFrame(pos, key, { index = 1, system = null } = {}) {
   return { svg: `${out.join("\n")}\n`, halfMeters: half, balls: balls.length, focus: [...focus] };
 }
 
-// Every frame a timeline asks for, without writing anything.
+// Every frame a timeline asks for, without writing anything. options:
+// maxFrames, and registry (the plugins', for colours and event lines).
 function buildFrames(events, options = {}) {
+  const registry = options.registry || defaultRegistry();
   const positions = events.filter((event) => event.kind === "POS");
   const { keys, skipped } = selectKeyEvents(events, options);
   const frames = [];
@@ -412,11 +436,11 @@ function buildFrames(events, options = {}) {
     const atMs = Number(key.event.atMs) || 0;
     const pos = positionsFor(positions, atMs);
     if (!pos) {
-      unplaced.push({ reason: key.reason, t: key.event.t, line: formatTimelineEvent(key.event) });
+      unplaced.push({ reason: key.reason, t: key.event.t, line: formatTimelineEvent(key.event, registry) });
       continue;
     }
     const index = frames.length + 1;
-    const drawn = renderFrame(pos, key, { index });
+    const drawn = renderFrame(pos, key, { index, registry });
     const name = `${String(index).padStart(2, "0")}-${key.reason}-${slug(key.what)}.svg`;
     frames.push({
       file: name,
@@ -425,7 +449,7 @@ function buildFrames(events, options = {}) {
       stop: Boolean(key.stop || key.alsoStop),
       t: key.event.t,
       seq: key.event.seq === undefined ? null : key.event.seq,
-      line: formatTimelineEvent(key.reason === "stop" && key.stop === key.event ? key.stop : key.event),
+      line: formatTimelineEvent(key.reason === "stop" && key.stop === key.event ? key.stop : key.event, registry),
       positionsT: pos.t,
       lagMs: pos.atMs - atMs,
       balls: drawn.balls,

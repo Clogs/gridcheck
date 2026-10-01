@@ -26,21 +26,29 @@ test("a tree's port block is stable, below the ephemeral range and overridable",
   assert.throws(() => ports.slotForTree("x", { EVEJS_E2E_PORT_SLOT: "800" }), /0 to 799/);
 });
 
-test("the server environment moves every configurable listener onto the block", () => {
-  const block = ports.portsForSlot(0);
-  const env = ports.serverEnvironment(block);
-  assert.deepStrictEqual(env, {
+test("the server environment moves every configurable listener onto the block, plugin listeners included", () => {
+  const core = {
     EVEJS_SERVER_PORT: "30000",
     EVEJS_IMAGE_SERVER_URL: "http://127.0.0.1:30001/",
     EVEJS_MICROSERVICES_PORT: "30002",
     EVEJS_MICROSERVICES_PUBLIC_URL: "http://127.0.0.1:30002/",
     EVEJS_PROXY_LOOPBACK_CDN_LISTEN_PORT: "30004",
     EVEJS_REDSHIFT_MONITOR_PORT: "30005",
-    EVEJS_LU_MONITOR_BRIDGE_PORT: "30006",
     EVEJS_AGENT_BRIDGE_PORT: "30007",
     EVEJS_MARKET_DAEMON_PORT: "30009",
     EVEJS_XMPP_SERVER_PORT: "30010",
-  });
+  };
+  assert.deepStrictEqual(ports.serverEnvironment(ports.portsForSlot(0)), core);
+  const listeners = [
+    { name: "luMonitor", offset: 6, env: "EVEJS_LU_MONITOR_BRIDGE_PORT" },
+    { name: "clash", offset: 7, env: "TAKEN" },
+    { name: "outside", offset: 20, env: "OUTSIDE" },
+  ];
+  assert.deepStrictEqual(ports.usableListeners(listeners).map((listener) => listener.name), ["luMonitor"],
+    "a plugin can't take a core offset or one outside the block");
+  const block = ports.portsForSlot(0, listeners);
+  assert.strictEqual(block.luMonitor, 30006);
+  assert.deepStrictEqual(ports.serverEnvironment(block, listeners), { ...core, EVEJS_LU_MONITOR_BRIDGE_PORT: "30006" });
 });
 
 test("the market config keeps the tracked file and swaps ports and database", () => {
@@ -126,7 +134,8 @@ test("save, list and restore round-trip the world and its market", () => {
     assert.deepStrictEqual(worlds.listWorlds(root).map((row) => [row.name, row.market, row.note]), [
       ["lowsec-docked", true, "Rifter in Amamake"],
     ]);
-    worlds.restoreWorld(root, "lowsec-docked");
+    const restored = worlds.restoreWorld(root, "lowsec-docked");
+    assert.deepStrictEqual(restored.notes, [], "no plugin hooks, no notes");
     assert.strictEqual(fs.existsSync(`${paths.world}-wal`), false);
     assert.deepStrictEqual(readMarker(paths.world), { value: "tree" });
     assert.deepStrictEqual(readMarker(paths.market, "orders"), { tree: "tree" });
@@ -135,6 +144,34 @@ test("save, list and restore round-trip the world and its market", () => {
     worlds.freshWorld(root);
     assert.strictEqual(fs.existsSync(paths.world), false);
     assert.strictEqual(fs.existsSync(paths.manifest), true, "a fresh world keeps the manifest");
+  } finally {
+    fs.rmSync(scratch, { recursive: true, force: true });
+  }
+});
+
+test("plugin world hooks keep their data in world.json and see it again on restore", () => {
+  const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "e2e-worlds-"));
+  try {
+    const root = path.join(scratch, "tree");
+    const paths = makeTree(root, { market: false });
+    const seen = [];
+    const hooks = [{
+      plugin: "demo",
+      onSave: ({ world, name }) => ({ world: path.basename(world), name }),
+      onRestore: (ctx) => {
+        seen.push(ctx);
+        return ctx.options.fast ? "restored fast" : null;
+      },
+    }];
+    const saved = worlds.saveWorld(root, "w1", { hooks });
+    assert.deepStrictEqual(saved.ext, { demo: { world: "gamestore.sqlite", name: "w1" } });
+    const restored = worlds.restoreWorld(root, "w1", { hooks, options: { fast: true } });
+    assert.deepStrictEqual(restored.notes, ["restored fast"]);
+    assert.strictEqual(seen[0].world, paths.world);
+    assert.strictEqual(seen[0].source, path.join(saved.dir, "gamestore.sqlite"));
+    assert.deepStrictEqual(seen[0].saved.ext, { demo: { world: "gamestore.sqlite", name: "w1" } });
+    const broken = [{ plugin: "bad", onRestore: () => { throw new Error("no table"); } }];
+    assert.throws(() => worlds.restoreWorld(root, "w1", { hooks: broken }), /plugin bad: world onRestore failed: no table/);
   } finally {
     fs.rmSync(scratch, { recursive: true, force: true });
   }

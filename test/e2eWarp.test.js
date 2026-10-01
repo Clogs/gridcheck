@@ -1,8 +1,8 @@
 "use strict";
 
-// plugins/lu/tool/warp.js and the world marker in core/worlds.js: durations, the
-// economy report a warp writes, the fidelity comparison, and the clock row a
-// restored world gets.
+// plugins/lu/tool/warp.js and the world marker in plugins/lu/tool/world.js:
+// durations, the economy report a warp writes, the fidelity comparison, and
+// the clock row a restored world gets.
 
 const test = require("node:test");
 const assert = require("node:assert/strict");
@@ -11,7 +11,7 @@ const os = require("node:os");
 const path = require("node:path");
 
 const warp = require("../plugins/lu/tool/warp");
-const worlds = require("../core/worlds");
+const worlds = require("../plugins/lu/tool/world");
 
 test("durations read ms, s, m, h and d, and bare numbers are seconds", () => {
   assert.equal(warp.parseDuration("24h"), 86_400_000);
@@ -131,6 +131,22 @@ test("marking keeps an offset the world already has, and a world's time includes
   assert.equal(real.offsetMs, 0);
   assert.equal(real.resumeAtSimMs, null);
   assert.equal(worlds.readSimClock(file).offsetMs, 0);
+});
+
+test("the world hooks: a save records the clock, a restore marks the copy from it", (t) => {
+  const { dir, file } = scratchWorld();
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const { savedSimNowMs } = worlds.worldHooks.onSave({ world: file });
+  assert.ok(Math.abs(savedSimNowMs - fs.statSync(file).mtimeMs) < 2, "no offset yet: the last write");
+  const note = worlds.worldHooks.onRestore({ world: file, source: file, name: "econ",
+    saved: { ext: { lu: { savedSimNowMs: 42_000 } } }, options: {} });
+  assert.equal(note, null);
+  assert.equal(worlds.readSimClock(file).resumeAtSimMs, 42_000);
+  worlds.worldHooks.onRestore({ world: file, source: file, name: "old", saved: { savedSimNowMs: 7_000 }, options: {} });
+  assert.equal(worlds.readSimClock(file).resumeAtSimMs, 7_000, "a world saved before plugins kept it at the top");
+  assert.match(worlds.worldHooks.onRestore({ world: file, source: file, name: "grid", saved: {}, options: { realClock: true } }),
+    /clock at real time/);
+  assert.equal(worlds.readSimClock(file).resumeAtSimMs, null);
 });
 
 test("a world with no Living Universe table is left unmarked", (t) => {

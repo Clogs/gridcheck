@@ -114,11 +114,30 @@ function copyWorld(treeRoot, fromTree, { force = false } = {}) {
   return { source: source.world, bytes: fs.statSync(here.world).size, cleared, market };
 }
 
-function saveWorld(treeRoot, name, { force = false, note = "" } = {}) {
+// hooks: the plugins' world hooks (core/plugins.js registry.worldHooks).
+//   onSave({ world, name }) -> data kept in world.json at ext.<plugin>
+//   onRestore({ world, source, name, saved, options }) -> a note for the user, or null
+// `world` is this tree's game store, `source` the saved copy, `saved` the
+// saved world.json, `options` the `e2e up` flags the plugins declared.
+function runHook(hook, method, ctx) {
+  if (typeof hook[method] !== "function") return null;
+  try {
+    return hook[method](ctx);
+  } catch (error) {
+    throw new Error(`plugin ${hook.plugin}: world ${method} failed: ${error.message}`);
+  }
+}
+
+function saveWorld(treeRoot, name, { force = false, note = "", hooks = [] } = {}) {
   const here = worldPaths(treeRoot);
   requireWorld(here, "this tree");
   const dir = savedWorldDir(treeRoot, name);
   if (fs.existsSync(dir) && !force) throw new Error(`saved world ${name} exists; pass --force to replace it`);
+  const ext = {};
+  for (const hook of hooks) {
+    const data = runHook(hook, "onSave", { world: here.world, name });
+    if (data && typeof data === "object") ext[hook.plugin] = data;
+  }
   const staging = `${dir}.saving`;
   fs.rmSync(staging, { recursive: true, force: true });
   fs.mkdirSync(staging, { recursive: true });
@@ -130,10 +149,10 @@ function saveWorld(treeRoot, name, { force = false, note = "" } = {}) {
   const info = {
     name,
     savedAt: new Date().toISOString(),
-    savedSimNowMs: worldSimNowMs(here.world),
     tree: treeRoot,
     market,
     note: String(note || ""),
+    ...(Object.keys(ext).length ? { ext } : {}),
   };
   fs.writeFileSync(path.join(staging, "world.json"), `${JSON.stringify(info, null, 2)}\n`);
   fs.rmSync(dir, { recursive: true, force: true });
@@ -141,81 +160,9 @@ function saveWorld(treeRoot, name, { force = false, note = "" } = {}) {
   return { ...info, dir, bytes: dirBytes(dir) };
 }
 
-// The Living Universe clock's row (server/src/space/npc/ambientTraffic/livingSimClock.js).
-// Only a world restored from _local/e2e/worlds/ carries e2eWorld, and the server
-// refuses to warp any other, so dev's world never gets a clock offset. An offset
-// the saved world already has is kept: its stored deadlines are in that time.
-const SIM_CLOCK_TABLE = "npcRuntimeState";
-const SIM_CLOCK_KEY = "livingSimClock";
-
-function readSimClockRow(db) {
-  const exists = db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(SIM_CLOCK_TABLE);
-  if (!exists) return { exists: false, row: null };
-  const found = db.prepare(`SELECT json FROM "${SIM_CLOCK_TABLE}" WHERE key = ?`).get(SIM_CLOCK_KEY);
-  let row = null;
-  try {
-    row = found ? JSON.parse(found.json) : null;
-  } catch (_error) {
-    row = null;
-  }
-  return { exists: true, row };
-}
-
-// The Living Universe time a stopped world had reached: its last write, which is
-// the shutdown flush, on its own clock.
-function worldSimNowMs(file) {
-  let lastWriteMs = 0;
-  for (const suffix of ["", "-wal"]) {
-    try {
-      lastWriteMs = Math.max(lastWriteMs, fs.statSync(`${file}${suffix}`).mtimeMs);
-    } catch (_error) {
-      // No WAL beside a snapshot.
-    }
-  }
-  if (!lastWriteMs) return 0;
-  const row = readSimClock(file);
-  const offsetMs = row && Number.isFinite(Number(row.offsetMs)) ? Number(row.offsetMs) : 0;
-  return Math.round(lastWriteMs + offsetMs);
-}
-
-// realClock: the clock runs at real time from this boot, offset 0, so on-grid and
-// Living Universe times agree; stored deadlines come back as overdue as the copy is old.
-function markE2eWorld(file, savedWorld, { resumeAtSimMs = 0, realClock = false } = {}) {
-  const db = openDatabase(file);
-  try {
-    const { exists, row } = readSimClockRow(db);
-    if (!exists) return null;
-    const next = {
-      offsetMs: 0,
-      ...(row && typeof row === "object" ? row : {}),
-      e2eWorld: true,
-      savedWorld: String(savedWorld || ""),
-      markedAtMs: Date.now(),
-      resumeAtSimMs: !realClock && Number(resumeAtSimMs) > 0 ? Math.round(Number(resumeAtSimMs)) : null,
-      ...(realClock ? { offsetMs: 0 } : {}),
-    };
-    db.prepare(`INSERT INTO "${SIM_CLOCK_TABLE}" (key, json) VALUES (?, ?) ` +
-      "ON CONFLICT(key) DO UPDATE SET json = excluded.json").run(SIM_CLOCK_KEY, JSON.stringify(next));
-    return next;
-  } finally {
-    db.close();
-  }
-}
-
-// What a world file says about its clock, read only.
-function readSimClock(file) {
-  if (!fs.existsSync(file)) return null;
-  const db = openDatabase(file, { readOnly: true });
-  try {
-    return readSimClockRow(db).row;
-  } finally {
-    db.close();
-  }
-}
-
 // Replace this tree's world with a saved one. A saved world without a market
 // leaves this tree's market as it is.
-function restoreWorld(treeRoot, name, { realClock = false } = {}) {
+function restoreWorld(treeRoot, name, { hooks = [], options = {} } = {}) {
   const here = worldPaths(treeRoot);
   const dir = savedWorldDir(treeRoot, name);
   const world = path.join(dir, "gamestore.sqlite");
@@ -226,14 +173,17 @@ function restoreWorld(treeRoot, name, { realClock = false } = {}) {
   fs.mkdirSync(path.dirname(here.world), { recursive: true });
   removeSqlite(here.world);
   fs.copyFileSync(world, here.world);
-  let info = {};
+  let saved = {};
   try {
-    info = JSON.parse(fs.readFileSync(path.join(dir, "world.json"), "utf8"));
+    saved = JSON.parse(fs.readFileSync(path.join(dir, "world.json"), "utf8"));
   } catch (_error) {
-    // A hand-made folder: resume from the copy's own time.
+    // A hand-made folder: the hooks read the copy itself.
   }
-  const resumeAtSimMs = Number(info.savedSimNowMs) > 0 ? Number(info.savedSimNowMs) : worldSimNowMs(world);
-  markE2eWorld(here.world, name, { resumeAtSimMs, realClock });
+  const notes = [];
+  for (const hook of hooks) {
+    const note = runHook(hook, "onRestore", { world: here.world, source: world, name, saved, options });
+    if (note) notes.push(String(note));
+  }
   fs.copyFileSync(path.join(dir, "manifest.json"), here.manifest);
   const market = path.join(dir, "market.sqlite");
   const restoredMarket = fs.existsSync(market);
@@ -242,7 +192,7 @@ function restoreWorld(treeRoot, name, { realClock = false } = {}) {
     removeSqlite(here.market);
     fs.copyFileSync(market, here.market);
   }
-  return { name, market: restoredMarket };
+  return { name, market: restoredMarket, notes };
 }
 
 // A fresh world: drop the game store and let the next boot seed it from the
@@ -285,9 +235,6 @@ module.exports = {
   freshWorld,
   listWorlds,
   liveLeases,
-  markE2eWorld,
-  readSimClock,
-  worldSimNowMs,
   restoreWorld,
   saveWorld,
   savedWorldDir,

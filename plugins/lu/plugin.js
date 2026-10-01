@@ -20,4 +20,8 @@ module.exports = {
   server(ctx) {
     return require("./server").createLuServer(ctx);
   },
+  // Plain functions and data, no mod code: the CLI and the MCP server read it.
+  get tool() {
+    return require("./tool");
+  },
 };

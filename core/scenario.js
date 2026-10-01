@@ -2,16 +2,17 @@
 
 // `e2e run <scenario>`: scenario files, their checks, the run itself and its
 // report. A scenario names a saved world, setup steps, stop conditions and
-// expectations (tools/evejs-e2e/scenarios/*.json). The server calls come in as
-// `ops`, so the run can be tested without a server. Guide:
-// docs/E2E-GRID-TESTING.md "Scenarios".
+// expectations (tools/evejs-e2e/scenarios/*.json, and each plugin's
+// plugins/<name>/scenarios/). Plugins add steps and `up` options through the
+// registry (core/plugins.js). The server calls come in as `ops`, so the run
+// can be tested without a server. Guide: docs/E2E-GRID-TESTING.md "Scenarios".
 
 const fs = require("node:fs");
 const path = require("node:path");
 
 const { parseCondition } = require("./conditions");
+const { defaultRegistry } = require("./plugins");
 const { formatOffset, formatTimelineEvent } = require("./timeline");
-const triggerTools = require("../plugins/lu/tool/triggers");
 const actionTools = require("./actions");
 
 const SCENARIO_DIR = path.join(__dirname, "..", "scenarios");
@@ -22,38 +23,35 @@ const SCENARIO_DIR = path.join(__dirname, "..", "scenarios");
 const BUDGET_SECONDS = 3000;
 
 const TOP_KEYS = new Set(["name", "description", "world", "up", "setup", "during", "watch", "until", "expect"]);
-const UP_KEYS = new Set(["realClock", "market", "offgridTravel", "offgridActivity", "timeout"]);
+const CORE_UP_KEYS = ["market", "timeout"];
 const WATCH_KEYS = new Set(["every", "offgridEvery", "client", "divergeMeters", "log", "grep"]);
 const UNTIL_KEYS = new Set(["any", "timeout", "grace", "from"]);
 const UNTIL_FROM = ["setup", "start"];
 const EXPECT_KEYS = new Set(["match", "absent", "note"]);
 
-// Player actions (actions.js) are steps too, in setup and in `during`.
-const STEP_TYPES = ["login", "undock", "dock", "slash", "teleport", "trigger", "wait", "waitFor", ...actionTools.ACTION_TYPES];
+// Core steps and the keys each takes. Player actions (actions.js) are steps
+// too, in setup and in `during`. Plugin steps (registry.steps) take their own
+// keys, plus "as" when they bind and "retry" when they may be tried again:
+//   { binds, retries, keys(raw) -> [key], parse(raw, ctx) -> fields, describe(step), run(step, io) }
+// ctx: problem(key|null, message), bound(value, key), resolveSystemID(text).
 const ACTION_STEP_KEYS = (type) => {
   const spec = actionTools.ACTIONS[type];
   return [type, "as", "retry",
     ...(spec.target === "optional" ? ["target"] : []),
     ...["range", "once", "timeout", "charge", "count"].filter((key) => spec[key] !== undefined)];
 };
-const STEP_KEYS = {
+const CORE_STEP_KEYS = {
   login: ["login"],
   undock: ["undock"],
   dock: ["dock"],
   slash: ["slash"],
-  teleport: ["teleport", "flight"],
-  trigger: ["trigger", "as", "retry"],
+  teleport: ["teleport"],
   wait: ["wait"],
   waitFor: ["waitFor", "timeout"],
   ...Object.fromEntries(actionTools.ACTION_TYPES.map((type) => [type, ACTION_STEP_KEYS(type)])),
 };
-const TRIGGER_KEYS = {
-  scout: ["system", "flight"],
-  hunt: ["flight", "phase"],
-  fleet: ["family", "doctrine", "to", "count", "anchor"],
-  materialize: ["flight", "go"],
-  skirmish: ["count", "shipClass", "gap"],
-};
+// What a step keeps that is not a $value to bind at run time.
+const STEP_OWN_KEYS = new Set(["type", "note", "as", "retry", "implicit", "action", "condition", "seconds", "plugin"]);
 const DEFAULT_WAIT_FOR_SECONDS = 300;
 
 class ScenarioError extends Error {
@@ -66,68 +64,80 @@ class ScenarioError extends Error {
 const isObject = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
 const positive = (value) => typeof value === "number" && Number.isFinite(value) && value > 0;
 
-// The flight or hunt IDs a trigger's reply names, for its `as` binding. A
-// fleet binds its flights first, then its owner ID (INCOMING ownerID=$fleet);
-// a hunt binds its hunt ID and its leader's flight.
-function triggerIDs(reply) {
-  if (!reply) return [];
-  switch (reply.trigger) {
-    case "scout":
-    case "materialize":
-      return [reply.flightID].filter(Boolean).map(String);
-    case "hunt":
-      return [reply.huntID, reply.flight && reply.flight.flightID].filter(Boolean).map(String);
-    case "fleet":
-      return [...(reply.flights || []).map((flight) => flight.flightID), reply.ownerID].filter(Boolean).map(String);
-    default:
-      return [];
-  }
+// The plugin steps a registry adds, without any that would shadow a core step.
+function pluginSteps(registry) {
+  return Object.fromEntries(Object.entries(registry.steps).filter(([name]) => CORE_STEP_KEYS[name] === undefined));
 }
 
-// A step with its $names replaced by the first ID each binding holds.
+function stepTypes(registry) {
+  return [...Object.keys(CORE_STEP_KEYS), ...Object.keys(pluginSteps(registry))];
+}
+
+// A step with its $names replaced by the first ID each binding holds. Player
+// actions resolve their own targets against the grid, so they are left alone.
 function bindStep(step, bindings) {
   const resolve = (value) => {
-    if (typeof value !== "string" || !value.startsWith("$")) return value;
-    const ids = bindings[value.slice(1)];
-    if (!ids || !ids.length) throw new Error(`${value} is not bound yet`);
-    return ids[0];
+    if (typeof value === "string") {
+      if (!value.startsWith("$")) return value;
+      const ids = bindings[value.slice(1)];
+      if (!ids || !ids.length) throw new Error(`${value} is not bound yet`);
+      return ids[0];
+    }
+    if (Array.isArray(value)) return value.map(resolve);
+    if (isObject(value)) return Object.fromEntries(Object.entries(value).map(([key, inner]) => [key, resolve(inner)]));
+    return value;
   };
   const bound = { ...step };
-  if (step.flight !== undefined) bound.flight = resolve(step.flight);
-  if (step.positionals) bound.positionals = step.positionals.map(resolve);
-  if (step.flags) bound.flags = Object.fromEntries(Object.entries(step.flags).map(([key, value]) => [key, resolve(value)]));
+  for (const [key, value] of Object.entries(step)) {
+    if (!STEP_OWN_KEYS.has(key)) bound[key] = resolve(value);
+  }
   return bound;
 }
 
-function describeStep(step) {
+function suffixes(step) {
+  return `${step.as ? ` as $${step.as}` : ""}` +
+    `${step.retry ? ` (retry every ${step.retry.every}s for ${step.retry.for}s)` : ""}`;
+}
+
+function describeStep(step, registry = defaultRegistry()) {
   switch (step.type) {
     case "login": return `login${step.user ? ` ${step.user}` : ""}${step.name ? ` "${step.name}"` : ""}`;
     case "undock":
     case "dock": return step.type;
     case "slash": return `slash ${step.command}`;
-    case "teleport": return `teleport ${step.system}${step.flight ? ` --flight ${step.flight}` : ""}`;
-    case "trigger": {
-      const args = [...step.positionals, ...Object.entries(step.flags)
-        .map(([key, value]) => (value === true ? `--${key}` : `--${key} ${value}`))];
-      return `trigger ${step.name}${args.length ? ` ${args.join(" ")}` : ""}${step.as ? ` as $${step.as}` : ""}` +
-        `${step.retry ? ` (retry every ${step.retry.every}s for ${step.retry.for}s)` : ""}`;
-    }
+    case "teleport": return `teleport ${step.system}`;
     case "wait": return `wait ${step.seconds}s`;
     case "waitFor": return `waitFor ${step.condition.text} (up to ${step.seconds}s)`;
-    default:
-      if (step.action) {
-        return `${actionTools.describeAction(step.action)}${step.as ? ` as $${step.as}` : ""}` +
-          `${step.retry ? ` (retry every ${step.retry.every}s for ${step.retry.for}s)` : ""}`;
+    default: {
+      if (step.action) return `${actionTools.describeAction(step.action)}${suffixes(step)}`;
+      const spec = registry.steps[step.type];
+      if (spec && typeof spec.describe === "function") {
+        try {
+          return `${spec.describe(step)}${suffixes(step)}`;
+        } catch (_error) {
+          // Fall back on the type.
+        }
       }
       return step.type;
+    }
   }
+}
+
+// The `up` options a scenario takes: the core's and the plugins' upFlags.
+function upDefaults(registry) {
+  const up = { market: true, timeout: null };
+  for (const flag of registry.upFlags) up[flag.key] = flag.scenarioDefault === undefined ? null : flag.scenarioDefault;
+  return up;
 }
 
 // raw JSON -> a checked scenario, or a ScenarioError listing every problem.
 // `context.worldExists(name)` and `context.resolveSystemID(text)` come from
-// the CLI, which knows the tree; tests pass stubs.
+// the CLI, which knows the tree; tests pass stubs. `context.registry` is the
+// plugins' (core/plugins.js), by default this tree's.
 function validateScenario(raw, { source = "scenario", defaultName = null, worldExists = () => true,
-  resolveSystemID = (text) => text } = {}) {
+  resolveSystemID = (text) => text, registry = defaultRegistry() } = {}) {
+  const extraSteps = pluginSteps(registry);
+  const types = stepTypes(registry);
   const problems = [];
   const problem = (where, message) => problems.push(`${where}: ${message}`);
   if (!isObject(raw)) throw new ScenarioError(source, ["a scenario is a JSON object"]);
@@ -147,16 +157,19 @@ function validateScenario(raw, { source = "scenario", defaultName = null, worldE
     problem("world", `no saved world "${raw.world}" in _local/e2e/worlds/ (e2e world list)`);
   }
 
-  const up = { realClock: true, market: true, offgridTravel: null, offgridActivity: null, timeout: null };
+  const up = upDefaults(registry);
+  const upFlags = new Map(registry.upFlags.map((flag) => [flag.key, flag]));
+  const upKeys = [...CORE_UP_KEYS, ...upFlags.keys()];
   if (raw.up !== undefined) {
     if (!isObject(raw.up)) {
       problem("up", "an object");
     } else {
       for (const [key, value] of Object.entries(raw.up)) {
-        if (!UP_KEYS.has(key)) problem(`up.${key}`, `unknown key; up takes ${[...UP_KEYS].join(", ")}`);
-        else if ((key === "realClock" || key === "market") && typeof value !== "boolean") problem(`up.${key}`, "true or false");
-        else if ((key === "offgridTravel" || key === "offgridActivity") && !(typeof value === "number" && value >= 1 && value <= 100)) {
-          problem(`up.${key}`, "a number from 1 through 100");
+        const flag = upFlags.get(key);
+        if (!upKeys.includes(key)) problem(`up.${key}`, `unknown key; up takes ${upKeys.join(", ")}`);
+        else if ((key === "market" || (flag && flag.type === "bool")) && typeof value !== "boolean") problem(`up.${key}`, "true or false");
+        else if (flag && flag.type === "number" && !(typeof value === "number" && value >= flag.min && value <= flag.max)) {
+          problem(`up.${key}`, `a number from ${flag.min} through ${flag.max}`);
         } else if (key === "timeout" && !positive(value)) problem("up.timeout", "seconds, above 0");
         else up[key] = value;
       }
@@ -190,7 +203,7 @@ function validateScenario(raw, { source = "scenario", defaultName = null, worldE
   const bindings = new Set();
   const condition = (where, text) => {
     try {
-      const parsed = parseCondition(text, { bindings });
+      const parsed = parseCondition(text, { bindings, registry });
       if (parsed.kind === "CLIENT" && watch.client !== "all") {
         problem(where, `CLIENT needs "watch": { "client": "all" } (now ${watch.client})`);
       } else if (parsed.kind === "FX" && !["all", "fx"].includes(watch.client)) {
@@ -231,24 +244,68 @@ function validateScenario(raw, { source = "scenario", defaultName = null, worldE
         problem(where, "a step name or an object");
         return;
       }
-      const types = STEP_TYPES.filter((type) => rawStep[type] !== undefined);
-      if (types.length !== 1) {
-        problem(where, types.length ? `one step per entry, not ${types.join(" and ")}` :
-          `unknown step; steps are ${STEP_TYPES.join(", ")}`);
+      const present = types.filter((type) => rawStep[type] !== undefined);
+      if (present.length !== 1) {
+        problem(where, present.length ? `one step per entry, not ${present.join(" and ")}` :
+          `unknown step; steps are ${types.join(", ")}`);
         return;
       }
-      const type = types[0];
-      const allowed = new Set([...STEP_KEYS[type], "note",
-        ...(type === "trigger" && TRIGGER_KEYS[rawStep.trigger] ? TRIGGER_KEYS[rawStep.trigger] : [])]);
+      const type = present[0];
+      const plugin = extraSteps[type] || null;
+      let allowed;
+      if (plugin) {
+        let keys = [];
+        try {
+          keys = typeof plugin.keys === "function" ? plugin.keys(rawStep) || [] : [];
+        } catch (_error) {
+          keys = [];
+        }
+        allowed = new Set([type, "note", ...(plugin.binds ? ["as"] : []), ...(plugin.retries ? ["retry"] : []), ...keys]);
+      } else {
+        allowed = new Set([...CORE_STEP_KEYS[type], "note"]);
+      }
       for (const key of Object.keys(rawStep)) {
-        if (!allowed.has(key)) problem(`${where}.${key}`, `unknown key for ${type}${type === "trigger" ? ` ${rawStep.trigger}` : ""}`);
+        if (allowed.has(key)) continue;
+        const which = plugin && typeof rawStep[type] === "string" ? `${type} ${rawStep[type]}` : type;
+        problem(`${where}.${key}`, `unknown key for ${which}`);
       }
       const bound = (value, key) => {
         if (typeof value !== "string" || !value.startsWith("$")) return;
         if (!bindings.has(value.slice(1))) problem(`${where}.${key}`, `no earlier step binds ${value} ("as": "${value.slice(1)}")`);
       };
+      const bindAs = (step) => {
+        if (rawStep.as === undefined) return;
+        if (typeof rawStep.as !== "string" || !/^[A-Za-z_]\w*$/.test(rawStep.as)) problem(`${where}.as`, "a name: letters, digits, underscore");
+        else {
+          step.as = rawStep.as;
+          bindings.add(rawStep.as);
+        }
+      };
       const value = rawStep[type];
       const step = { type, note: typeof rawStep.note === "string" ? rawStep.note : null };
+      if (plugin) {
+        step.plugin = plugin.plugin;
+        let fields = null;
+        try {
+          fields = plugin.parse(rawStep, {
+            problem: (key, message) => problem(key ? `${where}.${key}` : where, message),
+            bound,
+            resolveSystemID,
+            during,
+          });
+        } catch (error) {
+          problem(where, error.message);
+        }
+        if (isObject(fields)) {
+          for (const [key, field] of Object.entries(fields)) if (!STEP_OWN_KEYS.has(key)) step[key] = field;
+        }
+        // A step the feature refuses for now (a flight still warping, no gang
+        // in the system yet) can be tried again until it is accepted.
+        if (plugin.retries) retryOf(rawStep, step, where);
+        if (plugin.binds) bindAs(step);
+        steps.push(step);
+        return;
+      }
       switch (type) {
         case "login":
           if (during) problem(where, "login is a setup step");
@@ -279,66 +336,7 @@ function validateScenario(raw, { source = "scenario", defaultName = null, worldE
               problem(where, error.message);
             }
           }
-          if (rawStep.flight !== undefined) {
-            step.flight = String(rawStep.flight);
-            bound(step.flight, "flight");
-          }
           break;
-        case "trigger": {
-          const name = value;
-          if (!TRIGGER_KEYS[name]) {
-            problem(where, `unknown trigger "${name}"; triggers are ${Object.keys(TRIGGER_KEYS).join(", ")}`);
-            break;
-          }
-          step.name = name;
-          const positionals = [];
-          const flags = {};
-          if (name === "scout" && rawStep.system !== undefined) positionals.push(String(rawStep.system));
-          if (name === "fleet" && rawStep.family !== undefined) positionals.push(String(rawStep.family));
-          if (name === "materialize" && rawStep.flight !== undefined) positionals.push(String(rawStep.flight));
-          if (name !== "materialize" && rawStep.flight !== undefined) flags.flight = String(rawStep.flight);
-          if (rawStep.phase !== undefined) {
-            if (!["stalking", "committed"].includes(rawStep.phase)) problem(`${where}.phase`, "stalking or committed");
-            flags.phase = String(rawStep.phase);
-          }
-          for (const key of ["doctrine", "to"]) if (rawStep[key] !== undefined) flags[key] = String(rawStep[key]);
-          if (rawStep.count !== undefined) {
-            const most = name === "skirmish" ? 20 : 8;
-            if (!(Number.isInteger(rawStep.count) && rawStep.count >= 1 && rawStep.count <= most)) problem(`${where}.count`, `1 through ${most}`);
-            flags.count = rawStep.count;
-          }
-          if (rawStep.shipClass !== undefined) flags.class = String(rawStep.shipClass);
-          if (rawStep.gap !== undefined) {
-            if (!(typeof rawStep.gap === "number" && rawStep.gap >= 500 && rawStep.gap <= 200_000)) problem(`${where}.gap`, "500 through 200000 metres");
-            flags.gap = rawStep.gap;
-          }
-          if (rawStep.anchor !== undefined) flags.anchor = rawStep.anchor;
-          if (rawStep.go !== undefined) {
-            if (typeof rawStep.go !== "boolean") problem(`${where}.go`, "true or false");
-            else if (rawStep.go) flags.go = true;
-          }
-          bound(rawStep.flight, "flight");
-          try {
-            const flight = typeof rawStep.flight === "string" && rawStep.flight.startsWith("$") ? "living_flight_0" : null;
-            triggerTools.triggerRequest(name, flight && name === "materialize" ? [flight] : positionals,
-              flight && name !== "materialize" ? { ...flags, flight } : flags, { characterID: 0, resolveSystemID });
-          } catch (error) {
-            problem(where, error.message.split("\n")[0]);
-          }
-          step.positionals = positionals;
-          step.flags = flags;
-          // A trigger the feature refuses for now (a flight still warping, no
-          // gang in the system yet) can be tried again until it is accepted.
-          retryOf(rawStep, step, where);
-          if (rawStep.as !== undefined) {
-            if (typeof rawStep.as !== "string" || !/^[A-Za-z_]\w*$/.test(rawStep.as)) problem(`${where}.as`, "a name: letters, digits, underscore");
-            else {
-              step.as = rawStep.as;
-              bindings.add(rawStep.as);
-            }
-          }
-          break;
-        }
         case "wait":
           if (!positive(value)) problem(where, "wait: seconds, above 0");
           else {
@@ -390,13 +388,7 @@ function validateScenario(raw, { source = "scenario", defaultName = null, worldE
           }
           step.action = action;
           retryOf(rawStep, step, where);
-          if (rawStep.as !== undefined) {
-            if (typeof rawStep.as !== "string" || !/^[A-Za-z_]\w*$/.test(rawStep.as)) problem(`${where}.as`, "a name: letters, digits, underscore");
-            else {
-              step.as = rawStep.as;
-              bindings.add(rawStep.as);
-            }
-          }
+          bindAs(step);
           break;
         }
       }
@@ -485,10 +477,18 @@ function validateScenario(raw, { source = "scenario", defaultName = null, worldE
     bindings: [...bindings] };
 }
 
-function scenarioPath(nameOrPath, { dir = SCENARIO_DIR } = {}) {
+// The folders scenarios live in: the core's, then each plugin's.
+function scenarioDirs({ dir = SCENARIO_DIR, registry = defaultRegistry() } = {}) {
+  return [{ plugin: null, dir }, ...registry.scenarioDirs];
+}
+
+// A bare name is a file in the first folder that has it; a path is a path.
+function scenarioPath(nameOrPath, context = {}) {
   const text = String(nameOrPath || "");
   if (text.endsWith(".json") || text.includes("/") || text.includes("\\")) return path.resolve(text);
-  return path.join(dir, `${text}.json`);
+  const dirs = scenarioDirs(context);
+  const found = dirs.map(({ dir }) => path.join(dir, `${text}.json`)).find((file) => fs.existsSync(file));
+  return found || path.join(dirs[0].dir, `${text}.json`);
 }
 
 function loadScenario(nameOrPath, context = {}) {
@@ -503,22 +503,31 @@ function loadScenario(nameOrPath, context = {}) {
   return { file, scenario };
 }
 
-function listScenarios({ dir = SCENARIO_DIR } = {}) {
-  let names = [];
-  try {
-    names = fs.readdirSync(dir).filter((name) => name.endsWith(".json")).sort();
-  } catch (_error) {
-    return [];
-  }
-  return names.map((name) => {
-    const file = path.join(dir, name);
+// Every scenario in every folder; a name the core has hides a plugin's.
+function listScenarios(context = {}) {
+  const rows = [];
+  const seen = new Set();
+  for (const { plugin, dir } of scenarioDirs(context)) {
+    let names = [];
     try {
-      const raw = JSON.parse(fs.readFileSync(file, "utf8"));
-      return { name: path.basename(name, ".json"), file, description: String(raw.description || ""), world: raw.world };
-    } catch (error) {
-      return { name: path.basename(name, ".json"), file, description: `(unreadable: ${error.message})` };
+      names = fs.readdirSync(dir).filter((name) => name.endsWith(".json")).sort();
+    } catch (_error) {
+      continue;
     }
-  });
+    for (const name of names) {
+      const scenarioName = path.basename(name, ".json");
+      if (seen.has(scenarioName)) continue;
+      seen.add(scenarioName);
+      const file = path.join(dir, name);
+      try {
+        const raw = JSON.parse(fs.readFileSync(file, "utf8"));
+        rows.push({ name: scenarioName, file, plugin, description: String(raw.description || ""), world: raw.world });
+      } catch (error) {
+        rows.push({ name: scenarioName, file, plugin, description: `(unreadable: ${error.message})` });
+      }
+    }
+  }
+  return rows;
 }
 
 // ---------- the run ----------
@@ -550,8 +559,8 @@ async function race(entries) {
 
 // ops:
 //   up(scenario)                  boot the scenario's world; throws on failure
-//   step(step, bindings)          one login, undock, dock, slash, teleport or
-//                                 trigger step -> { ok, text, ids? }
+//   step(step, bindings)          one login, undock, dock, slash, teleport,
+//                                 action or plugin step -> { ok, text, ids? }
 //   startWatch(onEvent)           -> { push(event), stop(): Promise, ended: Promise<{ reason, error }> }
 //   down()                        stop the server
 async function runScenario(scenario, ops, { now = Date.now, signal = null, log = () => {} } = {}) {
@@ -827,8 +836,25 @@ function stopText(result) {
   }
 }
 
+// How a scenario's `up` options read in its report: each plugin flag's own
+// words, then the core's.
+function upText(up = {}, registry = defaultRegistry()) {
+  const parts = [];
+  for (const flag of registry.upFlags) {
+    const value = up[flag.key];
+    if (value === undefined || value === null || (flag.type === "number" && !value)) continue;
+    try {
+      parts.push(typeof flag.describe === "function" ? flag.describe(value) : `${flag.key} ${value}`);
+    } catch (_error) {
+      parts.push(`${flag.key} ${value}`);
+    }
+  }
+  if (up.market === false) parts.push("no market");
+  return parts.filter(Boolean).join(", ");
+}
+
 function renderReport(result, { runID, scenario, scenarioFile = null, timelineFile = "timeline.jsonl",
-  framesSection = null, commit = null } = {}) {
+  framesSection = null, commit = null, registry = defaultRegistry() } = {}) {
   const met = result.expectations.filter((row) => row.met).length;
   const verdict = result.failure ? "DID NOT COMPLETE" : result.missing ? "FAILED" : "PASSED";
   const lines = [];
@@ -839,18 +865,12 @@ function renderReport(result, { runID, scenario, scenarioFile = null, timelineFi
     lines.push(`**${result.failure.stage} failed**${result.failure.step ? ` at \`${result.failure.step}\`` : ""}: ` +
       `${cell(result.failure.error)}`, "");
   }
-  const up = scenario ? scenario.up : {};
-  const upText = [
-    up.realClock ? "real clock" : "saved clock",
-    up.market === false ? "no market" : null,
-    up.offgridTravel ? `off-grid travel x${up.offgridTravel}` : null,
-    up.offgridActivity ? `off-grid activity x${up.offgridActivity}` : null,
-  ].filter(Boolean).join(", ");
+  const upLine = upText(scenario ? scenario.up : {}, registry);
   lines.push("| | |", "| --- | --- |");
   lines.push(`| Run | \`${cell(runID)}\` |`);
   if (scenarioFile) lines.push(`| Scenario | \`${cell(scenarioFile)}\` |`);
   if (commit) lines.push(`| Commit | \`${cell(commit.sha)}\`${commit.dirty ? " plus uncommitted changes" : ""} |`);
-  lines.push(`| World | ${cell(result.world)} (${cell(upText)}) |`);
+  lines.push(`| World | ${cell(result.world)}${upLine ? ` (${cell(upLine)})` : ""} |`);
   lines.push(`| Started | ${new Date(result.startedAtMs).toISOString()} |`);
   lines.push(`| Took | ${Math.round((result.stoppedAtMs - result.startedAtMs) / 1000)} s, server boot and shutdown included |`);
   lines.push(`| Stopped | ${stopText(result)} |`);
@@ -937,7 +957,10 @@ module.exports = {
   renderReport,
   resultRecord,
   runScenario,
+  scenarioDirs,
   scenarioPath,
-  triggerIDs,
+  stepTypes,
+  upDefaults,
+  upText,
   validateScenario,
 };

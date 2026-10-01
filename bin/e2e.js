@@ -3,29 +3,8 @@
 
 // Headless observer for end-to-end grid checks: log a character in through
 // the web gateway, undock it, run slash commands on its session and read its
-// grid, with no EVE client. Guide: docs/E2E-GRID-TESTING.md.
-//
-//   node tools/evejs-e2e/bin/e2e.js world copy --from ../dev [--force]
-//   node tools/evejs-e2e/bin/e2e.js world save <name> [--note "..."] [--force] | world list
-//   node tools/evejs-e2e/bin/e2e.js up [--world <name> [--real-clock] | --fresh] [--no-market] [--timeout 600] [--offgrid-travel 1-100] [--offgrid-activity 1-100]
-//   node tools/evejs-e2e/bin/e2e.js down [--force] | status | ports
-//   node tools/evejs-e2e/bin/e2e.js login [--user e2eagent] [--name "Agent Observer"]
-//   node tools/evejs-e2e/bin/e2e.js undock | dock | logout
-//   node tools/evejs-e2e/bin/e2e.js slash "/tr me Amamake"
-//   node tools/evejs-e2e/bin/e2e.js scouts [--all]
-//   node tools/evejs-e2e/bin/e2e.js teleport Siseide [--flight living_flight_0908]
-//   node tools/evejs-e2e/bin/e2e.js trigger scout [<system>] [--flight <id>] | trigger hunt [--flight <id>] [--phase stalking|committed]
-//   node tools/evejs-e2e/bin/e2e.js trigger fleet <family> [--doctrine <key>] [--to self|<system>] [--count 1-8] | trigger materialize <flightID> [--go]
-//   node tools/evejs-e2e/bin/e2e.js grid [--range 10000] [--all] [--json]
-//   node tools/evejs-e2e/bin/e2e.js watch [--for 600] [--every 2] [--offgrid-every 5] [--grep <regex>] [--no-log] [--json] [--run <id>]
-//                               [--client all|fx|diverge|off] [--diverge-meters 5000] [--positions]
-//   node tools/evejs-e2e/bin/e2e.js act <approach|orbit|keepAtRange|warpTo|stop|lock|unlock|activate|deactivate|loadAmmo|launchDrones|engageDrones> [<target|modules>] [--range] [--target] [--once] [--charge] [--count] [--timeout]
-//   node tools/evejs-e2e/bin/e2e.js view [<run>] [--serve] [--port N]
-//   node tools/evejs-e2e/bin/e2e.js run [<scenario>] [--check] [--run <id>] [--keep-up]
-//   node tools/evejs-e2e/bin/e2e.js log [--grep PirateHunt] [--lines 40] [--any-pid]
-//   node tools/evejs-e2e/bin/e2e.js clock [--stages] [--json]
-//   node tools/evejs-e2e/bin/e2e.js warp --for 24h [--step 1000] [--real] [--run <id>]
-//   node tools/evejs-e2e/bin/e2e.js economy compare <reference run> <candidate run>
+// grid, with no EVE client. `e2e help` lists the commands, the plugins'
+// included (core/plugins.js). Guide: docs/E2E-GRID-TESTING.md.
 
 const { spawn, spawnSync } = require("node:child_process");
 const fs = require("node:fs");
@@ -34,22 +13,21 @@ const path = require("node:path");
 
 const { formatClock, formatGrid } = require("../core/format");
 const { collectIDs, createReorderBuffer, formatTimelineEvent, mentionsAny, parseLogLine } = require("../core/timeline");
-const { busyPorts, marketConfig, portsForTree, serverEnvironment } = require("../core/ports");
+const { busyPorts, marketConfig, portsForTree, serverEnvironment, usableListeners } = require("../core/ports");
+const { defaultRegistry } = require("../core/plugins");
 const worlds = require("../core/worlds");
-const warpTools = require("../plugins/lu/tool/warp");
-const triggerTools = require("../plugins/lu/tool/triggers");
 const scenarioTools = require("../core/scenario");
 const frameTools = require("../core/frames");
 const actionTools = require("../core/actions");
 
 const REPO_ROOT = path.resolve(__dirname, "..", "..", "..");
+const REGISTRY = defaultRegistry();
 const E2E_DIR = path.join(REPO_ROOT, "_local", "e2e");
+const RUNS_DIR = path.join(E2E_DIR, "runs");
 const STATE_PATH = path.join(E2E_DIR, "state.json");
 const SERVER_OUT_PATH = path.join(E2E_DIR, "server.out.log");
 const BRIDGE_HANDSHAKE_PATH = String(process.env.EVEJS_AGENT_BRIDGE_HANDSHAKE || "").trim() ||
   path.join(REPO_ROOT, "_local", "agentBridge", "bridge.json");
-const LU_MONITOR_HANDSHAKE_PATH = String(process.env.EVEJS_LU_MONITOR_BRIDGE_HANDSHAKE || "").trim() ||
-  path.join(REPO_ROOT, "_local", "luMonitor", "bridge.json");
 const SOLAR_SYSTEMS_PATH = path.join(REPO_ROOT, "_local", "gameStore", "data", "solarSystems", "data.json");
 const SERVER_LOG_PATH = path.join(REPO_ROOT, "_local", "logs", "server.log");
 const WORLD = worlds.worldPaths(REPO_ROOT);
@@ -62,10 +40,11 @@ const MARKET_TRACKED_CONFIG = path.join(MARKET_DIR, "config", "market-server.loc
 const MARKET_CONFIG_PATH = path.join(E2E_DIR, "market-server.toml");
 const MARKET_OUT_PATH = path.join(E2E_DIR, "market.out.log");
 const MARKET_BUILD_PATH = path.join(E2E_DIR, "market.build.log");
-const TREE_PORTS = portsForTree(REPO_ROOT);
+const LISTENERS = usableListeners(REGISTRY.listeners);
+const TREE_PORTS = portsForTree(REPO_ROOT, process.env, LISTENERS);
 
-const BOOLEAN_FLAGS = new Set(["all", "json", "any-pid", "force", "fresh", "no-market", "no-log", "help", "real", "stages", "go", "real-clock",
-  "check", "keep-up", "positions", "once", "serve"]);
+const BOOLEAN_FLAGS = new Set(["all", "json", "any-pid", "force", "fresh", "no-market", "no-log", "help",
+  "check", "keep-up", "positions", "once", "serve", ...REGISTRY.booleanFlags]);
 
 class CliError extends Error {}
 
@@ -214,16 +193,6 @@ function requireHandshake() {
 
 function bridge(method, route, body) {
   return callBridge(requireHandshake(), method, route, body);
-}
-
-// The LU Monitor bridge runs in the same server and knows the population:
-// which flights exist, where, and how to pin one for materialization.
-function luMonitor(method, route, body) {
-  const handshake = readJSON(LU_MONITOR_HANDSHAKE_PATH);
-  if (!handshake || !handshake.token || !pidAlive(handshake.pid)) {
-    throw new CliError(`no live LU Monitor bridge (${relativePath(LU_MONITOR_HANDSHAKE_PATH)})`);
-  }
-  return callBridge(handshake, method, route, body);
 }
 
 async function callBridge(handshake, method, route, body) {
@@ -426,10 +395,9 @@ async function cmdGrid(flags) {
   }));
 }
 
-// Only LU, NPC and hostility lines by default, and only those naming a flight
-// or ball this watch has seen. PirateHunt lines repeat the HUNT events.
-// LivingRetaliation says whether being shot woke a flight to fight back.
-const DEFAULT_WATCH_LOG = "\\[(LivingHostility|LivingRetaliation|NpcController|HunterIntel|LivingUniverse)\\]";
+// By default only NPC lines and the plugins' own tags (registry.logTags), and
+// only those naming a flight or ball this watch has seen.
+const DEFAULT_WATCH_LOG = `\\[(${["NpcController", ...REGISTRY.logTags].join("|")})\\]`;
 
 function runStamp(ms) {
   return new Date(ms).toISOString().replace(/[-:]/g, "").replace("T", "-").slice(0, 15);
@@ -553,7 +521,7 @@ async function openWatch(state, handshake, { forSeconds, everySeconds, offGridEv
           const event = JSON.parse(text);
           if (event.kind === "START") startedAtMs = event.atMs;
           if (event.kind === "END") end = event;
-          if (event.kind !== "POS") collectIDs(event, knownIDs);
+          if (event.kind !== "POS") collectIDs(event, knownIDs, REGISTRY);
           buffer.push(event);
         }
       }
@@ -602,8 +570,8 @@ async function cmdWatch(flags) {
     positions: Boolean(flags.positions),
     log: !flags["no-log"],
     grep: flags.grep,
-    runDir: path.join(E2E_DIR, "runs", runID),
-    print: (line) => console.log(flags.json ? JSON.stringify(line) : formatTimelineEvent(line)),
+    runDir: path.join(RUNS_DIR, runID),
+    print: (line) => console.log(flags.json ? JSON.stringify(line) : formatTimelineEvent(line, REGISTRY)),
   });
   const onInterrupt = () => { watch.stop(); };
   process.once("SIGINT", onInterrupt);
@@ -618,167 +586,6 @@ async function cmdWatch(flags) {
 }
 
 let solarSystems = null;
-// ---------- warp ----------
-
-async function cmdClock(flags) {
-  const { clock } = await bridge("GET", "/clock");
-  if (flags.json) {
-    console.log(JSON.stringify(clock, null, 2));
-    return;
-  }
-  const marker = clock.marker;
-  console.log(`LU clock ${new Date(clock.simNowMs).toISOString()}  offset ${warpTools.formatOffset(clock.offsetMs)}` +
-    `  ${marker && marker.e2eWorld ? `e2e world (${marker.savedWorld || "?"})` : "no e2e marker: warp refused"}`);
-  if (clock.warp) {
-    const w = clock.warp;
-    console.log(`warping: ${warpTools.formatDuration(w.simulatedMs)} of ${warpTools.formatDuration(w.targetSimMs)} ` +
-      `in ${warpTools.formatDuration(w.realMs)} (${w.speed.toFixed(1)}x)`);
-  }
-  if (clock.backlog) {
-    console.log(`backlog: oldest overdue flight ${warpTools.formatDuration(clock.backlog.flightsOverdueMs)}, ` +
-      `deferred passes ${clock.backlog.deferredDuePasses}`);
-  }
-  if (clock.pulse) {
-    const p = clock.pulse;
-    const b = p.lastWorkBudget;
-    console.log(`economy pulses ${p.completedPulses} (failed ${p.pulseFailures}): last ${p.lastDurationMs} ms, ` +
-      `average ${p.averageDurationMs} ms, max ${p.maxDurationMs} ms` +
-      (b ? `; last pulse ${b.wallMs} ms wall, ${b.externalWaitMs} ms in ${b.externalWaits} market waits, ` +
-        `${b.yields} yields at ${b.budgetMs} ms slices` : ""));
-    if (b && flags.stages) {
-      for (const stage of b.stages) {
-        console.log(`  ${stage.name.padEnd(32)} ${String(stage.wallMs).padStart(7)} ms wall  ` +
-          `${String(stage.externalWaitMs).padStart(7)} ms market  ${stage.yields} yields`);
-      }
-    }
-  }
-}
-
-function economyRunDir(flags, suffix) {
-  const runID = flags.run ? String(flags.run).replace(/[^A-Za-z0-9._-]/g, "_") : `${runStamp(Date.now())}-${suffix}`;
-  const runDir = path.join(E2E_DIR, "runs", runID);
-  fs.mkdirSync(runDir, { recursive: true });
-  return { runID, runDir };
-}
-
-// Real time or warped, the window is measured the same way: an /economy read
-// before, one after, and the telemetry snapshots in between.
-async function cmdWarp(flags) {
-  const forMs = warpTools.parseDuration(flags.for);
-  if (!forMs) throw new CliError("warp needs --for, e.g. --for 2h, --for 90m or --for 3600");
-  const real = Boolean(flags.real);
-  const run = readRun() || {};
-  if (!real && !String(run.world || "").startsWith("saved ")) {
-    throw new CliError(
-      `this server's world is "${run.world || "unknown"}", not one restored from _local/e2e/worlds/. ` +
-      "Warp only a copy: `e2e up --world <name>`. dev's own world must never get a clock offset.",
-    );
-  }
-  const handshake = requireHandshake();
-  const { runID, runDir } = economyRunDir(flags, real ? "real" : "warp");
-  const clockBefore = (await bridge("GET", "/clock")).clock;
-  // Reaching back one telemetry interval finds the snapshot the window starts from.
-  const lookBackMs = 11 * 60 * 1000;
-  const start = (await bridge("GET", `/economy?since=${clockBefore.simNowMs - lookBackMs}`)).economy;
-  const startedAtReal = Date.now();
-  console.log(`${real ? "watching" : "warping"} ${warpTools.formatDuration(forMs)} of Living Universe time from ` +
-    `${new Date(start.simNowMs).toISOString()}; report in ${relativePath(runDir)}`);
-
-  let final = null;
-  if (real) {
-    const targetMs = start.simNowMs + forMs;
-    for (;;) {
-      const { clock } = await bridge("GET", "/clock");
-      if (clock.simNowMs >= targetMs) break;
-      const remaining = targetMs - clock.simNowMs;
-      console.log(`  +${warpTools.formatDuration(clock.simNowMs - start.simNowMs)}  ${warpTools.formatDuration(remaining)} to go`);
-      await sleep(Math.min(remaining, 60_000));
-    }
-  } else {
-    const controller = new AbortController();
-    const onInterrupt = () => controller.abort();
-    process.once("SIGINT", onInterrupt);
-    try {
-      const response = await fetch(`http://${handshake.host}:${handshake.port}/warp`, {
-        method: "POST",
-        headers: { authorization: `Bearer ${handshake.token}`, "content-type": "application/json" },
-        body: JSON.stringify({
-          forSeconds: forMs / 1000,
-          stepMs: flags.step === undefined ? undefined : Number(flags.step),
-          sliceMs: flags.slice === undefined ? undefined : Number(flags.slice),
-        }),
-        signal: controller.signal,
-      });
-      if (!response.ok) {
-        const reply = await response.json().catch(() => ({}));
-        throw new CliError(`bridge /warp: ${reply.error || `HTTP ${response.status}`}`);
-      }
-      const decoder = new TextDecoder();
-      let pending = "";
-      let lastPrintAt = 0;
-      for await (const chunk of response.body) {
-        pending += decoder.decode(chunk, { stream: true });
-        let newline;
-        while ((newline = pending.indexOf("\n")) >= 0) {
-          const text = pending.slice(0, newline).trim();
-          pending = pending.slice(newline + 1);
-          if (!text) continue;
-          const event = JSON.parse(text);
-          if (event.kind === "END") final = event;
-          if (event.kind === "ERROR") throw new CliError(`warp failed: ${event.error}`);
-          if (event.kind === "PROGRESS" && Date.now() - lastPrintAt >= 10_000) {
-            lastPrintAt = Date.now();
-            console.log(`  +${warpTools.formatDuration(event.simulatedMs)} in ${warpTools.formatDuration(event.realMs)} ` +
-              `(${event.speed.toFixed(1)}x)  passes ${event.passes}  pulse waits ${event.pulseWaits}` +
-              (event.backlog ? `  oldest overdue ${warpTools.formatDuration(event.backlog.flightsOverdueMs)}` : ""));
-          }
-        }
-      }
-    } catch (error) {
-      if (!controller.signal.aborted) {
-        throw error instanceof CliError ? error : new CliError(`bridge /warp failed: ${error.message}`);
-      }
-      await bridge("POST", "/warp/stop", {}).catch(() => {});
-    } finally {
-      process.removeListener("SIGINT", onInterrupt);
-    }
-  }
-  const realMs = Date.now() - startedAtReal;
-  const end = (await bridge("GET", `/economy?since=${start.simNowMs - lookBackMs}`)).economy;
-  const summary = warpTools.buildEconomySummary({ start, end, mode: real ? "real" : "warp", warp: final, realMs });
-  const record = { runID, world: run.world || null, forMs, clockBefore, start, end, warp: final, summary };
-  fs.writeFileSync(path.join(runDir, "economy.json"), `${JSON.stringify(record, null, 2)}\n`);
-  fs.writeFileSync(path.join(runDir, "economy.md"), warpTools.renderEconomyMarkdown(summary, { runID, world: run.world }));
-  console.log(`${real ? "real time" : "warped"}: ${warpTools.formatDuration(summary.simulatedMs)} simulated in ` +
-    `${warpTools.formatDuration(realMs)} real (${summary.speed.toFixed(1)}x)` +
-    (final ? `, ended ${final.stopReason}` : ""));
-  console.log(`industry jobs ${summary.industry.jobsCompleted}, freight deliveries ${summary.freight.jobsDelivered}, ` +
-    `stock ${summary.stock.stockUnitsEnd === null ? "-" : summary.stock.stockUnitsEnd.toLocaleString("en-US")} units`);
-  console.log(`report: ${relativePath(path.join(runDir, "economy.md"))}`);
-}
-
-function readEconomyRun(id) {
-  const file = path.join(E2E_DIR, "runs", String(id), "economy.json");
-  const record = readJSON(file);
-  if (!record || !record.summary) throw new CliError(`no economy report in ${relativePath(file)}`);
-  return record;
-}
-
-function cmdEconomy(positionals) {
-  if (positionals[0] !== "compare" || positionals.length < 3) {
-    throw new CliError("usage: e2e economy compare <reference run> <candidate run>");
-  }
-  const reference = readEconomyRun(positionals[1]);
-  const candidate = readEconomyRun(positionals[2]);
-  const result = warpTools.compareSummaries(reference.summary, candidate.summary);
-  console.log(`reference ${reference.runID} (${reference.summary.mode}), candidate ${candidate.runID} (${candidate.summary.mode})`);
-  for (const row of result.rows) {
-    console.log(`${row.ok ? "ok  " : "FAIL"} ${row.name.padEnd(24)} ${String(row.a).padStart(12)} ${String(row.b).padStart(12)}` +
-      `  diff ${row.difference >= 0 ? "+" : ""}${Math.round(row.difference * 100) / 100} (allowed ${Math.round(row.allowed * 100) / 100})`);
-  }
-  console.log(result.ok ? "agree within tolerances" : "DISAGREE");
-  if (!result.ok) process.exitCode = 1;
-}
 
 function solarSystemTable() {
   if (!solarSystems) {
@@ -801,86 +608,19 @@ function resolveSystemID(text) {
   throw new CliError(`no solar system named ${text}`);
 }
 
-// Pirate scouts are single-hull pirate flights. Holding scouts sit at their
-// patrol destination and are the ones worth visiting: a scout in transit jumps
-// in and warps on before its sensors' first scan.
-function selectScouts(fleets, { all = false } = {}) {
-  const scouts = fleets.filter((flight) => flight.family === "pirate" && flight.pilotCount === 1);
-  const holding = (flight) => flight.phase === "mission_holding";
-  scouts.sort((left, right) => Number(holding(right)) - Number(holding(left)) ||
-    String(left.flightID).localeCompare(String(right.flightID)));
-  return all ? scouts : scouts.filter(holding);
+// The first plugin handler of a core command whose flags this call passes, if any.
+function pluginHandler(command, flags) {
+  return (REGISTRY.handlers[command] || []).find((handler) => handler.flags.some((flag) => flags[flag] !== undefined)) || null;
 }
 
-async function cmdScouts(flags) {
-  const reply = await luMonitor("GET", "/fleets?all=1");
-  const systems = solarSystemTable();
-  const place = (id) => {
-    const row = systems.get(id);
-    return row ? `${row.solarSystemName} (${Number(row.security).toFixed(2)})` : String(id || "-");
-  };
-  const scouts = selectScouts(Array.isArray(reply.fleets) ? reply.fleets : [], { all: Boolean(flags.all) });
-  for (const flight of scouts) {
-    const hull = (flight.members || []).map((member) => member.hull).filter(Boolean).join("/");
-    console.log(
-      `${flight.flightID}  ${flight.homeCorporationName || "?"} ${hull}  ${flight.phase}  ` +
-      `in ${place(flight.currentSystemID)}  system ${flight.currentSystemID}` +
-      `${flight.materialized ? "  materialized" : ""}`,
-    );
-  }
-  console.log(`${scouts.length} scout(s)${flags.all ? "" : " holding (--all for every scout)"}`);
-}
-
+// Stock /tr takes a system ID and lands on the system's first stargate.
+// A plugin may take the command over for its own flags (registry.handlers).
 async function cmdTeleport(positionals, flags) {
-  const state = requireLogin(readState());
-  if (!positionals[0]) throw new CliError("usage: e2e teleport <system name|ID> [--flight <flightID>]");
+  if (!positionals[0]) throw new CliError("usage: e2e teleport <system name|ID>");
+  const handler = pluginHandler("teleport", flags);
+  if (handler) return handler.run(positionals, flags, pluginIO());
   const systemID = resolveSystemID(positionals.join(" "));
-  const before = await currentSystemID(state);
-  const reply = await luMonitor("POST", "/teleport", {
-    characterID: state.characterID,
-    systemID,
-    flightID: flags.flight ? String(flags.flight) : undefined,
-  });
-  const text = `${reply.command} -> ${reply.success ? "ok" : "refused"}\n${reply.message || ""}`.trim();
-  console.log(text);
-  if (!reply.success) process.exitCode = 2;
-  else await bindRemotePark(state, { unlessIn: before });
-  return { ok: Boolean(reply.success), text };
-}
-
-// Prints the flight or hunt ID first, so the watch output can be grepped for it.
-async function cmdTrigger(positionals, flags) {
-  const state = requireLogin(readState());
-  const name = positionals[0];
-  let body;
-  try {
-    body = triggerTools.triggerRequest(name, positionals.slice(1), flags, { characterID: state.characterID, resolveSystemID });
-  } catch (error) {
-    throw error instanceof CliError ? error : new CliError(error.message);
-  }
-  if (name === "skirmish") {
-    const reply = { trigger: "skirmish", ...(await luMonitor("POST", "/allianceskirmish", body)) };
-    if (reply.success === false) throw new CliError(`trigger skirmish: ${reply.message || "refused"}`);
-    console.log(flags.json ? JSON.stringify(reply, null, 2) : triggerTools.formatTriggerReply(reply));
-    return reply;
-  }
-  const before = await currentSystemID(state);
-  const handshake = requireHandshake();
-  const { status, json } = await requestJSON(`http://${handshake.host}:${handshake.port}/trigger/${name}`, {
-    method: "POST",
-    body,
-    headers: { authorization: `Bearer ${handshake.token}` },
-    timeoutMs: 90_000,
-  });
-  if (status >= 400 || json.ok === false) {
-    const refusals = json.refusals && Object.keys(json.refusals).length
-      ? `\n  refused: ${Object.entries(json.refusals).map(([reason, count]) => `${reason} x${count}`).join(", ")}` : "";
-    const facts = json.facts ? `\n  facts: ${Object.entries(json.facts).map(([key, value]) => `${key}=${value}`).join(" ")}` : "";
-    throw new CliError(`trigger ${name}: ${json.error || `HTTP ${status}`}${refusals}${facts}`);
-  }
-  console.log(flags.json ? JSON.stringify(json, null, 2) : triggerTools.formatTriggerReply(json));
-  if (json.moved && json.moved.success) await bindRemotePark(state, { unlessIn: before });
-  return json;
+  return runSlash(`/tr me ${systemID}`);
 }
 
 // ---------- player actions ----------
@@ -898,7 +638,7 @@ function typeInfo(typeID) {
 }
 
 // Every call goes through the gateway on the held session, as a client's
-// would; the grid read comes from the bridge, with LU flights joined.
+// would; the grid read comes from the bridge, with the plugins' annotations.
 function actionIO(state, bindings = {}) {
   const session = { userid: state.accountID };
   return {
@@ -906,7 +646,7 @@ function actionIO(state, bindings = {}) {
     call: async (service, method, args, kwargs) => (await gateway("POST", "/call", {
       service, method, args, kwargs: kwargs || undefined, confirm: true, session, bridgeSessionID: state.bridgeSessionID,
     })).result,
-    grid: async () => (await bridge("GET", `/grid?characterID=${state.characterID}&lu=1`)).grid,
+    grid: async () => (await bridge("GET", `/grid?characterID=${state.characterID}&ext=1`)).grid,
     listShip: async (shipID) => {
       const bound = await gateway("POST", "/bound/bind", {
         service: "invbroker", method: "GetInventoryFromId", args: [shipID], confirm: true, session,
@@ -958,8 +698,8 @@ function viewerURL(port, token, runID) {
 // loopback with its own token, until Ctrl-C.
 async function cmdView(positionals, flags) {
   const runID = positionals[0] ? String(positionals[0]).replace(/[^A-Za-z0-9._-]/g, "_") : null;
-  if (runID && !fs.existsSync(path.join(E2E_DIR, "runs", runID, "timeline.jsonl"))) {
-    throw new CliError(`no timeline for run ${runID} in ${relativePath(path.join(E2E_DIR, "runs"))}`);
+  if (runID && !fs.existsSync(path.join(RUNS_DIR, runID, "timeline.jsonl"))) {
+    throw new CliError(`no timeline for run ${runID} in ${relativePath(RUNS_DIR)}`);
   }
   const handshake = flags.serve ? null : readHandshake();
   if (handshake && await httpOK(`http://${handshake.host}:${handshake.port}/viewer`)) {
@@ -969,7 +709,7 @@ async function cmdView(positionals, flags) {
   }
   const { createAgentBridgeHttp } = require("../bridge/http");
   const { createAgentBridgeViewer } = require("../bridge/viewer");
-  const viewer = createAgentBridgeViewer({ runsDir: path.join(E2E_DIR, "runs") });
+  const viewer = createAgentBridgeViewer({ runsDir: RUNS_DIR, registry: REGISTRY });
   const port = flags.port === undefined ? 0 : Math.trunc(Number(flags.port));
   if (!(port >= 0 && port < 65536)) throw new CliError("--port takes a port number");
   const server = createAgentBridgeHttp({
@@ -990,6 +730,39 @@ async function cmdView(positionals, flags) {
   return null;
 }
 
+// ---------- plugins ----------
+
+// What a plugin command, handler or step gets to work with.
+function pluginIO() {
+  return {
+    CliError,
+    treeRoot: REPO_ROOT,
+    e2eDir: E2E_DIR,
+    runsDir: RUNS_DIR,
+    print: (line) => console.log(line),
+    setExitCode: (code) => { process.exitCode = code; },
+    readJSON,
+    pidAlive,
+    relativePath,
+    runStamp,
+    sleep,
+    readState,
+    requireLogin,
+    readRun,
+    readHandshake,
+    requireHandshake,
+    bridge,
+    callBridge,
+    requestJSON,
+    gateway,
+    currentSystemID,
+    bindRemotePark,
+    resolveSystemID,
+    solarSystems: solarSystemTable,
+    runSlash,
+  };
+}
+
 // ---------- scenarios ----------
 
 function savedWorldExists(name) {
@@ -1002,37 +775,52 @@ function savedWorldExists(name) {
 
 function loadScenarioOrFail(name) {
   try {
-    return scenarioTools.loadScenario(name, { worldExists: savedWorldExists, resolveSystemID });
+    return scenarioTools.loadScenario(name, { worldExists: savedWorldExists, resolveSystemID, registry: REGISTRY });
   } catch (error) {
     throw new CliError(error.message);
   }
 }
 
-// The steps the CLI runs for a scenario. wait and waitFor are the runner's own.
+// The steps the CLI runs for a scenario. wait and waitFor are the runner's
+// own; plugin steps run with the same io as plugin commands.
+const STEP_RUNNERS = {
+  login: async (step) => ({ ok: true, text: await cmdLogin({ user: step.user, name: step.name }) }),
+  undock: async () => ({ ok: true, text: await cmdUndock() }),
+  dock: () => runSlash("/dock"),
+  slash: (step) => runSlash(step.command),
+  teleport: (step) => cmdTeleport([String(step.systemID)], {}),
+};
+
 async function runScenarioStep(step, bindings = {}) {
   if (step.action) return performAction(step.action, bindings);
-  switch (step.type) {
-    case "login": return { ok: true, text: await cmdLogin({ user: step.user, name: step.name }) };
-    case "undock": return { ok: true, text: await cmdUndock() };
-    case "dock": return runSlash("/dock");
-    case "slash": return runSlash(step.command);
-    case "teleport": return cmdTeleport([String(step.systemID)], { flight: step.flight });
-    case "trigger": {
-      const reply = await cmdTrigger([step.name, ...step.positionals], step.flags);
-      return { ok: true, text: triggerTools.formatTriggerReply(reply), ids: scenarioTools.triggerIDs(reply) };
-    }
-    default: throw new CliError(`no such step: ${step.type}`);
+  if (STEP_RUNNERS[step.type]) return STEP_RUNNERS[step.type](step, bindings);
+  const plugin = REGISTRY.steps[step.type];
+  if (plugin) return plugin.run(step, pluginIO(), bindings);
+  throw new CliError(`no such step: ${step.type}`);
+}
+
+// A scenario's `up` as the flags `e2e up` takes.
+function upFlagsFor(up) {
+  const flags = {
+    "no-market": up.market ? undefined : true,
+    timeout: up.timeout || undefined,
+  };
+  for (const flag of REGISTRY.upFlags) {
+    const value = up[flag.key];
+    if (value === undefined || value === null || value === false) continue;
+    flags[flag.flag] = flag.type === "bool" ? true : value;
   }
+  return flags;
 }
 
 function printScenario(file, scenario) {
-  const up = scenario.up;
+  const up = upFlagsFor(scenario.up);
+  const upText = Object.entries(up).filter(([key, value]) => key !== "timeout" && value !== undefined)
+    .map(([key, value]) => (value === true ? ` --${key}` : ` --${key} ${value}`)).join("");
   console.log(`${relativePath(file)}: ok`);
-  console.log(`  world  ${scenario.world}${up.realClock ? " --real-clock" : ""}${up.market ? "" : " --no-market"}` +
-    `${up.offgridTravel ? ` --offgrid-travel ${up.offgridTravel}` : ""}` +
-    `${up.offgridActivity ? ` --offgrid-activity ${up.offgridActivity}` : ""}`);
-  for (const step of scenario.setup) console.log(`  step   ${scenarioTools.describeStep(step)}`);
-  for (const step of scenario.during) console.log(`  during ${scenarioTools.describeStep(step)}`);
+  console.log(`  world  ${scenario.world}${upText}`);
+  for (const step of scenario.setup) console.log(`  step   ${scenarioTools.describeStep(step, REGISTRY)}`);
+  for (const step of scenario.during) console.log(`  during ${scenarioTools.describeStep(step, REGISTRY)}`);
   console.log(`  watch  every ${scenario.watch.every}s, off grid every ${scenario.watch.offgridEvery}s, ` +
     `client ${scenario.watch.client}${scenario.watch.log ? "" : ", no log"}`);
   for (const condition of scenario.until.any) console.log(`  until  ${condition.text}`);
@@ -1044,9 +832,6 @@ function printScenario(file, scenario) {
   for (const entry of scenario.expect) console.log(`  expect ${entry.text}${entry.note ? `  (${entry.note})` : ""}`);
 }
 
-// up, setup, watch until a stop condition, down; then report.md and
-// result.json beside the watch's timeline.jsonl. Exit 1 when an expectation
-// is missing, 2 when the run could not finish.
 // The code a run ran on, for citing it: HEAD, and whether the tree had
 // changes on top (untracked files count; _local/ is ignored).
 function gitCommit() {
@@ -1057,10 +842,15 @@ function gitCommit() {
   return { sha: head.stdout.trim(), dirty: Boolean(status.status === 0 && status.stdout.trim()) };
 }
 
+// up, setup, watch until a stop condition, down; then report.md and
+// result.json beside the watch's timeline.jsonl. Exit 1 when an expectation
+// is missing, 2 when the run could not finish.
 async function cmdRun(positionals, flags) {
   if (!positionals[0]) {
-    const rows = scenarioTools.listScenarios();
-    for (const row of rows) console.log(`${row.name.padEnd(28)} ${String(row.world || "?").padEnd(16)} ${row.description}`);
+    const rows = scenarioTools.listScenarios({ registry: REGISTRY });
+    for (const row of rows) {
+      console.log(`${row.name.padEnd(28)} ${String(row.world || "?").padEnd(16)} ${row.plugin ? `[${row.plugin}] ` : ""}${row.description}`);
+    }
     if (!rows.length) console.log(`no scenarios in ${relativePath(scenarioTools.SCENARIO_DIR)}`);
     console.log("usage: e2e run <scenario> [--check] [--run <id>] [--keep-up]");
     return;
@@ -1075,7 +865,7 @@ async function cmdRun(positionals, flags) {
     throw new CliError(`this tree's server is running (pid ${running.pid}); a run boots its own world. \`e2e down\` first.`);
   }
   const runID = flags.run ? String(flags.run).replace(/[^A-Za-z0-9._-]/g, "_") : `${runStamp(Date.now())}-${scenario.name}`;
-  const runDir = path.join(E2E_DIR, "runs", runID);
+  const runDir = path.join(RUNS_DIR, runID);
   if (fs.existsSync(runDir)) throw new CliError(`run ${runID} already exists (${relativePath(runDir)}); pass another --run`);
   fs.mkdirSync(runDir, { recursive: true });
   fs.copyFileSync(file, path.join(runDir, "scenario.json"));
@@ -1087,14 +877,7 @@ async function cmdRun(positionals, flags) {
   const onInterrupt = () => controller.abort();
   process.on("SIGINT", onInterrupt);
   const ops = {
-    up: () => cmdUp({
-      world: scenario.world,
-      "real-clock": scenario.up.realClock || undefined,
-      "no-market": scenario.up.market ? undefined : true,
-      timeout: scenario.up.timeout || undefined,
-      "offgrid-travel": scenario.up.offgridTravel || undefined,
-      "offgrid-activity": scenario.up.offgridActivity || undefined,
-    }),
+    up: () => cmdUp({ world: scenario.world, ...upFlagsFor(scenario.up) }),
     step: runScenarioStep,
     startWatch: (onEvent) => openWatch(requireLogin(readState()), requireHandshake(), {
       // The bridge's longest watch; the run stops it at its own stop condition.
@@ -1107,7 +890,7 @@ async function cmdRun(positionals, flags) {
       log: scenario.watch.log,
       grep: scenario.watch.grep === null ? undefined : scenario.watch.grep,
       runDir,
-      print: (line) => console.log(formatTimelineEvent(line)),
+      print: (line) => console.log(formatTimelineEvent(line, REGISTRY)),
       onEvent,
     }),
     down: async () => {
@@ -1128,20 +911,20 @@ async function cmdRun(positionals, flags) {
   const scenarioFile = relativePath(file);
   let frames = null;
   try {
-    frames = frameTools.writeFrames(runDir, frameTools.readTimeline(path.join(runDir, "timeline.jsonl")));
+    frames = frameTools.writeFrames(runDir, frameTools.readTimeline(path.join(runDir, "timeline.jsonl")), { registry: REGISTRY });
     console.log(`run: ${frames.frames.length} tactical frame(s) from ${frames.positions} position samples`);
   } catch (error) {
     console.log(`run: tactical frames failed: ${error.message}`);
   }
   fs.writeFileSync(reportPath, scenarioTools.renderReport(result, { runID, scenario, scenarioFile, commit,
-    framesSection: frameTools.renderFramesSection(frames) }));
+    framesSection: frameTools.renderFramesSection(frames), registry: REGISTRY }));
   const record = scenarioTools.resultRecord(result, { runID, scenarioFile });
   record.commit = commit;
   record.frames = frames ? frames.frames.map(({ file: frameFile, reason, stop, t, seq }) => ({ file: frameFile, reason, stop, t, seq })) : [];
   fs.writeFileSync(path.join(runDir, "result.json"), `${JSON.stringify(record, null, 2)}\n`);
   for (const row of result.expectations) {
     const status = row.absent ? (row.met ? "clean  " : "SEEN   ") : (row.met ? "met    " : "MISSING");
-    console.log(`${status} ${row.text}${row.first ? `  first at ${formatTimelineEvent(row.first).slice(0, 11)}` : ""}`);
+    console.log(`${status} ${row.text}${row.first ? `  first at ${formatTimelineEvent(row.first, REGISTRY).slice(0, 11)}` : ""}`);
   }
   if (result.failure) console.log(`${result.failure.stage} failed${result.failure.step ? ` at ${result.failure.step}` : ""}: ${result.failure.error}`);
   const met = result.expectations.filter((row) => row.met).length;
@@ -1347,9 +1130,38 @@ async function startMarket(ports, timeoutMs) {
 }
 
 function describePorts(ports) {
+  const plugins = LISTENERS.filter((listener) => ports[listener.name])
+    .map((listener) => `${listener.label || listener.name} :${ports[listener.name]}, `).join("");
   return `slot ${ports.slot}: game :${ports.game}, gateway :${ports.gateway}, agent bridge :${ports.agentBridge}, ` +
-    `LU bridge :${ports.luMonitor}, market :${ports.marketHttp} (rpc :${ports.marketRpc}), image :${ports.image}, ` +
+    `${plugins}market :${ports.marketHttp} (rpc :${ports.marketRpc}), image :${ports.image}, ` +
     `redshift :${ports.redshift}, xmpp :${ports.xmpp}`;
+}
+
+// The plugins' `e2e up` options (registry.upFlags) read from the flags:
+// { values: { key: value }, env, restore: { key: value } }. A number flag sets
+// its environment variable for the server; a bool flag goes to the plugins'
+// world restore.
+function upOptions(flags) {
+  const values = {};
+  const env = {};
+  const restore = {};
+  for (const flag of REGISTRY.upFlags) {
+    const raw = flags[flag.flag];
+    if (raw === undefined) continue;
+    if (flag.type === "bool") {
+      if (flag.restore && !flags.world) throw new CliError(`--${flag.flag} applies to a restored world: pass --world <name>`);
+      values[flag.key] = true;
+      if (flag.restore) restore[flag.key] = true;
+      continue;
+    }
+    const value = Number(raw);
+    if (!Number.isFinite(value) || value < flag.min || value > flag.max) {
+      throw new CliError(`--${flag.flag} takes a number from ${flag.min} through ${flag.max}`);
+    }
+    values[flag.key] = value;
+    if (flag.env) env[flag.env] = String(value);
+  }
+  return { values, env, restore };
 }
 
 async function cmdUp(flags) {
@@ -1359,13 +1171,7 @@ async function cmdUp(flags) {
     return;
   }
   if (flags.world && flags.fresh) throw new CliError("--world and --fresh both choose the world; pass one");
-  if (flags["real-clock"] && !flags.world) throw new CliError("--real-clock applies to a restored world: pass --world <name>");
-  let multipliers;
-  try {
-    multipliers = triggerTools.offGridMultipliers(flags);
-  } catch (error) {
-    throw new CliError(error.message);
-  }
+  const options = upOptions(flags);
 
   const previous = readRun();
   if (previous && previous.marketPid && !pidAlive(previous.pid) && pidAlive(previous.marketPid) &&
@@ -1377,7 +1183,7 @@ async function cmdUp(flags) {
 
   requireWorldIdle();
   const ports = TREE_PORTS;
-  const busy = await busyPorts(ports);
+  const busy = await busyPorts(ports, LISTENERS);
   if (busy.length) {
     throw new CliError(
       `port(s) in use: ${busy.map((row) => `${row.name} :${row.port}`).join(", ")}. ` +
@@ -1388,9 +1194,9 @@ async function cmdUp(flags) {
 
   try {
     if (flags.world) {
-      const restored = worlds.restoreWorld(REPO_ROOT, String(flags.world), { realClock: Boolean(flags["real-clock"]) });
+      const restored = worlds.restoreWorld(REPO_ROOT, String(flags.world), { hooks: REGISTRY.worldHooks, options: options.restore });
       console.log(`restored saved world ${restored.name}${restored.market ? " with its market" : "; market kept"}` +
-        (flags["real-clock"] ? "; clock at real time (offset 0), deadlines as overdue as the copy is old" : ""));
+        restored.notes.map((note) => `; ${note}`).join(""));
     } else if (flags.fresh) {
       worlds.freshWorld(REPO_ROOT);
       console.log("removed this tree's game store; this boot seeds a fresh one from the reference data");
@@ -1418,7 +1224,7 @@ async function cmdUp(flags) {
   const out = fs.openSync(SERVER_OUT_PATH, "w");
   const child = spawn(process.execPath, serverStartArgs(), {
     cwd: path.join(REPO_ROOT, "server"),
-    env: { ...process.env, ...serverEnvironment(ports), ...multipliers.env, EVEJS_AGENT_BRIDGE: "1" },
+    env: { ...process.env, ...serverEnvironment(ports, LISTENERS), ...options.env, EVEJS_AGENT_BRIDGE: "1" },
     detached: true,
     stdio: ["ignore", out, out],
     windowsHide: true,
@@ -1431,7 +1237,7 @@ async function cmdUp(flags) {
     marketPid: market ? market.pid : null,
     ports,
     world: flags.world ? `saved ${flags.world}` : flags.fresh ? "fresh" : "kept",
-    offGrid: multipliers.values,
+    options: Object.keys(options.values).length ? options.values : null,
     startedAtMs,
     readyAtMs: null,
     bootSeconds: null,
@@ -1457,7 +1263,14 @@ async function cmdUp(flags) {
       run.bootSeconds = Number(((run.readyAtMs - startedAtMs) / 1000).toFixed(1));
       writeRun(run);
       console.log(`up in ${run.bootSeconds}s: pid ${child.pid}, world ${run.world}, ${describePorts(ports)}`);
-      if (multipliers.text) console.log(`off-grid time: ${multipliers.text} (smoke tests only: the ratios between timers change)`);
+      for (const upNote of REGISTRY.upNotes) {
+        try {
+          const note = upNote(options.values);
+          if (note) console.log(note);
+        } catch (_error) {
+          // A note is a courtesy.
+        }
+      }
       return;
     }
     await sleep(2000);
@@ -1525,7 +1338,8 @@ function cmdWorld(positionals, flags) {
       );
     } else if (action === "save" && positionals[1]) {
       requireWorldIdle();
-      const result = worlds.saveWorld(REPO_ROOT, positionals[1], { force: Boolean(flags.force), note: flags.note });
+      const result = worlds.saveWorld(REPO_ROOT, positionals[1], { force: Boolean(flags.force), note: flags.note,
+        hooks: REGISTRY.worldHooks });
       console.log(
         `saved ${result.name} (${megabytes(result.bytes)} MB${result.market ? ", market included" : ", no market database"}) ` +
         `in ${relativePath(result.dir)}`,
@@ -1545,6 +1359,14 @@ function cmdWorld(positionals, flags) {
   } catch (error) {
     throw error instanceof CliError ? error : new CliError(error.message);
   }
+}
+
+function describePlugins() {
+  const active = REGISTRY.plugins.map((plugin) => plugin.name);
+  const skipped = REGISTRY.skipped.map((entry) => `${entry.name} (${entry.reason})`);
+  return `plugins  ${active.length ? active.join(", ") : "none"} active` +
+    `${skipped.length ? `; skipped: ${skipped.join("; ")}` : ""}` +
+    `${REGISTRY.warnings.length ? `\nplugin warnings: ${REGISTRY.warnings.join("; ")}` : ""}`;
 }
 
 async function cmdStatus() {
@@ -1572,51 +1394,84 @@ async function cmdStatus() {
     ? `character ${state.characterName || "?"} (${state.characterID})  account ${state.username}/${state.accountID}` +
       `  session ${state.bridgeSessionID ? "held" : "released"}`
     : "character  none (e2e login)");
+  console.log(describePlugins());
 }
 
-const HELP = fs.readFileSync(__filename, "utf8")
-  .split(/\r?\n/)
-  .filter((line) => line.startsWith("//   node tools/evejs-e2e"))
-  .map((line) => line.slice(5))
-  .join("\n");
+// ---------- the command table ----------
 
-async function main(argv) {
-  const { command, positionals, flags } = parseArgs(argv);
-  switch (command) {
-    case "up": return cmdUp(flags);
-    case "down": return cmdDown(flags);
-    case "status": return cmdStatus();
-    case "ports":
-      console.log(describePorts(activePorts()));
-      return undefined;
-    case "login": return cmdLogin(flags);
-    case "logout": return cmdLogout();
-    case "undock": return cmdUndock();
-    case "dock": return runSlash("/dock");
-    case "slash": {
+function upUsage() {
+  const plugin = REGISTRY.upFlags.map((flag) => (flag.type === "bool" ? `[--${flag.flag}]` : `[--${flag.flag} ${flag.min}-${flag.max}]`));
+  return [`up [--world <name> | --fresh] [--no-market] [--timeout 600]${plugin.length ? ` ${plugin.join(" ")}` : ""}`];
+}
+
+// name -> { usage: [lines], run(positionals, flags) }. Plugin commands
+// (registry.commands) run with pluginIO() and can't take a core name.
+const CORE_COMMANDS = {
+  world: {
+    usage: ["world copy --from ../dev [--force]", "world save <name> [--note \"...\"] [--force] | world list"],
+    run: cmdWorld,
+  },
+  up: { usage: upUsage(), run: (_positionals, flags) => cmdUp(flags) },
+  down: { usage: ["down [--force]"], run: (_positionals, flags) => cmdDown(flags) },
+  status: { usage: ["status"], run: () => cmdStatus() },
+  ports: {
+    usage: ["ports"],
+    run: () => { console.log(describePorts(activePorts())); },
+  },
+  login: { usage: ["login [--user e2eagent] [--name \"Agent Observer\"]"], run: (_positionals, flags) => cmdLogin(flags) },
+  logout: { usage: ["logout"], run: () => cmdLogout() },
+  undock: { usage: ["undock"], run: () => cmdUndock() },
+  dock: { usage: ["dock"], run: () => runSlash("/dock") },
+  slash: {
+    usage: ["slash \"/tr me 30002537\""],
+    run: (positionals) => {
       const line = positionals.join(" ").trim();
       if (!line) throw new CliError('slash needs a command, e.g. e2e slash "/where"');
       return runSlash(line);
-    }
-    case "grid": return cmdGrid(flags);
-    case "watch": return cmdWatch(flags);
-    case "act": return cmdAct(positionals, flags);
-    case "view": return cmdView(positionals, flags);
-    case "scouts": return cmdScouts(flags);
-    case "teleport": return cmdTeleport(positionals, flags);
-    case "trigger": return cmdTrigger(positionals, flags);
-    case "run": return cmdRun(positionals, flags);
-    case "log": return cmdLog(flags);
-    case "world": return cmdWorld(positionals, flags);
-    case "clock": return cmdClock(flags);
-    case "warp": return cmdWarp(flags);
-    case "economy": return cmdEconomy(positionals);
-    case "help":
-      console.log(HELP);
-      return undefined;
-    default:
-      throw new CliError(`unknown command: ${command}\n${HELP}`);
+    },
+  },
+  teleport: { usage: ["teleport <system name|ID>"], run: cmdTeleport },
+  grid: { usage: ["grid [--range 10000] [--all] [--json]"], run: (_positionals, flags) => cmdGrid(flags) },
+  watch: {
+    usage: ["watch [--for 600] [--every 2] [--offgrid-every 5] [--grep <regex>] [--no-log] [--json] [--run <id>]",
+      "      [--client all|fx|diverge|off] [--diverge-meters 5000] [--positions]"],
+    run: (_positionals, flags) => cmdWatch(flags),
+  },
+  act: {
+    usage: ["act <approach|orbit|keepAtRange|warpTo|stop|lock|unlock|activate|deactivate|loadAmmo|launchDrones|engageDrones>",
+      "    [<target|modules>] [--range] [--target] [--once] [--charge] [--count] [--timeout]"],
+    run: cmdAct,
+  },
+  view: { usage: ["view [<run>] [--serve] [--port N]"], run: cmdView },
+  run: { usage: ["run [<scenario>] [--check] [--run <id>] [--keep-up]"], run: cmdRun },
+  log: { usage: ["log [--grep NpcController] [--lines 40] [--any-pid]"], run: (_positionals, flags) => cmdLog(flags) },
+  help: { usage: ["help"], run: () => { console.log(helpText()); } },
+};
+
+function pluginCommands() {
+  return Object.fromEntries(Object.entries(REGISTRY.commands).filter(([name]) => !CORE_COMMANDS[name]));
+}
+
+function helpText() {
+  const lines = [];
+  const push = (name, entry) => {
+    for (const usage of entry.usage || [name]) lines.push(`  ${usage.startsWith(" ") ? "  " : "e2e "}${usage}`);
+  };
+  for (const [name, command] of Object.entries(CORE_COMMANDS)) push(name, command);
+  for (const [command, handlers] of Object.entries(REGISTRY.handlers)) {
+    for (const handler of handlers) push(command, { usage: handler.usage || [`${command} --${handler.flags.join(" --")}`] });
   }
+  for (const [name, command] of Object.entries(pluginCommands())) push(name, command);
+  return `node tools/evejs-e2e/bin/e2e.js <command>\n${lines.join("\n")}\n${describePlugins()}`;
+}
+
+async function main(argv) {
+  const { command, positionals, flags } = parseArgs(argv);
+  const core = CORE_COMMANDS[command];
+  if (core) return core.run(positionals, flags);
+  const plugin = pluginCommands()[command];
+  if (plugin) return plugin.run(positionals, flags, pluginIO());
+  throw new CliError(`unknown command: ${command}\n${helpText()}`);
 }
 
 if (require.main === module) {
@@ -1627,8 +1482,10 @@ if (require.main === module) {
 }
 
 module.exports = {
+  CORE_COMMANDS,
   CliError,
+  helpText,
   parseArgs,
   selectLogLines,
-  selectScouts,
+  upOptions,
 };

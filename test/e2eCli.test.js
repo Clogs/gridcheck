@@ -8,7 +8,8 @@ const test = require("node:test");
 const assert = require("node:assert");
 
 const { formatDistance, formatGrid, formatClock } = require("../core/format");
-const { parseArgs, selectLogLines, selectScouts } = require("../bin/e2e");
+const { CORE_COMMANDS, helpText, parseArgs, selectLogLines, upOptions } = require("../bin/e2e");
+const { selectScouts } = require("../plugins/lu/tool/commands");
 
 test("scouts are single-hull pirate flights, holding ones first", () => {
   const fleets = [
@@ -100,16 +101,30 @@ test("--all lists celestials, --range narrows, docked shows where", () => {
   );
 });
 
-const { offGridMultipliers, triggerRequest } = require("../plugins/lu/tool/triggers");
+const { triggerRequest } = require("../plugins/lu/tool/triggers");
 
-test("up's off-grid flags become the server's multiplier variables, 1 through 100", () => {
-  const set = offGridMultipliers({ "offgrid-travel": "10", "offgrid-activity": "4" });
+test("a plugin's up flags become the server's variables and the world restore's options", () => {
+  const set = upOptions({ "offgrid-travel": "10", "offgrid-activity": "4", "real-clock": true, world: "lowsec-docked" });
   assert.deepStrictEqual(set.env, {
     EVEJS_LIVING_UNIVERSE_OFFGRID_TRAVEL_TIME_MULTIPLIER: "10",
     EVEJS_LIVING_UNIVERSE_OFFGRID_ACTIVITY_TIME_MULTIPLIER: "4",
   });
-  assert.deepStrictEqual(offGridMultipliers({}), { env: {}, values: null, text: "" });
-  for (const bad of ["0", "101", "fast"]) assert.throws(() => offGridMultipliers({ "offgrid-travel": bad }), /1 through 100/);
+  assert.deepStrictEqual(set.values, { offgridTravel: 10, offgridActivity: 4, realClock: true });
+  assert.deepStrictEqual(set.restore, { realClock: true });
+  assert.deepStrictEqual(upOptions({}), { values: {}, env: {}, restore: {} });
+  for (const bad of ["0", "101", "fast"]) assert.throws(() => upOptions({ "offgrid-travel": bad }), /1 through 100/);
+  assert.throws(() => upOptions({ "real-clock": true }), /applies to a restored world/);
+  assert.deepStrictEqual(parseArgs(["up", "--real-clock", "--world", "w"]).flags, { "real-clock": true, world: "w" },
+    "a plugin's bool flag takes no value");
+});
+
+test("help lists the core commands, then each plugin's, and names the active plugins", () => {
+  const help = helpText();
+  assert.match(help, /e2e teleport <system name\|ID>/);
+  assert.match(help, /e2e trigger fleet <family>/);
+  assert.match(help, /plugins {2}lu active/);
+  assert.ok(help.indexOf("e2e help") < help.indexOf("e2e trigger"), "core commands first");
+  assert.ok(CORE_COMMANDS.trigger === undefined, "trigger is the plugin's");
 });
 
 test("trigger arguments become bridge bodies; a fleet goes to your grid unless --to names a system", () => {

@@ -93,6 +93,20 @@ test("client lines read what the client was sent, and DIVERGE says which side is
   ]);
 });
 
+test("a plugin formats its own kinds and tags core lines; without it they read raw", () => {
+  const { emptyRegistry } = require("../core/plugins");
+  const hunt = { t: 0, kind: "HUNT", phase: "stalking", reason: "x", leader: { flightID: "f1" } };
+  assert.match(formatTimelineEvent(hunt), /^t\+00:00:00 {2}HUNT {6}f1 {2}x/);
+  assert.match(formatTimelineEvent(hunt, emptyRegistry()), /^t\+00:00:00 {2}HUNT {6}\{"t":0,"kind":"HUNT"/);
+  const target = { t: 0, kind: "TARGET", sourceLabel: "a", targetLabel: "self", locked: true, lu: { flightID: "f9" } };
+  assert.match(formatTimelineEvent(target), /self \(locked\) +f9$/);
+  assert.strictEqual(formatTimelineEvent(target, emptyRegistry()), "t+00:00:00  TARGET    a -> self (locked)");
+  const end = { t: 0, kind: "END", reason: "time", samples: 2, events: 9, costs: { sampleMsAvg: 1, sampleMsMax: 2,
+    offGridMsAvg: 3, offGridMsMax: 4, flightsScanned: 1717 } };
+  assert.match(formatTimelineEvent(end), /off grid 3\/4 ms over 1717 flights \(avg\/max\)$/);
+  assert.match(formatTimelineEvent(end, emptyRegistry()), /off grid 3\/4 ms \(avg\/max\)$/);
+});
+
 test("log lines parse to server time, pid, level and text", () => {
   assert.deepStrictEqual(
     parseLogLine("[2026-09-30T19:03:13.564Z] [pid 23332] [INF] [LivingHostility] flight=living_flight_4420 armed"),

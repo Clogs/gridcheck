@@ -13,8 +13,9 @@
   const PLOT = 640;
   const TRACKED = new Set(["ship", "drone", "fighter", "wreck", "container", "structure"]);
   const MOVING = new Set(["ORBIT", "FOLLOW", "APPROACH"]);
+  // Plugins add colours for their own balls (GET /viewer/config).
   const COLOURS = {
-    self: "#1f6feb", pirate: "#d1242f", concord: "#bf8700", drifter: "#8250df", player: "#1a7f37", neutral: "#6e7781",
+    self: "#1f6feb", hostile: "#d1242f", concord: "#bf8700", drifter: "#8250df", player: "#1a7f37", neutral: "#6e7781",
     others: ["#e16f24", "#0a7f86", "#a0457a", "#7d4e00", "#5a32a3", "#2f6f3e"],
   };
   const MARKS = { DIVERGE: "#8250df", DESTROYED: "#24292f", TARGET: "#cf222e", ARRIVE: "#1a7f37", STEP: "#0969da", FX: "#e16f24" };
@@ -48,6 +49,7 @@
     current: -1,
     palette: new Map(),
     destroyedAt: new Map(),
+    colourRules: [],
   };
 
   // ---------- text ----------
@@ -91,15 +93,6 @@
       case "CLIENT": return `${e.op || ""} ${e.label || ""}${e.mode ? ` ${e.mode}` : ""}${e.error ? ` ${e.error}` : ""}`;
       case "STEP": return `${e.phase === "during" ? "during: " : ""}${e.ok ? "" : "FAILED "}${e.step}${e.text ? `: ${e.text}` : ""}`;
       case "STOP": return e.reason === "until" ? `stop condition met: ${e.condition}` : `stopped: ${e.reason}`;
-      case "HUNT": return `${e.huntID || ""} ${e.phase || ""} ${e.reason || ""}`;
-      case "SIGHTING": return `${e.observerLabel || e.observerID} saw self at ${distance(e.distanceMeters)}`;
-      case "INCOMING": return `${e.flightID} ${e.family || ""} -> ${e.toSystemName || ""}` +
-        `${e.jumpsRemaining !== undefined && e.jumpsRemaining !== null ? `  ${e.jumpsRemaining} jumps out` : ""}`;
-      case "ENTER": return `${e.flightID} ${e.family || ""} entered the system`;
-      case "EXIT": return `${e.flightID} ${e.family || ""} left the system`;
-      case "HERE": return `${e.count} flight(s) in ${e.systemName || e.systemID} off grid`;
-      case "ENGAGEMENT": return `${e.encounterID} ${e.status}${e.phase ? ` phase=${e.phase}` : ""}`;
-      case "LOSS": return `${e.shipName || "ship"} of ${e.corporation || "?"} lost`;
       case "GRID": return `${e.systemName || e.systemID}${e.self && e.self.typeName ? `, self in a ${e.self.typeName}` : ""}`;
       case "SYSTEM": return `self now in ${e.toSystemName || e.toSystemID}`;
       case "MOVED": return `self moved ${distance(e.distanceMeters)} to a new grid`;
@@ -107,7 +100,8 @@
       case "LOG": return String(e.text || "");
       case "START": return "watch started";
       case "END": return `watch ended: ${e.reason}`;
-      default: return JSON.stringify(e).slice(0, 200);
+      // A plugin's kind: the plugin's own text, sent with the timeline.
+      default: return e.summary_ || JSON.stringify(e).slice(0, 200);
     }
   }
 
@@ -190,7 +184,7 @@
       for (;;) {
         const body = await api(`/viewer/timeline?run=${encodeURIComponent(state.runID)}&from=${state.bytes}`);
         if (generation !== state.generation) return;
-        added += ingest(body.text);
+        added += ingest(body.text, body.summaries);
         state.bytes = body.next;
         state.result = body.result;
         state.mtimeMs = body.mtimeMs;
@@ -210,11 +204,14 @@
     render();
   }
 
-  function ingest(text) {
+  function ingest(text, summaries) {
     let added = 0;
     const list = $("events");
     const diverges = $("diverges");
-    for (const line of String(text || "").split("\n")) {
+    const texts = new Map(Array.isArray(summaries) ? summaries : []);
+    const lines = String(text || "").split("\n");
+    for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
+      const line = lines[lineIndex];
       if (!line.trim()) continue;
       let event;
       try {
@@ -222,6 +219,7 @@
       } catch (_error) {
         continue;
       }
+      if (texts.has(lineIndex)) event.summary_ = texts.get(lineIndex);
       const atMs = Number(event.atMs);
       if (Number.isFinite(atMs)) {
         if (state.t0 === null || atMs < state.t0) state.t0 = atMs;
@@ -329,12 +327,20 @@
     return node;
   }
 
+  // A plugin's data on a POS ball, at ball.ext.<plugin>; balls written before
+  // the watch wrote ext carry it flat.
+  function ballData(ball, plugin) {
+    return (ball.ext && ball.ext[plugin]) || ball;
+  }
+
   function colourFor(ball) {
     if (ball.who === "self") return COLOURS.self;
-    if (ball.who === "concord" || ball.family === "concord") return COLOURS.concord;
+    if (ball.who === "concord") return COLOURS.concord;
     if (ball.who === "drifter") return COLOURS.drifter;
     if (ball.who === "player") return COLOURS.player;
-    if (ball.family === "pirate") return COLOURS.pirate;
+    const rule = state.colourRules.find((entry) => Object.entries(entry.match || {})
+      .every(([field, value]) => String(ballData(ball, entry.plugin)[field]) === String(value)));
+    if (rule) return rule.colour;
     if (!ball.who) return COLOURS.neutral;
     const key = ball.flightID || ball.family || (ball.corp ? `corp:${ball.corp}` : `name:${String(ball.label || "").split(" ")[0]}`);
     if (!state.palette.has(key)) state.palette.set(key, COLOURS.others[state.palette.size % COLOURS.others.length]);
@@ -446,7 +452,7 @@
         if (!locked) continue;
         const to = project(locked);
         svg.append(el("line", { x1: from.x, y1: from.y, x2: to.x, y2: to.y,
-          stroke: lockID === pos.selfID ? COLOURS.pirate : colour.get(ball.id), "stroke-width": 1.2, "stroke-opacity": 0.75 }));
+          stroke: lockID === pos.selfID ? COLOURS.hostile : colour.get(ball.id), "stroke-width": 1.2, "stroke-opacity": 0.75 }));
       }
     }
     // Weapons and effects the client was told about (FX). A repeating module
@@ -662,6 +668,7 @@
     }
     try {
       await loadRuns();
+      state.colourRules = (await api("/viewer/config")).colours || [];
     } catch (error) {
       message(error.message);
       return;

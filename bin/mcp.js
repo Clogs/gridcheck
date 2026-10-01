@@ -15,8 +15,12 @@ const fs = require("node:fs");
 const path = require("node:path");
 
 const { formatOffset, formatTimelineEvent } = require("../core/timeline");
+const { defaultRegistry } = require("../core/plugins");
+const { kindsOf } = require("../core/conditions");
+const { scenarioDirs } = require("../core/scenario");
 
 const REPO_ROOT = path.resolve(__dirname, "..", "..", "..");
+const REGISTRY = defaultRegistry();
 const CLI_PATH = path.join(__dirname, "e2e.js");
 const E2E_DIR = path.join(REPO_ROOT, "_local", "e2e");
 const RUNS_DIR = path.join(E2E_DIR, "runs");
@@ -33,27 +37,36 @@ const WATCH_DEFAULT_SECONDS = 60;
 const MAX_WAIT_SECONDS = 600;
 const NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/;
 
-const INSTRUCTIONS = `End-to-end grid testing for EveJS / Living Universe, with no EVE client. A server boots from a saved world; a character logs in through the web gateway, undocks, and you read its grid, run slash commands, trigger Living Universe features and watch what NPCs do as a timeline. Every tool runs the CLI \`node tools/evejs-e2e/bin/e2e.js\` in this tree; the guide is docs/E2E-GRID-TESTING.md.
+// The core's instructions, then each plugin's primer.
+function instructions(registry = REGISTRY) {
+  const upKeys = ["market", "timeout", ...registry.upFlags.map((flag) => flag.key)].join(", ");
+  const pluginSteps = Object.keys(registry.steps);
+  const kinds = kindsOf(registry).filter((kind) => !["CLIENT", "FX", "DIVERGE"].includes(kind)).join(" ");
+  const pluginTools = registry.mcpTools.map((tool) => tool.name);
+  const core = `End-to-end grid testing for EveJS with no EVE client. A server boots from a saved world; a character logs in through the web gateway, undocks, and you read its grid, run slash commands, act as the player and watch what happens as a timeline. Every tool runs the CLI \`node tools/evejs-e2e/bin/e2e.js\` in this tree; the guide is docs/E2E-GRID-TESTING.md.
 
-Start with e2e_status: it shows whether this tree's server is up, the saved worlds and the scenarios.
+Start with e2e_status: it shows whether this tree's server is up, the saved worlds, the scenarios and the plugins that are active.
 
 To verify a feature, write a scenario and run it (e2e_run_scenario). A run boots its own world, so call e2e_down first if the server is up. A scenario is JSON:
-{ "description": "...", "world": "lowsec-docked",
-  "up": { "offgridTravel": 5 },
-  "setup": ["undock", { "trigger": "scout", "as": "scout" }, { "waitFor": "INCOMING flightID=$scout", "timeout": 120 }],
-  "until": { "any": ["ENTER flightID=$scout", "DESTROYED self"], "timeout": 300, "grace": 10 },
-  "expect": ["INCOMING flightID=$scout family=pirate", { "match": "ENTER flightID=$scout", "note": "why it matters" }, "no DIVERGE status=open"] }
-- up: realClock (default true), market, offgridTravel/offgridActivity (1-100, smoke tests only), timeout.
-- setup steps: "login" (implicit), "undock", "dock", { "slash": "/heal" }, { "teleport": "Amamake", "flight": "<flightID>" }, { "trigger": "scout|hunt|fleet|materialize|skirmish", <args>, "as": "name", "retry": { "every": 15, "for": 480 } }, { "wait": 30 }, { "waitFor": "<condition>", "timeout": 300 }. Trigger args: system, flight, phase (stalking|committed), family, doctrine, to (self|system), count, anchor, go, shipClass, gap.
-- player actions are steps too, in setup and in "during" (a second list that runs after setup, beside the stop conditions, and stops when the run stops): { "lock": "<target>", "as": "mark", "timeout": 30 }, { "activate": "weapons", "target": "$mark", "once": false }, { "deactivate": "weapons" }, { "orbit": "<target>", "range": 5000 }, { "approach": "<target>" }, { "keepAtRange": "<target>", "range": 10000 }, { "warpTo": "<target>", "range": 0 }, "stop", { "unlock": "<target>" }, { "loadAmmo": "weapons", "charge": "EMP S" }, { "launchDrones": "all", "count": 5 }, { "engageDrones": "<target>" }; each also takes "retry". A target is the nearest ball passing every term: "nearest npc", "npc family=police", "name~Scout", "flight=$fleet", "$mark", an itemID. "as" on a lock binds the ball. Shots show as TARGET sourceLabel=self, FX self (needs "watch": { "client": "fx" }) and DAMAGE itemID=$mark; the saved world's Rifter has no ammo, so give and load it in setup ({ "slash": "/giveitem EMP S 1000" }, { "loadAmmo": "weapons", "charge": "EMP S" }).
+{ "description": "...", "world": "<a saved world e2e_status lists>",
+  "setup": ["undock", { "teleport": "Siseide" }, { "slash": "/gaterats on" }, { "waitFor": "ARRIVE who=npc", "timeout": 120 }],
+  "until": { "any": ["DESTROYED self"], "timeout": 300, "grace": 10 },
+  "expect": ["ARRIVE who=npc", { "match": "TARGET self locked", "note": "why it matters" }, "no DIVERGE status=open"] }
+- up: ${upKeys}.
+- setup steps: "login" (implicit), "undock", "dock", { "slash": "/heal" }, { "teleport": "Amamake" }, { "wait": 30 }, { "waitFor": "<condition>", "timeout": 300 }${pluginSteps.length ? `, and the plugins' ${pluginSteps.join(", ")}` : ""}.
+- player actions are steps too, in setup and in "during" (a second list that runs after setup, beside the stop conditions, and stops when the run stops): { "lock": "<target>", "as": "mark", "timeout": 30 }, { "activate": "weapons", "target": "$mark", "once": false }, { "deactivate": "weapons" }, { "orbit": "<target>", "range": 5000 }, { "approach": "<target>" }, { "keepAtRange": "<target>", "range": 10000 }, { "warpTo": "<target>", "range": 0 }, "stop", { "unlock": "<target>" }, { "loadAmmo": "weapons", "charge": "EMP S" }, { "launchDrones": "all", "count": 5 }, { "engageDrones": "<target>" }; each also takes "retry". A target is the nearest ball passing every term: "nearest npc", "name~Scout", "type~Rifter", "kind=station", "within=30km", "player", "$mark", an itemID. "as" on a lock binds the ball. Shots show as TARGET sourceLabel=self, FX self (needs "watch": { "client": "fx" }) and DAMAGE itemID=$mark.
 - until: any (stop conditions), timeout (s after setup, required), grace (s more after a stop), from ("setup" default: only events after setup count; "start": setup's own events count, e.g. the GRID an undock causes).
 - expect: conditions that should be seen; "no <condition>" expects none. A missing one fails the run (exit 1) but the run keeps watching.
-- Conditions: KIND then field tests. Kinds: GRID PRESENT ARRIVE LEAVE MODE TARGET DAMAGE DESTROYED KILLMAIL SIGHTING SELF DOCKED SYSTEM MOVED HUNT HERE INCOMING ENTER EXIT ENGAGEMENT LOSS LOG, and CLIENT (needs "watch": { "client": "all" }), FX (needs "client": "fx" or "all") and DIVERGE. Tests: field=value, field!=value, field~regex, field>=N (also > < <=), bare field (set), !field (unset). Units: 30km, 90s, 5min. "self" = about your ship. $name = IDs a trigger step bound with "as". A field is looked up on the event, then one level down (family on ARRIVE is lu.family). Field names are the ones e2e_watch with json:true prints; a check lists a kind's fields when you name a wrong one.
+- Conditions: KIND then field tests. Kinds: ${kinds}, and CLIENT (needs "watch": { "client": "all" }), FX (needs "client": "fx" or "all") and DIVERGE. Tests: field=value, field!=value, field~regex, field>=N (also > < <=), bare field (set), !field (unset). Units: 30km, 90s, 5min. "self" = about your ship. $name = IDs a step bound with "as". A field is looked up on the event, then one level down. Field names are the ones e2e_watch with json:true prints; a check lists a kind's fields when you name a wrong one.
 Write the file with e2e_run_scenario { name, scenario, check: true } first: that validates without booting. save:true writes it to tools/evejs-e2e/scenarios/ to commit with the feature; otherwise it goes to _local/e2e/scenarios/.
 
 Runs take minutes (boot about 25 s, then real-time grid behaviour). wait:false starts one in the background; e2e_report { run, waitSeconds } waits for it and reads the verdict. e2e_report { run, section: "pr" } gives the markdown to cite the run in a PR description.
 
-By hand: e2e_up { world: "lowsec-docked", realClock: true }, e2e_login, e2e_undock, e2e_grid, e2e_trigger, e2e_act, e2e_watch { seconds }, e2e_slash, e2e_teleport, e2e_log, e2e_down. A person can replay any run, or follow a live one, in the viewer: \`node tools/evejs-e2e/bin/e2e.js view [<run>]\` prints its URL. Calling e2e_watch and e2e_trigger in the same turn lets you see a trigger's effect. Replies are the CLI's own output, so a message naming a command such as \`e2e login\` means the tool e2e_login.`;
+By hand: e2e_up { world }, e2e_login, e2e_undock, e2e_grid, e2e_act, e2e_watch { seconds }, e2e_slash, e2e_teleport, e2e_log, e2e_down${pluginTools.length ? `, and the plugins' ${pluginTools.join(", ")}` : ""}. A person can replay any run, or follow a live one, in the viewer: \`node tools/evejs-e2e/bin/e2e.js view [<run>]\` prints its URL. Calling e2e_watch and an action in the same turn lets you see its effect. Replies are the CLI's own output, so a message naming a command such as \`e2e login\` means the tool e2e_login.`;
+  return [core, ...registry.primers.map((primer) => primer.text)].join("\n\n");
+}
+
+const INSTRUCTIONS = instructions();
 
 // ---------- helpers ----------
 
@@ -166,103 +179,88 @@ function runCli(args, { signal, onLine } = {}) {
 // The CLI arguments for the tools that are one command. Valued flags use
 // --flag=value so a value starting with "--" is still a value, and free text
 // goes after "--" so the CLI never reads it as flags.
-function cliArgs(tool, params = {}) {
-  const p = params;
-  const args = [];
+function argList(command) {
+  const args = [command];
   const flag = (name, value) => {
     if (value === undefined || value === null || value === false || value === "") return;
     args.push(value === true ? `--${name}` : `--${name}=${value}`);
   };
-  switch (tool) {
-    case "e2e_up":
-      args.push("up");
-      flag("world", p.world);
-      flag("fresh", p.fresh);
-      flag("real-clock", p.realClock);
-      flag("no-market", p.market === false);
-      flag("offgrid-travel", p.offgridTravel);
-      flag("offgrid-activity", p.offgridActivity);
-      flag("timeout", p.timeout);
-      return args;
-    case "e2e_down":
-      args.push("down");
-      flag("force", p.force);
-      return args;
-    case "e2e_login":
-      args.push("login");
-      flag("user", p.user);
-      flag("name", p.name);
-      return args;
-    case "e2e_undock":
-      return ["undock"];
-    case "e2e_teleport":
-      args.push("teleport");
-      flag("flight", p.flight);
-      args.push("--", String(p.system));
-      return args;
-    case "e2e_grid":
-      args.push("grid");
-      flag("range", p.range);
-      flag("all", p.all);
-      flag("json", p.json);
-      return args;
-    case "e2e_slash":
-      return ["slash", "--", String(p.command)];
-    case "e2e_watch":
-      args.push("watch");
-      flag("for", p.seconds === undefined ? WATCH_DEFAULT_SECONDS : p.seconds);
-      flag("every", p.every);
-      flag("offgrid-every", p.offgridEvery);
-      flag("grep", p.grep);
-      flag("no-log", p.log === false);
-      flag("client", p.client);
-      flag("diverge-meters", p.divergeMeters);
-      flag("positions", p.positions);
-      flag("run", p.run);
-      flag("json", p.json);
-      return args;
-    case "e2e_trigger": {
-      // The same argument names as a scenario's trigger step (scenario.js).
-      const positionals = [p.name];
-      if (p.name === "scout" && p.system !== undefined) positionals.push(String(p.system));
-      if (p.name === "fleet" && p.family !== undefined) positionals.push(String(p.family));
-      if (p.name === "materialize" && p.flight !== undefined) positionals.push(String(p.flight));
-      args.push("trigger");
-      if (p.name !== "materialize") flag("flight", p.flight);
-      flag("phase", p.phase);
-      flag("doctrine", p.doctrine);
-      flag("to", p.to);
-      flag("count", p.count);
-      flag("anchor", p.anchor);
-      flag("go", p.go);
-      flag("class", p.shipClass);
-      flag("gap", p.gap);
-      flag("json", p.json);
-      args.push("--", ...positionals);
-      return args;
-    }
-    case "e2e_act": {
-      // The same argument names as a scenario's action step (scenario.js).
-      args.push("act");
-      flag("range", p.range);
-      flag("target", p.action === "activate" ? p.target : undefined);
-      flag("once", p.once);
-      flag("charge", p.charge);
-      flag("count", p.count);
-      flag("timeout", p.timeout);
-      const what = p.action === "activate" ? p.modules : (p.target || p.modules || p.drones);
-      args.push("--", p.action, ...(what === undefined ? [] : [String(what)]));
-      return args;
-    }
-    case "e2e_log":
-      args.push("log");
-      flag("grep", p.grep);
-      flag("lines", p.lines);
-      flag("any-pid", p.anyPid);
-      return args;
-    default:
-      throw new ToolError(`no CLI command for ${tool}`);
-  }
+  return { args, flag };
+}
+
+// tool name -> (params) -> CLI arguments. Plugin tools bring their own args().
+const CLI_ARGS = {
+  e2e_up(p) {
+    const { args, flag } = argList("up");
+    flag("world", p.world);
+    flag("fresh", p.fresh);
+    flag("no-market", p.market === false);
+    for (const upFlag of REGISTRY.upFlags) flag(upFlag.flag, p[upFlag.key]);
+    flag("timeout", p.timeout);
+    return args;
+  },
+  e2e_down(p) {
+    const { args, flag } = argList("down");
+    flag("force", p.force);
+    return args;
+  },
+  e2e_login(p) {
+    const { args, flag } = argList("login");
+    flag("user", p.user);
+    flag("name", p.name);
+    return args;
+  },
+  e2e_undock: () => ["undock"],
+  e2e_teleport: (p) => ["teleport", "--", String(p.system)],
+  e2e_grid(p) {
+    const { args, flag } = argList("grid");
+    flag("range", p.range);
+    flag("all", p.all);
+    flag("json", p.json);
+    return args;
+  },
+  e2e_slash: (p) => ["slash", "--", String(p.command)],
+  e2e_watch(p) {
+    const { args, flag } = argList("watch");
+    flag("for", p.seconds === undefined ? WATCH_DEFAULT_SECONDS : p.seconds);
+    flag("every", p.every);
+    flag("offgrid-every", p.offgridEvery);
+    flag("grep", p.grep);
+    flag("no-log", p.log === false);
+    flag("client", p.client);
+    flag("diverge-meters", p.divergeMeters);
+    flag("positions", p.positions);
+    flag("run", p.run);
+    flag("json", p.json);
+    return args;
+  },
+  // The same argument names as a scenario's action step (scenario.js).
+  e2e_act(p) {
+    const { args, flag } = argList("act");
+    flag("range", p.range);
+    flag("target", p.action === "activate" ? p.target : undefined);
+    flag("once", p.once);
+    flag("charge", p.charge);
+    flag("count", p.count);
+    flag("timeout", p.timeout);
+    const what = p.action === "activate" ? p.modules : (p.target || p.modules || p.drones);
+    args.push("--", p.action, ...(what === undefined ? [] : [String(what)]));
+    return args;
+  },
+  e2e_log(p) {
+    const { args, flag } = argList("log");
+    flag("grep", p.grep);
+    flag("lines", p.lines);
+    flag("any-pid", p.anyPid);
+    return args;
+  },
+};
+
+function cliArgs(tool, params = {}) {
+  const plugin = REGISTRY.mcpTools.find((entry) => entry.name === tool && !CLI_ARGS[tool]);
+  const build = CLI_ARGS[tool] || (plugin && plugin.args);
+  if (!build) throw new ToolError(`no CLI command for ${tool}`);
+  return build(params);
 }
 
 function textResult(text, isError = false) {
@@ -276,13 +274,22 @@ function cliResult({ code, output, aborted }, where = "") {
 
 // ---------- scenarios and runs ----------
 
-// A bare name is a tree scenario, else a draft the MCP wrote; a path is a path.
+// A bare name is a tree scenario (the core's, then each plugin's), else a
+// draft the MCP wrote; a path is a path.
 function resolveScenario(name) {
   const text = String(name);
   if (text.endsWith(".json") || text.includes("/") || text.includes("\\")) return path.resolve(REPO_ROOT, text);
-  const tree = path.join(SCENARIO_DIR, `${text}.json`);
+  const tree = scenarioDirs({ registry: REGISTRY }).map(({ dir }) => path.join(dir, `${text}.json`));
+  const found = tree.find((file) => fs.existsSync(file));
+  if (found) return found;
   const draft = path.join(DRAFT_DIR, `${text}.json`);
-  return !fs.existsSync(tree) && fs.existsSync(draft) ? draft : tree;
+  return fs.existsSync(draft) ? draft : tree[0];
+}
+
+// A scenario committed with the tool, which a reviewer can rerun by name.
+function committedScenario(scenarioFile) {
+  const file = String(scenarioFile || "");
+  return file.startsWith("tools/evejs-e2e/scenarios/") || /^tools\/evejs-e2e\/plugins\/[^/]+\/scenarios\//.test(file);
 }
 
 function writeScenario(name, scenario, { save = false } = {}) {
@@ -393,7 +400,7 @@ function prCitation(state, report) {
   const sections = reportSections(report);
   const verdictLine = sections.head.split("\n").find((line) => /expectations met\./.test(line)) || "";
   const scenarioFile = String(result.scenarioFile || "");
-  const inTree = scenarioFile.startsWith("tools/evejs-e2e/scenarios/");
+  const inTree = committedScenario(scenarioFile);
   const reproduce = inTree ? path.basename(scenarioFile, ".json") : scenarioFile || result.name;
   const commit = result.commit
     ? `\`${result.commit.sha}\`${result.commit.dirty ? " plus uncommitted changes" : ""}`
@@ -496,16 +503,16 @@ const TOOLS = [
   {
     name: "e2e_up",
     description: "Start this tree's server (and market daemon) in the background and wait until a character can log in, " +
-      "about 25 s warm. For grid checks pass world (a saved world, e.g. lowsec-docked) and realClock: true. Without world " +
-      "or fresh it keeps the current world. Refuses if the server is already up. e2e_run_scenario does its own up and " +
-      "down, so don't call this before a run.",
+      "about 25 s warm. For grid checks pass world (a saved world e2e_status lists). Without world or fresh it keeps " +
+      "the current world. Refuses if the server is already up. e2e_run_scenario does its own up and down, so don't " +
+      "call this before a run.",
     inputSchema: schema({
       world: str("Saved world to restore before boot (e2e_status lists them)."),
-      realClock: bool("With world: start the Living Universe clock at real time (offset 0). Use it for grid checks."),
-      fresh: bool("Drop the game store; the boot seeds a new world. It has no pirate scouts."),
+      fresh: bool("Drop the game store; the boot seeds a new world from the reference data."),
       market: bool("Start the market daemon (default true)."),
-      offgridTravel: num("Off-grid travel time multiplier, 1 to 100. Smoke tests only.", { minimum: 1, maximum: 100 }),
-      offgridActivity: num("Off-grid activity time multiplier, 1 to 100. Smoke tests only.", { minimum: 1, maximum: 100 }),
+      ...Object.fromEntries(REGISTRY.upFlags.map((flag) => [flag.key, flag.type === "bool"
+        ? bool(flag.description || `--${flag.flag}`)
+        : num(flag.description || `--${flag.flag}`, { minimum: flag.min, maximum: flag.max })])),
       timeout: int("Seconds to wait for boot (default 600).", { minimum: 10 }),
     }),
     run: simple("e2e_up"),
@@ -520,24 +527,22 @@ const TOOLS = [
   {
     name: "e2e_login",
     description: "Log the test character in through the web gateway (account e2eagent, character Agent Observer by default). " +
-      "Needed once after e2e_up, before undock, grid, slash, teleport, trigger or watch.",
+      "Needed once after e2e_up, before undock, grid, slash, teleport, act or watch.",
     inputSchema: schema({ user: str("Account name (default e2eagent)."), name: str("Character name (default the account's first).") }),
     run: simple("e2e_login"),
   },
   {
     name: "e2e_undock",
-    description: "Undock the logged-in character's ship. Undocking puts the session in the system's scene, which is what makes " +
-      "Living Universe treat the system as observed. Undock protection hides the ship from hunter sensors for a while.",
+    description: "Undock the logged-in character's ship. Undocking puts the session in the system's scene, so the system " +
+      "counts as observed. The ship has undock protection for a while.",
     inputSchema: schema(),
     run: simple("e2e_undock"),
   },
   {
     name: "e2e_teleport",
-    description: "Teleport the ship to a system (lands on a stargate), optionally pinning a Living Universe flight there so " +
-      "it materializes as ships.",
+    description: "Teleport the ship to a system with stock /tr.",
     inputSchema: schema({
       system: str("Solar system name or ID, e.g. Amamake."),
-      flight: str("A flight ID to pin for materialization, e.g. living_flight_0908."),
     }, ["system"]),
     run: simple("e2e_teleport"),
   },
@@ -554,18 +559,17 @@ const TOOLS = [
   },
   {
     name: "e2e_slash",
-    description: "Run a slash command on the character's own session, as if typed in game chat, e.g. \"/tr me Amamake\", " +
+    description: "Run a slash command on the character's own session, as if typed in game chat, e.g. \"/tr me 30002537\", " +
       "\"/heal\", \"/dock\", \"/npc 3\", \"/ship Rifter\". Returns the command's reply. A refused command is an error.",
     inputSchema: schema({ command: str("The command line, starting with /.") }, ["command"]),
     run: simple("e2e_slash"),
   },
   {
     name: "e2e_watch",
-    description: "Watch the ship's grid and system for a number of seconds and return what changed, one line per event, " +
-      "with the Living Universe flight, hunt phase and controller decision behind each NPC: ARRIVE, LEAVE, MODE, TARGET, " +
-      "DAMAGE, DESTROYED, KILLMAIL, SIGHTING, HUNT, INCOMING, ENTER, EXIT, ENGAGEMENT, LOSS, LOG, DIVERGE and more. " +
-      "The call blocks for the whole watch. To see a trigger's effect, call e2e_trigger in the same turn. " +
-      "The timeline is also written to _local/e2e/runs/<id>/timeline.jsonl.",
+    description: "Watch the ship's grid and system for a number of seconds and return what changed, one line per event: " +
+      `${kindsOf(REGISTRY).filter((kind) => !["GRID", "CLIENT", "FX"].includes(kind)).join(", ")} and more, with what the ` +
+      "active plugins know about each NPC. The call blocks for the whole watch. To see an action's effect, call it in " +
+      "the same turn. The timeline is also written to _local/e2e/runs/<id>/timeline.jsonl.",
     inputSchema: schema({
       seconds: int(`How long to watch (default ${WATCH_DEFAULT_SECONDS}; the CLI's own default is 600).`, { minimum: 1, maximum: 3000 }),
       every: num("Grid sample interval, seconds (default 2).", { exclusiveMinimum: 0 }),
@@ -574,7 +578,7 @@ const TOOLS = [
         "diverge (only DIVERGE lines) or off.", { enum: ["all", "fx", "diverge", "off"] }),
       divergeMeters: num("Position error that counts as DIVERGE (default 5000).", { exclusiveMinimum: 0 }),
       positions: bool("Record ball positions too, so the viewer (e2e view) can draw this watch."),
-      grep: str("Keep every server log line matching this regex instead of the default LU lines."),
+      grep: str("Keep every server log line matching this regex instead of the default NPC and plugin lines."),
       log: bool("Include server log lines (default true)."),
       json: bool("Print events as JSON lines, with the field names scenario conditions use."),
       run: str("Run ID for the timeline directory (default: the start time)."),
@@ -582,38 +586,13 @@ const TOOLS = [
     run: simple("e2e_watch"),
   },
   {
-    name: "e2e_trigger",
-    description: "Set a Living Universe feature in motion through the entry point the feature itself uses; every gate still " +
-      "applies, and a refusal names the gate. The first line names the flight or hunt ID that watch lines carry. " +
-      "scout {system?, flight?}: a pirate scout goes to the system (default yours) and holds. " +
-      "hunt {flight?, phase?}: a materialized pirate flight on your system starts a hunt on you. " +
-      "fleet {family, doctrine?, to?, count?, anchor?}: Living Universe flights of a family travel to your grid or a system. " +
-      "materialize {flight, go?}: a flight stands up as ships now; go teleports you to it. " +
-      "skirmish {count?, shipClass?, gap?}: an alliance skirmish on your grid.",
-    inputSchema: schema({
-      name: str("The trigger.", { enum: ["scout", "hunt", "fleet", "materialize", "skirmish"] }),
-      system: str("scout: target system name or ID."),
-      flight: str("scout, hunt: the flight to use; materialize: the flight to stand up."),
-      phase: str("hunt: start phase.", { enum: ["stalking", "committed"] }),
-      family: str("fleet: the flight family, e.g. pirate, police."),
-      doctrine: str("fleet: doctrine key, e.g. sanshas."),
-      to: str("fleet: self (default) or a system name or ID."),
-      count: int("fleet: flights, 1 to 8; skirmish: hulls a side, 1 to 20.", { minimum: 1, maximum: 20 }),
-      anchor: int("fleet: item ID to anchor the journey on."),
-      go: bool("materialize: teleport there too."),
-      shipClass: str("skirmish: ship class."),
-      gap: num("skirmish: separation in metres, 500 to 200000."),
-      json: bool("The raw reply as JSON."),
-    }, ["name"]),
-    run: simple("e2e_trigger"),
-  },
-  {
     name: "e2e_act",
     description: "Act as the player, through the calls the web gateway allows a client: fly, lock, switch modules on and " +
       "off, load ammo and use drones. The server applies every rule (range, lock time, capacitor, ammo) and a refusal " +
       "is in its own words. A target is the nearest ball on grid that passes every term: \"nearest npc\", " +
-      "\"npc family=police\", \"name~Scout\", \"type~Rifter\", \"kind=station\", \"flight=living_flight_0630\", " +
-      "\"within=30km\", \"player\" or an itemID. Modules: weapons (default), high, mid, low, all, name~..., group~..., " +
+      "\"name~Scout\", \"type~Rifter\", \"kind=station\", \"within=30km\", \"player\" or an itemID" +
+      `${Object.keys(REGISTRY.targetFields).length ? `, and the plugins' ${Object.keys(REGISTRY.targetFields).map((term) => `${term}=`).join(", ")}` : ""}. ` +
+      "Modules: weapons (default), high, mid, low, all, name~..., group~..., " +
       "an itemID. Watch the effect with e2e_watch in the same turn (client: \"fx\" shows the guns firing).",
     inputSchema: schema({
       action: str("The action.", { enum: ["approach", "orbit", "keepAtRange", "warpTo", "stop", "lock", "unlock", "activate",
@@ -766,6 +745,15 @@ const TOOLS = [
     },
   },
 ];
+
+// The plugins' tools (registry.mcpTools), each one CLI command: name
+// e2e_<plugin>_<tool>, description, inputSchema and args(params).
+for (const tool of REGISTRY.mcpTools) {
+  if (TOOLS.some((other) => other.name === tool.name)) continue;
+  const inputSchema = tool.inputSchema && tool.inputSchema.type === "object"
+    ? { properties: {}, required: [], ...tool.inputSchema } : schema();
+  TOOLS.push({ name: tool.name, description: String(tool.description || tool.name), inputSchema, run: simple(tool.name) });
+}
 
 const TOOLS_BY_NAME = new Map(TOOLS.map((tool) => [tool.name, tool]));
 
@@ -937,7 +925,9 @@ module.exports = {
   callTool,
   checkParams,
   cliArgs,
+  committedScenario,
   createServer,
+  instructions,
   prCitation,
   reportSections,
   resolveScenario,
