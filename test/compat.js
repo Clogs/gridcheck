@@ -10,7 +10,8 @@
 // fixtures again and compares them with the committed ones, and runs the
 // tests that need a real tree. On stock with the three patches applied it
 // also refuses a loadout the character hasn't the skills for, builds the
-// starter world and runs the five core scenarios on it. Writes
+// starter world and runs the five core scenarios on it, and drives e2e gui
+// through its API against the tree. Writes
 // compat-report.md and exits 1 on any failure.
 //
 // stock  the zip is unpacked once into --scratch (F:/LU/_compat by default,
@@ -500,6 +501,74 @@ async function stockPatchRoundTrip(lane, tree) {
   }
 }
 
+// e2e gui from this checkout, driven through the API its page uses: the tree's
+// summary and patches, a run's report and frame, and one patch applied and
+// reverted by preview, byte for byte.
+async function guiRoundTrip(tree) {
+  const gui = spawn(process.execPath, [REPO_CLI, "gui", "--tree", tree], { cwd: REPO_ROOT, windowsHide: true,
+    stdio: ["ignore", "pipe", "pipe"] });
+  let printed = "";
+  try {
+    const { base, token } = await new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new CompatError(`e2e gui printed no URL in 30 s:\n${printed}`)), 30_000);
+      const take = (chunk) => {
+        printed += chunk;
+        const match = /(http:\/\/127\.0\.0\.1:\d+)\/gui#token=([0-9a-f]{64})/.exec(printed);
+        if (match) {
+          clearTimeout(timer);
+          resolve({ base: match[1], token: match[2] });
+        }
+      };
+      gui.stdout.on("data", take);
+      gui.stderr.on("data", take);
+      gui.once("exit", (code) => reject(new CompatError(`e2e gui exited ${code}:\n${printed}`)));
+    });
+    const call = async (route, body) => {
+      const response = await fetch(`${base}${route}`, { method: body ? "POST" : "GET",
+        headers: { authorization: `Bearer ${token}`, ...(body ? { "content-type": "application/json" } : {}) },
+        body: body ? JSON.stringify(body) : undefined, signal: AbortSignal.timeout(300_000) });
+      const json = await response.json();
+      if (!response.ok || json.ok === false) throw new CompatError(`${route}: HTTP ${response.status} ${json.error || ""}`);
+      return json;
+    };
+    if ((await fetch(`${base}/gui/api/trees`)).status !== 401) throw new CompatError("the API answered without the token");
+    const listed = (await call("/gui/api/trees")).trees;
+    const entry = listed.find((row) => path.resolve(row.root) === path.resolve(tree));
+    if (!entry) throw new CompatError(`the tree isn't in the GUI's list: ${listed.map((row) => row.root).join(", ")}`);
+    const summary = (await call(`/gui/api/tree?tree=${entry.id}`)).tree;
+    if (!summary.copy.ok || !summary.copy.upToDate) throw new CompatError(`the copy reads as drifted or old: ${JSON.stringify(summary.copy)}`);
+    const patches = (await call(`/gui/api/patches?tree=${entry.id}`)).patches.json;
+    if (!Array.isArray(patches) || patches.some((row) => row.state !== "absent")) throw new CompatError(`patch status: ${JSON.stringify(patches)}`);
+    const runs = (await call(`/gui/api/runs?tree=${entry.id}`)).runs;
+    const smoke = runs.find((run) => run.result && run.result.name === "smoke-undock" && run.result.passed);
+    if (!smoke) throw new CompatError("no passed smoke-undock run in the Runs list");
+    const detail = await call(`/gui/api/run?tree=${entry.id}&run=${encodeURIComponent(smoke.runID)}`);
+    if (!/^# Scenario smoke-undock: PASSED/.test(detail.report || "") || !detail.frames.length) {
+      throw new CompatError(`the run's report or frames are missing: ${JSON.stringify({ frames: detail.frames })}`);
+    }
+    const frame = await fetch(`${base}/gui/api/frame?tree=${entry.id}&run=${encodeURIComponent(smoke.runID)}&file=${encodeURIComponent(detail.frames[0])}`,
+      { headers: { authorization: `Bearer ${token}` } });
+    if (frame.headers.get("content-type") !== "image/svg+xml") throw new CompatError(`a frame came back as ${frame.headers.get("content-type")}`);
+
+    const target = path.join(tree, "server", "src", "edge", "chat", "chatEdgeRuntime.js");
+    const before = sha256File(target);
+    const applyPreview = (await call("/gui/api/preview", { tree: entry.id, action: "patch-apply", id: "xmpp-port" })).preview;
+    if (!applyPreview.ok || !/would apply xmpp-port/.test(applyPreview.steps[0].output)) throw new CompatError(`apply preview: ${JSON.stringify(applyPreview)}`);
+    if (sha256File(target) !== before) throw new CompatError("the preview changed the file");
+    const applied = (await call("/gui/api/run", { previewID: applyPreview.previewID })).result;
+    if (!applied.ok) throw new CompatError(`apply: ${JSON.stringify(applied)}`);
+    const revertPreview = (await call("/gui/api/preview", { tree: entry.id, action: "patch-revert", id: "xmpp-port" })).preview;
+    const reverted = (await call("/gui/api/run", { previewID: revertPreview.previewID })).result;
+    if (!reverted.ok) throw new CompatError(`revert: ${JSON.stringify(reverted)}`);
+    if (sha256File(target) !== before) throw new CompatError("chatEdgeRuntime.js isn't byte-identical after the GUI's revert");
+    return `tree ${entry.id}: copy matches at ${String(summary.copy.commit).slice(0, 8)}, ${patches.length} patches absent, ` +
+      `${runs.length} runs (report and ${detail.frames.length} frame(s) of ${smoke.runID}); xmpp-port previewed, applied and ` +
+      "reverted byte for byte";
+  } finally {
+    gui.kill();
+  }
+}
+
 async function stockLane(flags, context) {
   const lane = "stock";
   let tree = null;
@@ -534,6 +603,7 @@ async function stockLane(flags, context) {
     }
   }
   await check(lane, "run smoke-undock (managed)", () => runScenario(tree, []));
+  await check(lane, "gui: summary, runs, a patch by preview", () => guiRoundTrip(tree));
   await stockPatchRoundTrip(lane, tree);
 
   await check(lane, "init (attach)", () => lastLine(cliIn(tree, ["init", "--mode", "attach", "--force"])));

@@ -118,7 +118,9 @@ this checkout's HEAD into each tree. Then it runs `init`, `doctor`, `login`, `un
 `watch` and `smoke-undock`: on stock in managed and in attach mode, on LU in managed mode on its
 saved world `lowsec-docked`. On stock with the three patches applied it also checks that a
 fresh character's loadout is refused with its missing skills, builds `starter`, and runs the five
-core scenarios on it. It records the fixtures again and fails if they no longer match the
+core scenarios on it. It drives `e2e gui` through its API against the stock tree: the tree's
+summary, its patches, a run's report and frame, and one patch applied and reverted by preview. It
+records the fixtures again and fails if they no longer match the
 committed ones: the encodings exactly, the session and grid by shape. It runs the tests that need a
 real tree and puts LU's vendored copy back (`--keep-lu` leaves it). The lanes run one after the
 other, because two large servers at once can lose a persistence lease on one machine.
