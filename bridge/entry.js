@@ -24,6 +24,7 @@ const { createGridReader } = require("./grid");
 const { annotateRow, createGridWatch } = require("./watch");
 const { createDestinyTee, probeDestinyLayout } = require("./destiny");
 const { createAgentBridgeViewer } = require("./viewer");
+const { createLoadout, loadLoadoutModules } = require("./loadout");
 const { createStock, serverRequire } = require("./stock");
 const { DEFAULT_PLUGINS_DIR, loadPlugins, startPlugins, stopPlugins } = require("./plugins");
 const { createToolRegistry, treeAt } = require("../core/plugins");
@@ -134,6 +135,17 @@ function createService({ serverRoot, stock: givenStock = null, pluginsDir = DEFA
     });
     const layout = probeLayout(stock);
     if (!layout.ok) log.warn(`[AgentBridge] client view off: ${layout.error}`);
+    // Loaded on the first loadout or capabilities call: the ship runtime pulls
+    // in half the server, which must not happen while the loader only scans.
+    let loadoutBuilder = null;
+    const loadout = () => {
+      if (!loadoutBuilder) {
+        const { modules, missing } = loadLoadoutModules(serverRequire(serverRoot));
+        loadoutBuilder = missing.length ? { error: missing.join("; "), missing } : { run: createLoadout(modules), missing: [] };
+        if (missing.length) log.warn(`[AgentBridge] loadout off: ${loadoutBuilder.error}`);
+      }
+      return loadoutBuilder;
+    };
     // A PackagedAction carries its updates as marshalled bytes.
     const destinyTee = createDestinyTee({
       decodePackaged: (bytes) => stock.marshal.marshalDecodeExact(bytes),
@@ -158,6 +170,7 @@ function createService({ serverRoot, stock: givenStock = null, pluginsDir = DEFA
       requestShutdown: () => setTimeout(() => process.emit("SIGTERM", "SIGTERM"), 100),
       log,
       destinyTee,
+      loadout,
       gridAnnotate: (row, entity, session) => annotateRow(hooks, row, entity, {
         nowMs: Date.now(),
         characterID: session && session.characterID,
@@ -174,6 +187,7 @@ function createService({ serverRoot, stock: givenStock = null, pluginsDir = DEFA
           allowlist: optional(() => stock.webGateway.WEB_CALL_ALLOWLIST),
           allowlistError: "the gateway exports no WEB_CALL_ALLOWLIST",
           destiny: layout,
+          loadout: { missing: loadout().missing },
         },
         live: {
           pid: process.pid,

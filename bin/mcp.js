@@ -59,7 +59,7 @@ To verify a feature, write a scenario and run it (e2e_run_scenario). A scenario 
   "until": { "any": ["DESTROYED self"], "timeout": 300, "grace": 10 },
   "expect": ["ARRIVE who=npc", { "match": "TARGET self locked", "note": "why it matters" }, "no DIVERGE status=open"] }
 - up: ${upKeys}.
-- setup steps: "login" (implicit), "undock", "dock", { "slash": "/heal" }, { "teleport": "Amamake" }, { "wait": 30 }, { "waitFor": "<condition>", "timeout": 300 }${pluginSteps.length ? `, and the plugins' ${pluginSteps.join(", ")}` : ""}.
+- setup steps: "login" (implicit), "undock", "dock", { "slash": "/heal" }, { "teleport": "Amamake" }, { "loadout": { "ship": "Tristan", "modules": ["Light Neutron Blaster II x2"], "drones": ["Hobgoblin II x5"], "charges": ["Antimatter Charge S"] } }, { "wait": 30 }, { "waitFor": "<condition>", "timeout": 300 }${pluginSteps.length ? `, and the plugins' ${pluginSteps.join(", ")}` : ""}.
 - player actions are steps too, in setup and in "during" (a second list that runs after setup, beside the stop conditions, and stops when the run stops): { "lock": "<target>", "as": "mark", "timeout": 30 }, { "activate": "weapons", "target": "$mark", "once": false }, { "deactivate": "weapons" }, { "orbit": "<target>", "range": 5000 }, { "approach": "<target>" }, { "keepAtRange": "<target>", "range": 10000 }, { "warpTo": "<target>", "range": 0 }, "stop", { "unlock": "<target>" }, { "loadAmmo": "weapons", "charge": "EMP S" }, { "launchDrones": "all", "count": 5 }, { "engageDrones": "<target>" }; each also takes "retry". A target is the nearest ball passing every term: "nearest npc", "name~Scout", "type~Rifter", "kind=station", "within=30km", "player", "$mark", an itemID. "as" on a lock binds the ball. Shots show as TARGET sourceLabel=self, FX self (needs "watch": { "client": "fx" }) and DAMAGE itemID=$mark.
 - until: any (stop conditions), timeout (s after setup, required), grace (s more after a stop), from ("setup" default: only events after setup count; "start": setup's own events count, e.g. the GRID an undock causes).
 - expect: conditions that should be seen; "no <condition>" expects none. A missing one fails the run (exit 1) but the run keeps watching.
@@ -68,7 +68,7 @@ Write the file with e2e_run_scenario { name, scenario, check: true } first: that
 
 Runs take minutes (boot about 25 s, then real-time grid behaviour). wait:false starts one in the background; e2e_report { run, waitSeconds } waits for it and reads the verdict. e2e_report { run, section: "pr" } gives the markdown to cite the run in a PR description.
 
-By hand: e2e_up { world }, e2e_login, e2e_undock, e2e_grid, e2e_act, e2e_watch { seconds }, e2e_slash, e2e_teleport, e2e_log, e2e_down${pluginTools.length ? `, and the plugins' ${pluginTools.join(", ")}` : ""}. A person can replay any run, or follow a live one, in the viewer: \`node tools/evejs-e2e/bin/e2e.js view [<run>]\` prints its URL. Calling e2e_watch and an action in the same turn lets you see its effect. Replies are the CLI's own output, so a message naming a command such as \`e2e login\` means the tool e2e_login.`;
+By hand: e2e_up { world }, e2e_login, e2e_undock, e2e_loadout, e2e_grid, e2e_act, e2e_watch { seconds }, e2e_slash, e2e_teleport, e2e_log, e2e_down${pluginTools.length ? `, and the plugins' ${pluginTools.join(", ")}` : ""}. A person can replay any run, or follow a live one, in the viewer: \`node tools/evejs-e2e/bin/e2e.js view [<run>]\` prints its URL. Calling e2e_watch and an action in the same turn lets you see its effect. Replies are the CLI's own output, so a message naming a command such as \`e2e login\` means the tool e2e_login.`;
   return [core, ...registry.primers.map((primer) => primer.text)].join("\n\n");
 }
 
@@ -226,6 +226,14 @@ const CLI_ARGS = {
     return args;
   },
   e2e_slash: (p) => ["slash", "--", String(p.command)],
+  e2e_loadout(p) {
+    const { args, flag } = argList("loadout");
+    const spec = { ship: p.ship };
+    for (const key of ["modules", "drones", "cargo", "charges"]) if (p[key] !== undefined) spec[key] = p[key];
+    flag("spec", JSON.stringify(spec));
+    flag("json", p.json);
+    return args;
+  },
   e2e_watch(p) {
     const { args, flag } = argList("watch");
     flag("for", p.seconds === undefined ? WATCH_DEFAULT_SECONDS : p.seconds);
@@ -558,6 +566,22 @@ const TOOLS = [
       system: str("Solar system name or ID, e.g. Amamake."),
     }, ["system"]),
     run: simple("e2e_teleport"),
+  },
+  {
+    name: "e2e_loadout",
+    description: "Give the logged-in character a new ship by item name, fitted, with drones, cargo and loaded charges, and " +
+      "board it where it is, docked or in space (in space the old ship is removed). Names must be exact item names; " +
+      "\"Name xN\" is N of one. Every skill the hull, modules, drones and charges need is checked first: a refusal lists " +
+      "the missing skills (or the unknown names) and changes nothing. /allskills grants every skill.",
+    inputSchema: schema({
+      ship: str("The hull, e.g. Tristan."),
+      modules: { type: "array", items: { type: "string" }, description: "Fitted modules, e.g. [\"Light Neutron Blaster II x2\", \"1MN Afterburner II\"]." },
+      drones: { type: "array", items: { type: "string" }, description: "Drone bay, e.g. [\"Hobgoblin II x5\"]." },
+      cargo: { type: "array", items: { type: "string" }, description: "Cargo hold, e.g. [\"Antimatter Charge S x400\"]." },
+      charges: { type: "array", items: { type: "string" }, description: "Charges to load: a full clip in every fitted module that takes one; no count." },
+      json: bool("The bridge's reply as JSON."),
+    }, ["ship"]),
+    run: simple("e2e_loadout"),
   },
   {
     name: "e2e_grid",

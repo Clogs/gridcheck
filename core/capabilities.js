@@ -10,12 +10,14 @@
 //   patches    which optional stock edits are applied, detected or absent
 //   plugins    active, and skipped with the reason
 //   listeners  which ports `e2e up` can move (e2e.config.json)
+//   loadout    whether the stock exports POST /loadout builds a ship from are there
 
 const fs = require("node:fs");
 const path = require("node:path");
 const { spawnSync } = require("node:child_process");
 
 const patchEngine = require("./patches");
+const { LOADOUT_EXPORTS } = require("../bridge/loadout");
 
 const COPY_ROOT = path.join(__dirname, "..");
 const { PATCHES_DIR, PATCH_MARKER } = patchEngine;
@@ -106,6 +108,26 @@ function probeTreeOffline(serverRoot, { timeoutMs = 60_000 } = {}) {
   return JSON.parse(line.slice("@@capabilities@@".length));
 }
 
+// The loadout's stock exports, read from the files without loading them: the
+// ship runtime pulls in the whole space runtime. A name counts when it appears
+// in the file's last module.exports block.
+function probeLoadoutExports(serverRoot) {
+  const missing = [];
+  for (const [relativePath, names] of Object.values(LOADOUT_EXPORTS)) {
+    let text;
+    try {
+      text = fs.readFileSync(path.join(serverRoot, "src", `${relativePath}.js`), "utf8");
+    } catch (_error) {
+      missing.push(`${relativePath} is not in the tree`);
+      continue;
+    }
+    const exportsBlock = text.slice(text.lastIndexOf("module.exports"));
+    const absent = names.filter((name) => !new RegExp(`\\b${name}\\b`).test(exportsBlock));
+    if (absent.length) missing.push(`${relativePath} has no ${absent.join(", ")}`);
+  }
+  return { missing };
+}
+
 // The vendored copy's VENDOR.json, or this checkout's package.json.
 function copyInfo(root = COPY_ROOT) {
   const read = (file) => {
@@ -148,6 +170,7 @@ function buildReport({ treeRoot, serverRoot, config = null, registry = null, pro
   patches = detectPatches(serverRoot) }) {
   const gateway = checkGatewayCalls(probe ? probe.allowlist : null, probe ? probe.allowlistError : null);
   const destiny = probe && probe.destiny ? probe.destiny : { ok: false, error: "not probed", balls: 0 };
+  const loadout = probe && probe.loadout ? probe.loadout : probeLoadoutExports(serverRoot);
   return {
     tool: copyInfo(),
     tree: { root: treeRoot, serverRoot, config: config ? { file: config.file, exists: config.exists, mode: config.mode,
@@ -157,6 +180,7 @@ function buildReport({ treeRoot, serverRoot, config = null, registry = null, pro
     patches,
     plugins: pluginReport(registry),
     listeners: config ? config.listeners : {},
+    loadout: { ok: !loadout.missing.length, missing: loadout.missing },
     ...(live ? { live } : {}),
   };
 }
@@ -170,6 +194,7 @@ module.exports = {
   copyInfo,
   detectPatches,
   loadPatches,
+  probeLoadoutExports,
   probeTreeOffline,
   sessionShape,
 };

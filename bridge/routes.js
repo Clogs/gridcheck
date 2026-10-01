@@ -11,6 +11,8 @@
 //                                     NDJSON stream of grid changes and plugin events; one call per watch.
 //                                     client: "all" (default), "diverge" or "off"
 //   POST /tee      { characterID }    start keeping the client's view of that gateway session
+//   POST /loadout  { characterID, ship, modules, drones, cargo, charges }
+//                                     a new ship by item name, fitted and boarded (loadout.js)
 //   POST /shutdown                    graceful stop, as if the process got SIGTERM
 //   GET  /capabilities ?characterID=  what this tree can do for the tool (core/capabilities.js);
 //                                     with characterID, also that session's shape
@@ -80,7 +82,7 @@ function createRouteTable(log) {
 
 function createAgentBridgeRoutes({
   findSession, executeChatCommand, readGrid, watcher, requestShutdown, log, destinyTee = null, gridAnnotate = null,
-  viewer = null, extraRoutes = [], capabilities = null,
+  viewer = null, extraRoutes = [], capabilities = null, loadout = null,
 }) {
   const logger = log || { debug() {} };
 
@@ -198,6 +200,24 @@ function createAgentBridgeRoutes({
     return { statusCode: 200, body: { ok: true, attached: attached.attached, client: destinyTee.describe(attached.state) } };
   }
 
+  // loadout: () -> the builder, or { error } when this tree lacks what it needs.
+  function buildLoadout(body) {
+    const found = sessionFor(body && body.characterID);
+    if (found.error) return found.error;
+    const builder = typeof loadout === "function" ? loadout() : null;
+    if (!builder || typeof builder.run !== "function") {
+      return { statusCode: 503, body: { ok: false, error: `This tree can't build a loadout: ${(builder && builder.error) || "not loaded"}.` } };
+    }
+    const { characterID: _characterID, ...spec } = body;
+    try {
+      const reply = builder.run(found.session, spec);
+      logger.debug(`[AgentBridge] ${found.session.characterID} loadout ${spec.ship} -> ${reply.body.ok ? "boarded" : reply.body.error}`);
+      return reply;
+    } catch (error) {
+      return { statusCode: 500, body: { ok: false, error: `loadout failed: ${error.message}` } };
+    }
+  }
+
   function shutdown() {
     if (typeof requestShutdown !== "function") {
       return { statusCode: 503, body: { ok: false, error: "Shutdown is not available." } };
@@ -211,6 +231,7 @@ function createAgentBridgeRoutes({
   table.add("GET /grid", ({ query }) => grid(query), "core");
   table.add("POST /watch", ({ body }) => watch(body), "core");
   table.add("POST /tee", ({ body }) => tee(body), "core");
+  table.add("POST /loadout", ({ body }) => buildLoadout(body), "core");
   table.add("POST /shutdown", () => shutdown(), "core");
   table.add("GET /capabilities", ({ query }) => {
     if (typeof capabilities !== "function") return { statusCode: 503, body: { ok: false, error: "Capabilities are not available." } };

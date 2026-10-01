@@ -28,6 +28,7 @@ const worlds = require("../core/worlds");
 const scenarioTools = require("../core/scenario");
 const frameTools = require("../core/frames");
 const actionTools = require("../core/actions");
+const loadoutTools = require("../core/loadout");
 const vendor = require("../core/vendor");
 const patchEngine = require("../core/patches");
 
@@ -667,6 +668,59 @@ async function cmdTeleport(positionals, flags) {
   return runSlash(`/tr me ${systemID}`);
 }
 
+// ---------- loadout ----------
+
+// e2e loadout Tristan --modules "Light Neutron Blaster II x2, 1MN Afterburner II" --drones "Hobgoblin II x5"
+// or --file <loadout.json>, or --spec '<json>' (what the MCP tool passes).
+function loadoutFromArgs(positionals, flags) {
+  let raw;
+  if (flags.spec !== undefined || flags.file !== undefined) {
+    if (flags.spec !== undefined && flags.file !== undefined) throw new CliError("pass --spec or --file, not both");
+    const text = flags.spec !== undefined ? String(flags.spec) : (() => {
+      try {
+        return fs.readFileSync(path.resolve(String(flags.file)), "utf8");
+      } catch (error) {
+        throw new CliError(`--file ${flags.file}: ${error.code === "ENOENT" ? "no such file" : error.message}`);
+      }
+    })();
+    try {
+      raw = JSON.parse(text);
+    } catch (error) {
+      throw new CliError(`the loadout is not valid JSON: ${error.message}`);
+    }
+  } else {
+    raw = { ship: positionals.join(" ").trim() };
+    for (const key of loadoutTools.LISTS) {
+      if (flags[key] !== undefined) raw[key] = loadoutTools.splitList(flags[key]);
+    }
+  }
+  const { loadout, problems } = loadoutTools.normalizeLoadout(raw);
+  if (!loadout) throw new CliError(`${problems.join("\n")}\nusage: ${CORE_COMMANDS.loadout.usage.join("\n       ")}`);
+  return loadout;
+}
+
+// The bridge builds and boards it. A refusal (an unknown name, a missing
+// skill) changes nothing and lists why.
+async function runLoadout(loadout, { json = false } = {}) {
+  const state = requireLogin(readState());
+  const handshake = requireHandshake();
+  await keepAlive(state);
+  const { status, json: reply } = await requestJSON(`http://${handshake.host}:${handshake.port}/loadout`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${handshake.token}` },
+    body: { characterID: state.characterID, ...loadoutTools.loadoutBody(loadout) },
+  });
+  if (status === 404) throw new CliError("this tree's agent bridge has no /loadout; its server runs an older evejs-e2e copy");
+  const text = json ? JSON.stringify(reply, null, 2) : loadoutTools.formatLoadoutReply(reply);
+  console.log(text);
+  if (!reply.ok) process.exitCode = 2;
+  return { ok: Boolean(reply.ok), text, ids: reply.ok ? [reply.ship.itemID] : [] };
+}
+
+function cmdLoadout(positionals, flags) {
+  return runLoadout(loadoutFromArgs(positionals, flags), { json: Boolean(flags.json) });
+}
+
 // ---------- player actions ----------
 
 let itemTypes = null;
@@ -835,6 +889,7 @@ const STEP_RUNNERS = {
   dock: () => runSlash("/dock"),
   slash: (step) => runSlash(step.command),
   teleport: (step) => cmdTeleport([String(step.systemID)], {}),
+  loadout: (step) => runLoadout(step.loadout),
 };
 
 async function runScenarioStep(step, bindings = {}) {
@@ -1596,6 +1651,10 @@ function formatDoctor(report) {
     ? `listeners  move: ${listeners.filter(([, row]) => row.movable).map(([name]) => name).join(", ") || "none"}` +
       `${listeners.some(([, row]) => !row.movable) ? `; stay on stock ports: ${listeners.filter(([, row]) => !row.movable).map(([name, row]) => `${name} (${row.via})`).join(", ")}` : ""}`
     : "listeners  not probed yet (e2e init)");
+  if (report.loadout) {
+    lines.push(report.loadout.ok ? "loadout    the stock ship helpers are there; e2e loadout can build a ship"
+      : `loadout    OFF: ${report.loadout.missing.join("; ")}`);
+  }
   const live = report.live;
   if (live && live.ports) {
     lines.push(`server     pid ${live.pid}: game :${live.ports.game || "?"}, gateway :${live.ports.gateway || "?"}, agent bridge :${live.ports.agentBridge || "?"}`);
@@ -1725,6 +1784,11 @@ const CORE_COMMANDS = {
     },
   },
   teleport: { usage: ["teleport <system name|ID>"], run: cmdTeleport },
+  loadout: {
+    usage: ["loadout <ship> [--modules \"Name xN, ...\"] [--drones ...] [--cargo ...] [--charges ...] [--json]",
+      "loadout --file <loadout.json> | --spec '<json>'"],
+    run: cmdLoadout,
+  },
   grid: { usage: ["grid [--range 10000] [--all] [--json]"], run: (_positionals, flags) => cmdGrid(flags) },
   watch: {
     usage: ["watch [--for 600] [--every 2] [--offgrid-every 5] [--grep <regex>] [--no-log] [--json] [--run <id>]",

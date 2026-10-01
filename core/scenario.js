@@ -16,6 +16,7 @@ const { defaultRegistry } = require("./plugins");
 const { defaultTreeConfig } = require("./treeConfig");
 const { formatOffset, formatTimelineEvent } = require("./timeline");
 const actionTools = require("./actions");
+const loadoutTools = require("./loadout");
 
 const SCENARIO_DIR = path.join(__dirname, "..", "scenarios");
 // The tree's own scenarios, committed with its features (e2e.config.json
@@ -54,6 +55,7 @@ const CORE_STEP_KEYS = {
   dock: ["dock"],
   slash: ["slash"],
   teleport: ["teleport"],
+  loadout: ["loadout"],
   wait: ["wait"],
   waitFor: ["waitFor", "timeout"],
   ...Object.fromEntries(actionTools.ACTION_TYPES.map((type) => [type, ACTION_STEP_KEYS(type)])),
@@ -114,6 +116,7 @@ function describeStep(step, registry = defaultRegistry()) {
     case "dock": return step.type;
     case "slash": return `slash ${step.command}`;
     case "teleport": return `teleport ${step.system}`;
+    case "loadout": return loadoutTools.describeLoadout(step.loadout);
     case "wait": return `wait ${step.seconds}s`;
     case "waitFor": return `waitFor ${step.condition.text} (up to ${step.seconds}s)`;
     default: {
@@ -345,6 +348,13 @@ function validateScenario(raw, { source = "scenario", defaultName = null, worldE
             }
           }
           break;
+        case "loadout": {
+          // "Tristan", or { "ship": "Tristan", "modules": [...], ... } (core/loadout.js).
+          const checked = loadoutTools.normalizeLoadout(typeof value === "string" ? { ship: value } : value);
+          if (checked.loadout) step.loadout = checked.loadout;
+          else for (const message of checked.problems) problem(`${where}.loadout`, message);
+          break;
+        }
         case "wait":
           if (!positive(value)) problem(where, "wait: seconds, above 0");
           else {
