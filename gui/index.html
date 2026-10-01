@@ -4,155 +4,250 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>evejs-e2e</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 20 20%22%3E%3Cpolygon points=%2210,1 19,10 10,19 1,10%22 fill=%22none%22 stroke=%22%23f0a848%22 stroke-width=%221.6%22/%3E%3Ccircle cx=%2210%22 cy=%2210%22 r=%223%22 fill=%22%23f0a848%22/%3E%3C/svg%3E">
 <link rel="stylesheet" href="/gui/gui.css">
 </head>
 <body>
-<header>
-  <strong>evejs-e2e</strong>
-  <span id="context" class="muted"></span>
-  <label>Tree <select id="tree"></select></label>
-  <span id="tree-badges"></span>
+<header class="app-head">
+  <div class="brand">
+    <span class="logo"><svg viewBox="0 0 20 20" aria-hidden="true"><polygon points="10,1 19,10 10,19 1,10"/><circle cx="10" cy="10" r="3"/></svg></span>
+    <b>evejs-e2e</b><span id="context" class="ver"></span>
+  </div>
+  <label class="tree"><span class="lbl">Tree</span><select id="tree"></select></label>
+  <span id="tree-badges" class="row"></span>
+  <span class="spacer"></span>
   <span id="message" role="status"></span>
 </header>
-<nav id="tabs" role="tablist">
-  <button type="button" role="tab" data-tab="runs">Runs</button>
+<nav id="tabs" class="tabs" role="tablist">
+  <button type="button" role="tab" data-tab="runs">Runs <span id="runs-n" class="n" hidden></span></button>
   <button type="button" role="tab" data-tab="install">Install</button>
-  <button type="button" role="tab" data-tab="patches">Patches</button>
+  <button type="button" role="tab" data-tab="patches">Patches <span id="patches-n" class="n" hidden></span></button>
+  <div id="view-switch" class="viewsw" hidden>
+    <span class="lbl">View</span>
+    <div class="seg sm" role="group" aria-label="Runs view">
+      <button type="button" data-view="workbench" title="Runs, replay and inspector side by side">Workbench</button>
+      <button type="button" data-view="trace" title="One lane per ball on a zoomable timeline">Trace</button>
+    </div>
+  </div>
 </nav>
+<div id="ctxbar" class="ctxbar"></div>
 
 <main>
+  <!-- Runs -->
   <section id="tab-runs" class="tab" hidden>
-    <div class="split">
-      <div class="pane list-pane">
-        <div class="bar">
-          <h2>Runs</h2>
-          <button id="runs-refresh" type="button">Refresh</button>
-        </div>
-        <p id="runs-where" class="muted"></p>
-        <table id="runs" class="rows">
-          <thead><tr><th>Run</th><th>Verdict</th><th>Expectations</th><th>When</th></tr></thead>
-          <tbody></tbody>
-        </table>
-        <p id="runs-empty" class="muted" hidden>No runs with a timeline in this tree yet. <code>e2e run &lt;scenario&gt;</code> makes one.</p>
-      </div>
-      <div class="pane detail-pane">
-        <div id="run-empty" class="muted">Pick a run to see its report and frames.</div>
-        <div id="run-detail" hidden>
-          <div class="bar">
-            <h2 id="run-title"></h2>
-            <span id="run-verdict" class="badge"></span>
-            <a id="run-replay" class="button" target="_blank" rel="noopener noreferrer">Open replay</a>
+    <div id="runs-wb" class="wb">
+      <aside class="rail">
+        <div class="rf">
+          <input id="rail-filter" type="search" placeholder="Filter scenarios" autocomplete="off" spellcheck="false">
+          <div id="rail-only" class="seg sm" role="group" aria-label="Which runs">
+            <button type="button" data-only="all" class="on">All</button><button type="button" data-only="failing">Failing</button>
           </div>
-          <p id="run-dir" class="muted"></p>
-          <h3>Frames</h3>
-          <div id="run-frames" class="frames"></div>
-          <h3>Report</h3>
-          <article id="run-report" class="report"></article>
         </div>
+        <div id="rail-sum" class="rsum"></div>
+        <div id="rail-live"></div>
+        <div id="rail-groups" class="groups"></div>
+        <div class="rail-foot"><span class="lbl">Legend</span><span class="hist"><i class="p"></i></span> passed
+          <span class="hist"><i class="f"></i></span> failed <span class="hist"><i class="d"></i></span> did not complete</div>
+      </aside>
+
+      <section class="center">
+        <div id="wb-mapwrap" class="mapwrap">
+          <svg id="wb-map" class="map" role="img" aria-label="Top-down tactical view"></svg>
+          <div class="hud tl"><span class="lbl" id="wb-map-what">Top-down · centred on self</span><b id="wb-map-clock" class="clock-sm">t+00:00:00</b></div>
+          <div class="hud tr"><div id="wb-zoom" class="seg sm zoom" role="group" aria-label="Zoom"></div></div>
+          <div class="hud bl"><span class="scale"><i id="wb-scale-bar"></i><span id="wb-scale-text"></span></span></div>
+          <div class="hud br" id="wb-legend"></div>
+        </div>
+        <div class="controls">
+          <div class="ctl-row">
+            <div class="seg">
+              <button type="button" data-act="start" title="Back to the start (Home)">&#x23EE;</button>
+              <button type="button" data-act="prev" title="Previous event (left arrow)">&#x25C0; event</button>
+              <button type="button" data-act="play" class="on" title="Play or pause (space)">&#x25B6; Play</button>
+              <button type="button" data-act="next" title="Next event (right arrow)">event &#x25B6;</button>
+              <button type="button" data-act="diverge" class="divbtn" title="Next DIVERGE (D)">DIVERGE &#x25B6;</button>
+            </div>
+            <span class="lbl">Speed</span>
+            <div class="seg sm speed" role="group" aria-label="Speed"></div>
+            <label class="toggle"><input type="checkbox" class="follow" checked><span class="sw-t"></span>Follow live</label>
+            <span class="spacer"></span>
+            <span class="clock" id="wb-clock">t+00:00:00</span>
+          </div>
+          <div id="wb-track" class="track"></div>
+        </div>
+        <div class="events">
+          <div class="ev-filters">
+            <span id="wb-chips" class="row"></span>
+            <input id="wb-grep" class="grep" type="search" placeholder="regex, e.g. TARGET|DAMAGE" autocomplete="off" spellcheck="false">
+          </div>
+          <div id="wb-events" class="evlist"></div>
+        </div>
+      </section>
+
+      <aside id="insp" class="insp">
+        <div class="insp-h">
+          <div id="insp-crumbs" class="crumbs"></div>
+          <div class="row"><span id="insp-name" class="nm"></span><span id="insp-verdict"></span><span class="spacer"></span>
+            <button id="insp-refresh" type="button" class="btn sm" title="Reload this run">&#x21BB;</button>
+            <a id="insp-popout" class="btn sm" target="_blank" rel="noopener noreferrer" title="Open the standalone replay viewer">Viewer &#x2197;</a></div>
+        </div>
+        <nav id="itabs" class="itabs"></nav>
+        <div id="ibody" class="ibody"></div>
+      </aside>
+    </div>
+
+    <div id="runs-trace" class="tracev" hidden>
+      <div class="runbar">
+        <select id="tr-run" aria-label="Run"></select><span id="tr-verdict"></span>
+        <span id="tr-stats" class="row"></span>
+        <span class="spacer"></span>
+        <div class="seg sm">
+          <button type="button" data-act="start" title="Back to the start (Home)">&#x23EE;</button>
+          <button type="button" data-act="play" title="Play or pause (space)">&#x25B6;</button>
+          <button type="button" data-act="next" title="Next event (right arrow)">&#x23ED;</button>
+        </div>
+        <div class="seg sm speed" role="group" aria-label="Speed"></div>
+        <span id="tr-clock" class="clock">t+00:00:00.000</span>
+        <div class="seg sm" role="group" aria-label="Zoom the timeline">
+          <button type="button" data-tz="out" title="Zoom out (Ctrl + wheel)">&#x2212;</button>
+          <button type="button" data-tz="fit" title="Show the whole run">fit</button>
+          <button type="button" data-tz="in" title="Zoom in around the cursor (Ctrl + wheel)">+</button>
+        </div>
+      </div>
+      <div id="trace" class="trace"></div>
+      <div class="tr-bottom">
+        <div id="tr-mapwrap" class="mapwrap">
+          <svg id="tr-map" class="map" role="img" aria-label="Top-down view at the cursor"></svg>
+          <div class="hud tl"><span class="lbl">At cursor</span><b id="tr-map-clock" class="clock-sm">t+00:00:00</b></div>
+          <div class="hud tr"><div id="tr-zoom" class="seg sm zoom" role="group" aria-label="Zoom"></div></div>
+          <div class="hud bl"><span class="scale"><i id="tr-scale-bar"></i><span id="tr-scale-text"></span></span></div>
+        </div>
+        <section id="tr-event" class="evd"></section>
+        <section id="tr-svc" class="evd"></section>
       </div>
     </div>
+
+    <div id="runs-empty" class="empty" hidden></div>
   </section>
 
+  <!-- Install -->
   <section id="tab-install" class="tab" hidden>
     <div class="split">
-      <div class="pane list-pane">
-        <h2>Trees</h2>
+      <aside class="rail">
+        <div class="pane-head"><h2>Trees</h2><span id="trees-count" class="count"></span></div>
         <ul id="trees" class="cards"></ul>
         <form id="add-tree" class="add">
-          <label for="add-path">Add a tree by its path</label>
+          <label class="lbl" for="add-path">Add a tree by its path</label>
           <div class="row">
             <input id="add-path" type="text" placeholder="F:/EveJS-0.12.9" autocomplete="off" spellcheck="false">
-            <button type="submit">Add</button>
+            <button type="submit" class="btn">Add</button>
           </div>
         </form>
-      </div>
-      <div class="pane detail-pane">
-        <div id="install-empty" class="muted">Pick or add a tree.</div>
+      </aside>
+      <div class="pane-scroll">
+        <div id="install-empty" class="empty">Pick or add a tree.</div>
         <div id="install-detail" hidden>
-          <div class="bar"><h2 id="install-title"></h2><button id="install-refresh" type="button">Refresh</button></div>
-          <p id="install-root" class="muted"></p>
-          <ol class="steps">
-            <li>
-              <h3>The vendored copy</h3>
-              <p id="copy-status"></p>
-              <ul id="copy-problems" class="problems"></ul>
-              <div class="row" id="copy-from-row" hidden>
-                <label for="copy-from">Update from the evejs-e2e checkout</label>
-                <input id="copy-from" type="text" placeholder="F:/evejs-e2e" autocomplete="off" spellcheck="false">
+          <div class="dhead">
+            <div><div id="install-root" class="crumbs"></div><h1 id="install-title"></h1></div>
+            <span class="spacer"></span>
+            <button id="install-refresh" type="button" class="btn sm">&#x21BB; Refresh</button>
+          </div>
+          <div class="steps">
+            <div class="panel">
+              <div class="panel-head"><span class="stepn">1</span><h3>The vendored copy</h3><span id="copy-badge" class="right"></span></div>
+              <div class="pbody">
+                <p id="copy-status"></p>
+                <ul id="copy-problems" class="problems"></ul>
+                <div class="row" id="copy-from-row" hidden>
+                  <label class="lbl" for="copy-from">Update from the evejs-e2e checkout</label>
+                  <input id="copy-from" type="text" placeholder="F:/evejs-e2e" autocomplete="off" spellcheck="false">
+                </div>
+                <div class="row">
+                  <label id="copy-force-label" class="toggle" hidden><input id="copy-force" type="checkbox"><span class="sw-t"></span>replace edited files (--force)</label>
+                  <button id="copy-preview" type="button" class="btn primary">Preview install</button>
+                </div>
+                <p class="muted">Shim <code>server/src/_secondary/agentBridge/server.js</code>: <span id="shim-status"></span></p>
               </div>
-              <div class="row">
-                <label id="copy-force-label" hidden><input id="copy-force" type="checkbox"> replace edited files (--force)</label>
-                <button id="copy-preview" type="button">Preview install</button>
+            </div>
+            <div class="panel">
+              <div class="panel-head"><span class="stepn">2</span><h3>The tree's config</h3><span id="config-badge" class="right"></span></div>
+              <div class="pbody">
+                <p id="config-status"></p>
+                <ul id="config-problems" class="problems"></ul>
+                <div class="row">
+                  <label class="tree"><span class="lbl">Mode</span><select id="config-mode">
+                    <option value="managed">managed: e2e starts and stops the server</option>
+                    <option value="attach">attach: you start the server</option>
+                  </select></label>
+                  <button id="config-preview" type="button" class="btn primary">Preview config</button>
+                </div>
               </div>
-              <p class="muted">Shim <code>server/src/_secondary/agentBridge/server.js</code>: <span id="shim-status"></span></p>
-            </li>
-            <li>
-              <h3>The tree's config</h3>
-              <p id="config-status"></p>
-              <ul id="config-problems" class="problems"></ul>
-              <div class="row">
-                <label>Mode <select id="config-mode">
-                  <option value="managed">managed: e2e starts and stops the server</option>
-                  <option value="attach">attach: you start the server</option>
-                </select></label>
-                <button id="config-preview" type="button">Preview config</button>
+            </div>
+            <div class="panel">
+              <div class="panel-head"><span class="stepn">3</span><h3>What the tree needs to run</h3></div>
+              <div class="pbody"><ul id="prereqs" class="checks"></ul><p id="server-status" class="muted"></p></div>
+            </div>
+            <div class="panel">
+              <div class="panel-head"><span class="stepn">4</span><h3>Plugins and doctor</h3></div>
+              <div class="pbody">
+                <ul id="plugins" class="checks"></ul>
+                <div class="row"><button id="doctor-run" type="button" class="btn">Run e2e doctor</button><span id="doctor-command" class="muted mono"></span></div>
+                <pre id="doctor-output" hidden></pre>
               </div>
-            </li>
-            <li>
-              <h3>What the tree needs to run</h3>
-              <ul id="prereqs" class="checks"></ul>
-              <p id="server-status"></p>
-            </li>
-            <li>
-              <h3>Plugins and doctor</h3>
-              <ul id="plugins" class="checks"></ul>
-              <div class="row"><button id="doctor-run" type="button">Run e2e doctor</button><span id="doctor-command" class="muted"></span></div>
-              <pre id="doctor-output" hidden></pre>
-            </li>
-            <li>
-              <h3>Next</h3>
-              <p id="next-steps"></p>
-            </li>
-          </ol>
+            </div>
+            <div class="panel">
+              <div class="panel-head"><span class="stepn">5</span><h3>Next</h3></div>
+              <div class="pbody" id="next-steps"></div>
+            </div>
+          </div>
         </div>
       </div>
     </div>
   </section>
 
+  <!-- Patches -->
   <section id="tab-patches" class="tab" hidden>
-    <div class="pane">
-      <div class="bar"><h2>Patches</h2><button id="patches-refresh" type="button">Refresh</button><span id="patches-command" class="muted"></span></div>
-      <p class="muted">Optional edits to stock EveJS, written as anchored insertions with a marker comment. Revert gives each file
+    <div class="pane-scroll full">
+      <div class="dhead">
+        <div><div id="patches-command" class="crumbs"></div><h1>Patches</h1></div>
+        <span class="spacer"></span>
+        <button id="patches-refresh" type="button" class="btn sm">&#x21BB; Refresh</button>
+      </div>
+      <p class="lede">Optional edits to stock EveJS, written as anchored insertions with a marker comment. Revert gives each file
         back byte for byte. The tree's server must be down.</p>
-      <table id="patches" class="rows">
-        <thead><tr><th>Patch</th><th>State</th><th>What it does</th><th></th></tr></thead>
-        <tbody></tbody>
-      </table>
-      <p id="patches-empty" class="muted" hidden></p>
+      <div class="panel">
+        <table id="patches" class="tbl">
+          <thead><tr><th>Patch</th><th>State</th><th>What it does</th><th></th></tr></thead>
+          <tbody></tbody>
+        </table>
+        <p id="patches-empty" class="empty" hidden></p>
+      </div>
     </div>
   </section>
 </main>
 
 <dialog id="preview" aria-labelledby="preview-title">
-  <div class="dialog">
-    <h2 id="preview-title">Preview</h2>
+  <div class="dialog-h"><h2 id="preview-title">Preview</h2></div>
+  <div class="dialog-b">
     <ul id="preview-refused" class="problems"></ul>
     <div id="preview-steps"></div>
-    <p id="preview-note" class="muted"></p>
-    <div class="row end">
-      <button id="preview-close" type="button">Close</button>
-      <button id="preview-run" type="button" class="primary">Run</button>
-    </div>
+  </div>
+  <div class="dialog-f">
+    <p id="preview-note" class="note"></p>
+    <button id="preview-close" type="button" class="btn">Close</button>
+    <button id="preview-run" type="button" class="btn primary">Run</button>
   </div>
 </dialog>
 
-<dialog id="frame-view" aria-label="Frame">
-  <div class="dialog wide">
-    <img id="frame-image" alt="">
-    <div class="row end"><button id="frame-close" type="button">Close</button></div>
-  </div>
+<dialog id="frame-view" class="wide" aria-label="Frame">
+  <div class="dialog-h"><h2 id="frame-title">Frame</h2><span class="spacer"></span>
+    <button id="frame-seek" type="button" class="btn sm">Seek the replay here</button>
+    <button id="frame-close" type="button" class="btn sm">Close</button></div>
+  <img id="frame-image" alt="">
 </dialog>
 
+<script src="/gui/replay.js"></script>
+<script src="/gui/runs.js"></script>
 <script src="/gui/gui.js"></script>
 </body>
 </html>

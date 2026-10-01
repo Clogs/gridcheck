@@ -1,10 +1,12 @@
 "use strict";
 
-// The page `e2e gui` serves (core/gui.js). It builds every element with
-// textContent, never HTML, so nothing a run or a tree contains can run here.
-// Every change goes through the preview dialog: the server runs the CLI
-// command with --dry-run, the dialog shows its output, and Run asks the server
-// to run that same command by the preview's ID.
+// The page `e2e gui` serves (core/gui.js): the header, the tabs, Install,
+// Patches and the preview dialog. The Runs tab is gui/runs.js, over the replay
+// model in gui/replay.js. It builds every element with textContent, never
+// HTML, so nothing a run or a tree contains can run here. Every change goes
+// through the preview dialog: the server runs the CLI command with --dry-run,
+// the dialog shows its output, and Run asks the server to run that same
+// command by the preview's ID.
 
 (() => {
   const $ = (id) => document.getElementById(id);
@@ -19,11 +21,11 @@
     trees: [],
     treeID: params.get("tree") || null,
     tab: params.get("tab") || "runs",
-    runID: params.get("run") || null,
     tree: null,
+    summaries: new Map(),
     preview: null,
-    afterRun: null,
     blobs: [],
+    frameSeek: null,
   };
 
   // ---------- helpers ----------
@@ -77,172 +79,30 @@
   const q = (value) => encodeURIComponent(value);
   const short = (commit) => (commit ? String(commit).slice(0, 8) : "?");
 
+  function badge(cls, text, dot = false) {
+    return h("span", { className: `badge ${cls}` }, dot ? h("i", { className: "dot" }) : null, text);
+  }
+
   function saveHash() {
     const parts = [`tab=${q(state.tab)}`];
     if (state.treeID) parts.push(`tree=${q(state.treeID)}`);
-    if (state.runID && state.tab === "runs") parts.push(`run=${q(state.runID)}`);
+    if (state.tab === "runs" && runs) parts.push(...runs.hashParts());
     history.replaceState(null, "", `#${parts.join("&")}`);
   }
 
-  function ago(ms) {
-    if (!Number.isFinite(ms)) return "";
-    const s = Math.max(0, Math.round((Date.now() - ms) / 1000));
-    if (s < 90) return `${s} s ago`;
-    if (s < 5400) return `${Math.round(s / 60)} min ago`;
-    if (s < 129600) return `${Math.round(s / 3600)} h ago`;
-    return new Date(ms).toISOString().slice(0, 16).replace("T", " ");
-  }
-
-  function verdict(result) {
-    if (!result) return { text: "no result", className: "" };
-    if (result.exitCode === 2) return { text: "did not complete", className: "warn" };
-    return result.passed ? { text: "passed", className: "passed" } : { text: "failed", className: "failed" };
-  }
-
-  // ---------- trees and tabs ----------
-
-  async function loadContext() {
-    const body = await api("/gui/api/context");
-    state.context = body.context;
-    const c = state.context;
-    $("context").textContent = c.mode === "vendored"
-      ? `vendored copy ${c.version || "?"} at ${short(c.commit)}, managing ${c.tree}`
-      : `checkout ${c.root}, ${c.version || "?"} at ${short(c.commit)}${c.dirty ? " (uncommitted changes aren't vendored)" : ""}`;
-  }
-
-  async function loadTrees() {
-    const body = await api("/gui/api/trees");
-    state.trees = body.trees || [];
-    if (!state.trees.some((tree) => tree.id === state.treeID)) {
-      state.treeID = (state.trees.find((tree) => tree.copy) || state.trees[0] || {}).id || null;
-    }
-    const select = $("tree");
-    select.textContent = "";
-    for (const tree of state.trees) {
-      select.append(h("option", { value: tree.id, text: `${tree.name}  (${tree.root})` }));
-    }
-    if (state.treeID) select.value = state.treeID;
-    renderTreeBadges();
-    renderTreeCards();
-  }
-
-  function currentTree() {
-    return state.trees.find((tree) => tree.id === state.treeID) || null;
-  }
-
-  function renderTreeBadges() {
-    const box = $("tree-badges");
-    box.textContent = "";
-    const tree = currentTree();
-    if (!tree) return;
-    box.append(tree.copy ? h("span", { className: "badge ok", text: `e2e ${tree.copy.version || "?"} at ${short(tree.copy.commit)}` })
-      : h("span", { className: "badge warn", text: "not installed" }));
-    if (tree.mode) box.append(" ", h("span", { className: "badge", text: tree.mode }));
-    if (tree.up) box.append(" ", h("span", { className: "badge warn", text: "server up" }));
-  }
-
-  function selectTree(id) {
-    state.treeID = id;
-    state.runID = null;
-    $("tree").value = id;
-    renderTreeBadges();
-    renderTreeCards();
-    saveHash();
-    showTab(state.tab);
-  }
-
-  function showTab(tab) {
-    state.tab = ["runs", "install", "patches"].includes(tab) ? tab : "runs";
-    for (const button of document.querySelectorAll("#tabs button")) {
-      button.setAttribute("aria-selected", String(button.dataset.tab === state.tab));
-    }
-    for (const section of document.querySelectorAll("section.tab")) section.hidden = section.id !== `tab-${state.tab}`;
-    saveHash();
-    if (!state.treeID) {
-      message(state.tab === "install" ? "" : "add a tree on the Install tab");
-      if (state.tab === "install") renderInstall(null);
-      return;
-    }
-    const load = state.tab === "runs" ? loadRuns : state.tab === "install" ? loadInstall : loadPatches;
-    load().catch((error) => message(error.message));
-  }
-
-  // ---------- Runs ----------
-
-  async function loadRuns() {
-    const tree = currentTree();
-    const body = await api(`/gui/api/runs?tree=${q(state.treeID)}`);
-    $("runs-where").textContent = tree ? `${body.runs.length}${body.more ? `+${body.more}` : ""} run(s) in ${tree.root}` : "";
-    const tbody = $("runs").querySelector("tbody");
-    tbody.textContent = "";
-    $("runs-empty").hidden = body.runs.length > 0;
-    for (const run of body.runs) {
-      const v = verdict(run.result);
-      const row = h("tr", { "data-run": run.runID, onclick: () => openRun(run.runID) },
-        h("td", {}, h("div", { className: "run-id", text: run.runID })),
-        h("td", {}, h("span", { className: `badge ${v.className}`, text: v.text })),
-        h("td", { text: run.result ? `${run.result.expectations - run.result.missing} of ${run.result.expectations}` : "" }),
-        h("td", { className: "muted", text: ago(run.mtimeMs) }));
-      if (run.runID === state.runID) row.classList.add("selected");
-      tbody.append(row);
-    }
-    if (state.runID && body.runs.some((run) => run.runID === state.runID) && $("run-detail").dataset.run !== state.runID) {
-      await openRun(state.runID);
-    } else if (!state.runID) {
-      $("run-detail").hidden = true;
-      $("run-empty").hidden = false;
-    }
-  }
-
-  async function openRun(runID) {
-    state.runID = runID;
-    saveHash();
-    for (const row of $("runs").querySelectorAll("tbody tr")) row.classList.toggle("selected", row.dataset.run === runID);
-    const body = await api(`/gui/api/run?tree=${q(state.treeID)}&run=${q(runID)}`);
-    freeBlobs();
-    $("run-empty").hidden = true;
-    $("run-detail").hidden = false;
-    $("run-detail").dataset.run = runID;
-    const result = body.result;
-    const v = verdict(result && { passed: result.passed === true, exitCode: result.exitCode });
-    $("run-title").textContent = (result && result.name) || runID;
-    $("run-verdict").textContent = v.text;
-    $("run-verdict").className = `badge ${v.className}`;
-    $("run-dir").textContent = body.dir;
-    const replay = $("run-replay");
-    replay.hidden = !body.hasTimeline;
-    replay.href = `/viewer#token=${q(token)}&tree=${q(state.treeID)}&run=${q(runID)}`;
-    const frames = $("run-frames");
-    frames.textContent = "";
-    if (!body.frames.length) frames.append(h("p", { className: "muted", text: "No frames: the run has no position samples." }));
-    for (const file of body.frames) {
-      const img = h("img", { alt: file, loading: "lazy" });
-      const figure = h("figure", { onclick: () => showFrame(img.src, file) }, img, h("figcaption", { text: file }));
-      frames.append(figure);
-      frameURL(runID, file).then((url) => { img.src = url; }).catch((error) => { figure.append(h("span", { className: "muted", text: error.message })); });
-    }
-    const report = $("run-report");
-    report.textContent = "";
-    if (body.report === null) report.append(h("p", { className: "muted", text: "No report.md: the run didn't finish writing one." }));
-    else renderMarkdown(body.report, report, runID);
-  }
-
-  function frameURL(runID, file) {
-    return blobURL(`/gui/api/frame?tree=${q(state.treeID)}&run=${q(runID)}&file=${q(file)}`);
-  }
-
-  function showFrame(src, file) {
-    if (!src) return;
-    $("frame-image").src = src;
-    $("frame-image").alt = file;
-    $("frame-view").showModal();
+  function setCount(name, n, warn = false) {
+    const node = $(`${name}-n`);
+    if (!node) return;
+    node.hidden = n === null || n === undefined;
+    node.textContent = String(n ?? "");
+    node.className = `n${warn ? " warn" : ""}`;
   }
 
   // ---------- a small Markdown reader for report.md ----------
 
   const FRAME_LINK = /^frames\/([A-Za-z0-9][A-Za-z0-9._-]*\.svg)$/;
 
-  function inline(text, runID) {
+  function inline(text, frames) {
     const out = [];
     const pattern = /(`[^`]+`)|(\*\*[^*]+\*\*)|(!?\[[^\]]*\]\([^)\s]+\))/g;
     let last = 0;
@@ -257,11 +117,11 @@
         const frame = FRAME_LINK.exec(link[3]);
         if (frame && link[1]) {
           const img = h("img", { alt: link[2] });
-          frameURL(runID, frame[1]).then((url) => { img.src = url; }).catch(() => {});
-          img.addEventListener("click", () => showFrame(img.src, frame[1]));
+          frames.url(frame[1]).then((url) => { img.src = url; }).catch(() => {});
+          img.addEventListener("click", () => frames.open(img.src, frame[1]));
           out.push(img);
         } else if (frame) {
-          out.push(h("a", { text: link[2], title: link[3], onclick: () => frameURL(runID, frame[1]).then((url) => showFrame(url, frame[1])) }));
+          out.push(h("a", { text: link[2], title: link[3], onclick: () => frames.url(frame[1]).then((url) => frames.open(url, frame[1])) }));
         } else {
           out.push(h("span", { title: link[3], text: link[2] }));
         }
@@ -290,12 +150,14 @@
     return cells;
   }
 
-  function renderMarkdown(text, into, runID) {
+  // frameURL(file) -> Promise<url>; openFrame(url, file) shows it.
+  function renderMarkdown(text, into, frameURL, openFrame) {
+    const frames = { url: frameURL, open: openFrame };
     const lines = String(text).replace(/\r\n?/g, "\n").split("\n");
     let index = 0;
     let paragraph = [];
     const flush = () => {
-      if (paragraph.length) into.append(h("p", {}, inline(paragraph.join(" "), runID)));
+      if (paragraph.length) into.append(h("p", {}, inline(paragraph.join(" "), frames)));
       paragraph = [];
     };
     while (index < lines.length) {
@@ -312,18 +174,18 @@
       const heading = /^(#{1,4})\s+(.*)$/.exec(line);
       if (heading) {
         flush();
-        into.append(h(`h${heading[1].length}`, {}, inline(heading[2], runID)));
+        into.append(h(`h${heading[1].length}`, {}, inline(heading[2], frames)));
         index += 1;
         continue;
       }
       if (/^\s*\|/.test(line) && index + 1 < lines.length && /^\s*\|[\s|:-]+\|\s*$/.test(lines[index + 1])) {
         flush();
         const head = tableCells(line);
-        const table = h("table", {}, h("thead", {}, h("tr", {}, head.map((cell) => h("th", {}, inline(cell, runID))))));
+        const table = h("table", {}, h("thead", {}, h("tr", {}, head.map((cell) => h("th", {}, inline(cell, frames))))));
         const tbody = h("tbody");
         index += 2;
         while (index < lines.length && /^\s*\|/.test(lines[index])) {
-          tbody.append(h("tr", {}, tableCells(lines[index]).map((cell) => h("td", {}, inline(cell, runID)))));
+          tbody.append(h("tr", {}, tableCells(lines[index]).map((cell) => h("td", {}, inline(cell, frames)))));
           index += 1;
         }
         table.append(tbody);
@@ -334,7 +196,7 @@
         flush();
         const list = h("ul");
         while (index < lines.length && /^\s*[-*]\s+/.test(lines[index])) {
-          list.append(h("li", {}, inline(lines[index].replace(/^\s*[-*]\s+/, ""), runID)));
+          list.append(h("li", {}, inline(lines[index].replace(/^\s*[-*]\s+/, ""), frames)));
           index += 1;
         }
         into.append(list);
@@ -347,27 +209,160 @@
     flush();
   }
 
+  function showFrame(src, file, atMs, seekFn) {
+    if (!src) return;
+    $("frame-image").src = src;
+    $("frame-image").alt = file;
+    $("frame-title").textContent = file;
+    state.frameSeek = Number.isFinite(atMs) && seekFn ? () => seekFn(atMs) : null;
+    $("frame-seek").hidden = !state.frameSeek;
+    $("frame-view").showModal();
+  }
+
+  // ---------- the Runs tab ----------
+
+  let runs = null;
+  const shell = {
+    api, blobURL, freeBlobs, h, message, token, params, saveHash, setCount, renderMarkdown, showFrame,
+    treeID: () => state.treeID,
+    refreshContext: () => renderContext(),
+  };
+
+  // ---------- trees, header and tabs ----------
+
+  async function loadContext() {
+    const body = await api("/gui/api/context");
+    state.context = body.context;
+    const c = state.context;
+    const node = $("context");
+    node.textContent = `${c.version || "?"} · ${short(c.commit)}`;
+    node.title = c.mode === "vendored"
+      ? `vendored copy ${c.version || "?"} at ${c.commit || "?"}, managing ${c.tree}`
+      : `checkout ${c.root}, ${c.version || "?"} at ${c.commit || "?"}${c.dirty ? " (uncommitted changes aren't vendored)" : ""}`;
+  }
+
+  async function loadTrees() {
+    const body = await api("/gui/api/trees");
+    state.trees = body.trees || [];
+    if (!state.trees.some((tree) => tree.id === state.treeID)) {
+      state.treeID = (state.trees.find((tree) => tree.copy) || state.trees[0] || {}).id || null;
+    }
+    const select = $("tree");
+    select.textContent = "";
+    for (const tree of state.trees) select.append(h("option", { value: tree.id, text: `${tree.name} — ${tree.root}` }));
+    if (state.treeID) select.value = state.treeID;
+    renderTreeBadges();
+    renderTreeCards();
+    renderContext();
+  }
+
+  function currentTree() {
+    return state.trees.find((tree) => tree.id === state.treeID) || null;
+  }
+
+  function renderTreeBadges() {
+    const box = $("tree-badges");
+    box.textContent = "";
+    const tree = currentTree();
+    if (!tree) return;
+    box.append(tree.copy ? badge("ok", `e2e ${tree.copy.version || "?"} · ${short(tree.copy.commit)}`, true) : badge("warn", tree.isTree ? "not installed" : "not a tree"));
+    if (tree.mode) box.append(badge("mute", tree.mode));
+    if (tree.up) box.append(badge("warn", "server up", true));
+  }
+
+  async function loadSummary(id = state.treeID, { fresh = false } = {}) {
+    if (!id) return null;
+    if (!fresh && state.summaries.has(id)) return state.summaries.get(id);
+    const body = await api(`/gui/api/tree?tree=${q(id)}`);
+    state.summaries.set(id, body.tree);
+    if (id === state.treeID) renderContext();
+    return body.tree;
+  }
+
+  function renderContext() {
+    const bar = $("ctxbar");
+    bar.textContent = "";
+    const tree = currentTree();
+    if (!tree) {
+      bar.append(h("span", { className: "cx muted", text: "No tree yet: add one on the Install tab." }));
+      return;
+    }
+    const summary = state.summaries.get(tree.id);
+    const cx = (label, ...value) => bar.append(h("span", { className: "cx" }, h("span", { className: "lbl", text: label }), ...value));
+    const run = state.tab === "runs" && runs ? runs.context() : {};
+    if (state.tab === "runs") cx("World", run.world || "-");
+    cx("Server", h("i", { className: `dot ${tree.up ? "ok" : ""}` }), tree.up ? "up" : "down");
+    cx("Mode", tree.mode || "no config");
+    cx("Copy", tree.copy ? h("i", { className: `dot ${summary && summary.copy && !summary.copy.ok ? "warn" : "ok"}` }) : h("i", { className: "dot warn" }),
+      tree.copy ? `${tree.copy.version || "?"}${summary && summary.copy && !summary.copy.ok ? " · edited" : ""}` : "not installed");
+    if (summary && summary.plugins) {
+      cx("Plugins", summary.plugins.active.length ? summary.plugins.active.join(", ") : "none active");
+    }
+    if (state.tab === "runs" && run.client) cx("Client view", run.client);
+    const where = state.tab === "runs" && run.runsDir ? run.runsDir : tree.root;
+    bar.append(h("span", { className: "cx path", text: where, title: where }));
+  }
+
+  function selectTree(id) {
+    if (id === state.treeID) return;
+    state.treeID = id;
+    $("tree").value = id;
+    if (runs) runs.treeChanged();
+    setCount("patches", null);
+    renderTreeBadges();
+    renderTreeCards();
+    renderContext();
+    saveHash();
+    showTab(state.tab);
+    loadSummary().catch(() => {});
+    countPatches();
+  }
+
+  function showTab(tab) {
+    state.tab = ["runs", "install", "patches"].includes(tab) ? tab : "runs";
+    for (const button of document.querySelectorAll("#tabs [data-tab]")) {
+      button.setAttribute("aria-selected", String(button.dataset.tab === state.tab));
+    }
+    for (const section of document.querySelectorAll("section.tab")) section.hidden = section.id !== `tab-${state.tab}`;
+    if (runs) {
+      if (state.tab === "runs") runs.show();
+      else runs.hide();
+    }
+    saveHash();
+    renderContext();
+    if (!state.treeID) {
+      if (state.tab === "install") renderInstall(null);
+      if (state.tab === "runs") {
+        $("runs-empty").hidden = false;
+        $("runs-empty").textContent = "Add a tree on the Install tab.";
+      }
+      return;
+    }
+    const load = state.tab === "runs" ? () => runs.load() : state.tab === "install" ? loadInstall : loadPatches;
+    load().catch((error) => message(error.message));
+  }
+
   // ---------- Install ----------
 
   function renderTreeCards() {
     const list = $("trees");
     list.textContent = "";
+    $("trees-count").textContent = state.trees.length ? String(state.trees.length) : "";
     if (!state.trees.length) {
-      list.append(h("li", { className: "muted", text: state.context && state.context.mode === "checkout"
+      list.append(h("li", { className: "none", text: state.context && state.context.mode === "checkout"
         ? "No trees yet. Add one by its path below: an unpacked EveJS zip, or a fork's checkout." : "No tree." }));
     }
     for (const tree of state.trees) {
-      const item = h("li", { onclick: () => { state.tab = "install"; selectTree(tree.id); } },
-        tree.source === "added" ? h("button", { type: "button", className: "forget", text: "Forget", title: "Take it off this list",
-          onclick: (event) => { event.stopPropagation(); forgetTree(tree.id); } }) : null,
-        h("strong", { text: tree.name }), " ",
-        tree.copy ? h("span", { className: "badge ok", text: `${tree.copy.version || "?"} at ${short(tree.copy.commit)}` })
-          : h("span", { className: "badge warn", text: tree.isTree ? "not installed" : "not a tree" }),
-        tree.mode ? [" ", h("span", { className: "badge", text: tree.mode })] : null,
-        tree.up ? [" ", h("span", { className: "badge warn", text: "server up" })] : null,
+      const item = h("li", { className: tree.id === state.treeID ? "sel" : "", onclick: () => { state.tab = "install"; selectTree(tree.id); } },
+        h("div", { className: "top" },
+          h("b", { text: tree.name }),
+          tree.copy ? badge("ok", `${tree.copy.version || "?"} · ${short(tree.copy.commit)}`) : badge("warn", tree.isTree ? "not installed" : "not a tree"),
+          tree.mode ? badge("mute", tree.mode) : null,
+          tree.up ? badge("warn", "server up") : null,
+          tree.source === "added" ? h("button", { type: "button", className: "btn sm ghost forget", text: "Forget", title: "Take it off this list",
+            onclick: (event) => { event.stopPropagation(); forgetTree(tree.id); } }) : null),
         h("div", { className: "path", text: tree.root }),
-        h("div", { className: "muted", text: tree.source === "nearby" ? "found beside this checkout" : tree.source }));
-      if (tree.id === state.treeID) item.classList.add("selected");
+        h("div", { className: "src", text: tree.source === "nearby" ? "found beside this checkout" : tree.source }));
       list.append(item);
     }
   }
@@ -379,6 +374,7 @@
       const body = await api("/gui/api/trees", { method: "POST", body: { path: input.value } });
       input.value = "";
       await loadTrees();
+      state.tab = "install";
       selectTree(body.tree.id);
       message(`added ${body.tree.root}`, true);
     } catch (error) {
@@ -398,14 +394,19 @@
   }
 
   async function loadInstall() {
-    const body = await api(`/gui/api/tree?tree=${q(state.treeID)}`);
-    state.tree = body.tree;
+    state.tree = await loadSummary(state.treeID, { fresh: true });
     renderInstall(state.tree);
     message("");
   }
 
   function checkItem(ok, text, extra) {
-    return h("li", { className: ok === null ? "info" : ok ? "ok" : "bad" }, text, extra ? [" ", h("span", { className: "muted", text: extra })] : null);
+    return h("li", { className: ok === null ? "info" : ok ? "ok" : "bad" }, h("span", {}, text, extra ? h("span", { className: "muted", text: extra }) : null));
+  }
+
+  function setBadge(id, node) {
+    const box = $(id);
+    box.textContent = "";
+    if (node) box.append(node);
   }
 
   function renderInstall(tree) {
@@ -414,7 +415,7 @@
     if (!tree) return;
     const vendoredGui = state.context.mode === "vendored";
     $("install-title").textContent = tree.name;
-    $("install-root").textContent = `${tree.root}${tree.git === false ? " (not a git checkout, so uncommitted changes can't be checked)" : ""}`;
+    $("install-root").textContent = `${tree.root}${tree.git === false ? "  (not a git checkout, so uncommitted changes can't be checked)" : ""}`;
 
     const copy = tree.copy || {};
     let status;
@@ -424,6 +425,8 @@
       status = `${copy.version} at ${short(copy.commit)}. ${copy.ok ? "It matches its VENDOR.json." : `It differs from its VENDOR.json in ${copy.problemCount} place(s):`}`;
       if (!vendoredGui) status += copy.upToDate ? " Same commit as this checkout." : ` This checkout is at ${short(state.context.commit)}.`;
     }
+    setBadge("copy-badge", !copy.present ? badge("warn", "not installed") : !copy.vendored ? badge("warn", "not vendored")
+      : !copy.ok ? badge("bad", "edited", true) : copy.upToDate || vendoredGui ? badge("ok", "matches", true) : badge("info", "update available"));
     $("copy-status").textContent = status;
     const problems = $("copy-problems");
     problems.textContent = "";
@@ -438,6 +441,7 @@
     $("shim-status").textContent = { missing: "missing", edited: "edited since it was vendored", matches: "matches", present: "present" }[tree.shim] || tree.shim;
 
     const config = tree.config || {};
+    setBadge("config-badge", !copy.present ? null : config.exists ? badge(config.problems && config.problems.length ? "warn" : "ok", config.mode) : badge("warn", "missing"));
     $("config-status").textContent = !copy.present ? "Install the copy first."
       : config.exists ? `${config.file}, mode ${config.mode}. Runs go to ${config.runsDir}.`
         : `No ${config.file || "e2e.config.json"} yet. Managed mode lets e2e start the server, restore worlds and build recipes; ` +
@@ -463,15 +467,15 @@
     const next = $("next-steps");
     next.textContent = "";
     const cli = "node tools/evejs-e2e/bin/e2e.js";
-    if (!copy.present) next.append("Install the copy, then write the config.");
-    else if (!config.exists) next.append("Write the config.");
-    else if ((tree.prerequisites || []).some((row) => !row.ok)) next.append("Finish what the tree needs (above), then run e2e doctor.");
+    if (!copy.present) next.append(h("p", { text: "Install the copy, then write the config." }));
+    else if (!config.exists) next.append(h("p", { text: "Write the config." }));
+    else if ((tree.prerequisites || []).some((row) => !row.ok)) next.append(h("p", { text: "Finish what the tree needs (above), then run e2e doctor." }));
     else {
-      next.append("Apply the patches you want on the Patches tab, then from the tree's folder:",
+      next.append(h("p", { text: "Apply the patches you want on the Patches tab, then from the tree's folder:" }),
         h("pre", { text: config.mode === "managed"
           ? `${cli} world build starter\n${cli} run loadout-npc-fight\n${cli} help`
           : `(start the server with EVEJS_AGENT_BRIDGE=1 set)\n${cli} login\n${cli} run smoke-undock\n${cli} help` }),
-        "Each run shows up on the Runs tab.");
+        h("p", { className: "muted", text: "Each run shows up on the Runs tab." }));
     }
   }
 
@@ -528,6 +532,21 @@
 
   // ---------- Patches ----------
 
+  // Patches not applied and not already there, for the tab's count.
+  async function countPatches() {
+    const tree = currentTree();
+    if (!tree || !tree.copy) return;
+    const id = tree.id;
+    try {
+      const body = await api(`/gui/api/patches?tree=${q(id)}`);
+      if (id !== state.treeID || !Array.isArray(body.patches.json)) return;
+      const open = body.patches.json.filter((row) => row.state === "absent" || row.state === "partial").length;
+      setCount("patches", open || null, open > 0);
+    } catch (_error) {
+      // The count is a hint; the tab says what went wrong.
+    }
+  }
+
   async function loadPatches() {
     const tbody = $("patches").querySelector("tbody");
     const tree = currentTree();
@@ -537,9 +556,11 @@
       $("patches-empty").textContent = "Install the copy into this tree first (Install tab).";
       return;
     }
-    $("patches-empty").hidden = true;
+    $("patches-empty").hidden = false;
+    $("patches-empty").textContent = "reading the tree's patch status...";
     const body = await api(`/gui/api/patches?tree=${q(state.treeID)}`);
     const patches = body.patches;
+    $("patches-empty").hidden = true;
     $("patches-command").textContent = `${patches.command}  (in ${patches.cwd})`;
     tbody.textContent = "";
     if (!Array.isArray(patches.json)) {
@@ -547,18 +568,20 @@
       $("patches-empty").textContent = patches.output || "patch status printed nothing";
       return;
     }
+    const open = patches.json.filter((row) => row.state === "absent" || row.state === "partial").length;
+    setCount("patches", open || null, open > 0);
     for (const row of patches.json) {
-      const stateClass = row.state === "applied" || row.state === "detected" ? "ok" : row.state === "absent" ? "" : "bad";
+      const cls = row.state === "applied" || row.state === "detected" ? "ok" : row.state === "absent" ? "mute" : "bad";
       const why = row.state === "detected" ? "equivalent code is already there, so this tree doesn't need it"
         : row.state === "absent" && row.applies ? "applies cleanly"
           : row.problems ? row.problems.join("; ") : row.missing ? `${row.missing.join(", ")} not in this tree` : row.error || "";
-      const actions = h("td");
-      if (row.state === "absent") actions.append(h("button", { type: "button", text: "Preview apply", onclick: () => preview({ action: "patch-apply", id: row.id }) }));
-      if (row.state === "applied") actions.append(h("button", { type: "button", text: "Preview revert", onclick: () => preview({ action: "patch-revert", id: row.id }) }));
+      const actions = h("td", { className: "act" });
+      if (row.state === "absent") actions.append(h("button", { type: "button", className: "btn sm primary", text: "Preview apply", onclick: () => preview({ action: "patch-apply", id: row.id }) }));
+      if (row.state === "applied") actions.append(h("button", { type: "button", className: "btn sm", text: "Preview revert", onclick: () => preview({ action: "patch-revert", id: row.id }) }));
       tbody.append(h("tr", {},
         h("td", {}, h("code", { text: row.id })),
-        h("td", {}, h("span", { className: `badge ${stateClass}`, text: `${row.state}${row.version ? ` v${row.version}` : ""}` })),
-        h("td", {}, row.title, why ? h("div", { className: "muted", text: why }) : null),
+        h("td", {}, badge(cls, `${row.state}${row.version ? ` v${row.version}` : ""}`, cls === "ok")),
+        h("td", {}, row.title, why ? h("div", { className: "why", text: why }) : null),
         actions));
     }
   }
@@ -584,7 +607,7 @@
       for (const step of p.steps) {
         $("preview-steps").append(h("div", { className: "step-block" },
           h("div", { className: "command", text: step.command }),
-          h("div", { className: "muted", text: `in ${step.cwd}. Its dry run (${step.dryRun}) ${step.exitCode === 0 ? "printed" : `exited ${step.exitCode}:`}` }),
+          h("div", { className: `exit${step.exitCode === 0 ? "" : " bad"}`, text: `in ${step.cwd}. Its dry run (${step.dryRun}) ${step.exitCode === 0 ? "printed" : `exited ${step.exitCode}:`}` }),
           h("pre", { text: step.output.trim() || "(no output)" })));
       }
       $("preview-note").textContent = p.note;
@@ -610,7 +633,7 @@
       for (const step of result.steps) {
         $("preview-steps").append(h("div", { className: "step-block" },
           h("div", { className: "command", text: step.command }),
-          h("div", { className: `exit ${step.exitCode === 0 ? "" : "muted"}`, text: `exit ${step.exitCode}, ${Math.round(step.ms / 100) / 10} s` }),
+          h("div", { className: `exit${step.exitCode === 0 ? "" : " bad"}`, text: `exit ${step.exitCode}, ${Math.round(step.ms / 100) / 10} s` }),
           h("pre", { text: step.output.trim() || "(no output)" })));
       }
       $("preview-note").textContent = result.ok ? "Done." : "It didn't finish; the output above says why.";
@@ -619,16 +642,18 @@
     } catch (error) {
       $("preview-note").textContent = error.message;
     }
+    state.summaries.clear();
     await loadTrees().catch(() => {});
     showTab(state.tab);
+    loadSummary().catch(() => {});
+    countPatches();
   }
 
   // ---------- start ----------
 
   function wire() {
-    for (const button of document.querySelectorAll("#tabs button")) button.addEventListener("click", () => showTab(button.dataset.tab));
+    for (const button of document.querySelectorAll("#tabs [data-tab]")) button.addEventListener("click", () => showTab(button.dataset.tab));
     $("tree").addEventListener("change", () => selectTree($("tree").value));
-    $("runs-refresh").addEventListener("click", () => loadRuns().catch((error) => message(error.message)));
     $("install-refresh").addEventListener("click", () => loadInstall().catch((error) => message(error.message)));
     $("patches-refresh").addEventListener("click", () => loadPatches().catch((error) => message(error.message)));
     $("add-tree").addEventListener("submit", addTree);
@@ -638,10 +663,15 @@
     $("preview-run").addEventListener("click", runPreview);
     $("preview-close").addEventListener("click", () => $("preview").close());
     $("frame-close").addEventListener("click", () => $("frame-view").close());
+    $("frame-seek").addEventListener("click", () => {
+      if (state.frameSeek) state.frameSeek();
+      $("frame-view").close();
+    });
   }
 
   async function start() {
     wire();
+    runs = window.E2ERuns.create(shell);
     if (!token) {
       message("no token: open the URL e2e gui prints");
       return;
@@ -654,9 +684,11 @@
       return;
     }
     showTab(state.tab);
+    loadSummary().catch(() => {});
+    countPatches();
     setInterval(() => {
-      if (state.tab === "runs" && state.treeID && !document.hidden && !$("preview").open) loadRuns().catch(() => {});
-    }, 15_000);
+      if (!document.hidden && !$("preview").open) loadTrees().catch(() => {});
+    }, 30_000);
   }
 
   start();

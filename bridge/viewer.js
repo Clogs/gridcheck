@@ -97,6 +97,9 @@ function createAgentBridgeViewer({ runsDir, pageDir = path.join(__dirname, "view
       const result = JSON.parse(fs.readFileSync(path.join(dir, "result.json"), "utf8"));
       return {
         name: result.name || null,
+        world: result.world || null,
+        startedAtMs: Number.isFinite(result.startedAtMs) ? result.startedAtMs : null,
+        stoppedAtMs: Number.isFinite(result.stoppedAtMs) ? result.stoppedAtMs : null,
         passed: result.passed === true,
         exitCode: Number.isInteger(result.exitCode) ? result.exitCode : null,
         missing: Number(result.missing) || 0,

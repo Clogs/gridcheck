@@ -102,9 +102,10 @@ of its `report.md`. In a new tree the first `starter` build took 80 s, most of i
 seeding a game store; a rebuild takes about 20 s. The fight took about 50 s, boot and shutdown
 included.
 
-**5. Replay it.** In the GUI's **Runs** tab, pick the run to see its report and frames, then
-**Open replay** for the viewer. From a shell, `node tools/evejs-e2e/bin/e2e.js view` prints the
-viewer's URL.
+**5. Replay it.** In the GUI's **Runs** tab, pick the run on the left. The replay plays in the
+middle, and its expectations, frames and report sit on the right. **Trace** shows the run as one
+timeline with a lane per ship. From a shell, `node tools/evejs-e2e/bin/e2e.js view` prints the
+standalone viewer's URL.
 
 ## Agents
 

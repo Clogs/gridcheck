@@ -3,8 +3,9 @@
 // `e2e gui`: a loopback web page for installing the tool into EveJS trees,
 // applying its patches and replaying runs. Three tabs:
 //
-//   Runs     a tree's runs with their verdicts, report.md and frames, and the
-//            replay viewer (bridge/viewer) for any of them
+//   Runs     a tree's runs grouped by scenario, with the replay, verdict,
+//            expectations, frames and report.md of one; a workbench view or a
+//            trace view with a lane per ball (gui/runs.js, gui/replay.js)
 //   Install  known trees or a typed path; for each, the vendored copy and its
 //            drift check, the shim, e2e.config.json, what the tree still needs,
 //            the plugins and `e2e doctor`. Installs, updates and writes config.
@@ -55,6 +56,8 @@ const PAGES = Object.freeze({
   "/": [PAGE_DIR, "index.html", "text/html; charset=utf-8"],
   "/gui": [PAGE_DIR, "index.html", "text/html; charset=utf-8"],
   "/gui/gui.js": [PAGE_DIR, "gui.js", "text/javascript; charset=utf-8"],
+  "/gui/replay.js": [PAGE_DIR, "replay.js", "text/javascript; charset=utf-8"],
+  "/gui/runs.js": [PAGE_DIR, "runs.js", "text/javascript; charset=utf-8"],
   "/gui/gui.css": [PAGE_DIR, "gui.css", "text/css; charset=utf-8"],
   "/viewer": [VIEWER_DIR, "index.html", "text/html; charset=utf-8"],
   "/viewer/viewer.js": [VIEWER_DIR, "viewer.js", "text/javascript; charset=utf-8"],

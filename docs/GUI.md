@@ -27,9 +27,64 @@ checkout path you type.
 
 ## Runs
 
-A tree's runs, newest first, with each verdict (passed, failed, or did not complete) and how many
-expectations were met. Pick one to see its frames and its `report.md`. "Open replay" opens the
-[viewer](GUIDE.md#viewer) on that run in a new tab. The list refreshes every 15 s.
+The Runs tab replays one run at a time, in either of two views. **View** at the right of the tab
+bar switches between them, and the page remembers the choice. Both read the run's
+`timeline.jsonl`, `result.json`, frames and `report.md`, and both follow a run that is still being
+written.
+
+### Workbench
+
+Three panes:
+
+- **The rail** lists the tree's runs grouped by scenario, newest group first. Each group shows the
+  verdicts of its last 8 runs, oldest first: passed, failed, or did not complete. A run that is still
+  being written is pinned at the top with **Follow**. The filter matches scenario names, and
+  **Failing** keeps the scenarios with a failed run. The list refreshes every 15 s.
+- **The replay** is a top-down map centred on self, with range rings, locks, shots, damage and
+  DIVERGE rings. Click a ship to select it. Below the map are the play controls (step by event,
+  next DIVERGE, speed, follow live) and a track with one lane per event kind. Click or drag the
+  track to seek. The event list under it has a chip per kind to show or hide it, and a regex
+  filter. CLIENT lines start hidden.
+- **The inspector** has five tabs:
+  - **Summary**: the totals, the expectations, the selected ship and the frames. The selected
+    ship's shield, armour and hull come from its DAMAGE events; a layer the run never reports
+    shows `?`.
+  - **Expectations**: each condition, its note, its count and when it was first met.
+  - **Frames**: the run's frames.
+  - **Report**: the run's `report.md`.
+  - **Facts**: the scenario file, world, commit, stop reason, bindings and steps.
+
+  Clicking an expectation, a frame, a step or an event seeks the replay to it. **Viewer ↗** opens
+  the standalone [viewer](GUIDE.md#viewer) on the run.
+
+Keys: space plays and pauses, left and right step by event, D jumps to the next DIVERGE, and Home
+and End go to the ends.
+
+### Trace
+
+One timeline for the whole run, like a profiler trace:
+
+- **Expectations** are numbered flags where each was first met. A missing one is a red flag at the
+  right edge.
+- **Frames** form a filmstrip, with a pin at each frame's time.
+- **Each ball has a lane**, up to 40 lanes. Self comes first, then the other ships, then each swarm
+  of same-named drones or fighters as one lane.
+  - A lane's spans are its modes, with the target when it moves relative to one. They come from
+    the position samples, refined by MODE events. A swarm's span is what most of its members are
+    doing.
+  - Marks show locks, shots, hits, decisions and divergences, and ✕ marks a kill. Click a mark to
+    select its event.
+- **Divergence** and **log density** have their own rows.
+
+The panes below follow the cursor:
+
+- the map at that moment;
+- the selected event, or the latest one, with its fields and raw JSON;
+- what was diverging between server and client, the divergences ahead, and the log lines within
+  2 s.
+
+Click or drag anywhere on the timeline to move the cursor. The − / fit / + buttons zoom, and so do
+Ctrl + wheel and the + and − keys. Shift + wheel pans a zoomed timeline.
 
 ## Install
 
@@ -109,8 +164,11 @@ The page uses a small JSON API, and a script or an agent can call it the same wa
 | `GET /gui/api/patches?tree=<id>` | `e2e patch status --json`, parsed. |
 | `POST /gui/api/preview` `{ "tree": "<id>", "action": "vendor" \| "init" \| "patch-apply" \| "patch-revert", "mode": "managed", "id": "xmpp-port", "force": false }` | The preview: `ok`, `refused`, each step's command and dry-run output, and a `previewID` when `ok`. |
 | `POST /gui/api/run` `{ "previewID": "..." }` | Runs the previewed commands; each step's output and exit code. |
-| `GET /gui/api/runs?tree=<id>` | The runs and their verdicts. |
+| `GET /gui/api/runs?tree=<id>` | The runs, newest first, each with `result`: `name`, `world`, `startedAtMs`, `stoppedAtMs`, `passed`, `exitCode`, `missing`, `expectations` (a count). |
+| `GET /viewer/timeline?tree=<id>&run=<run>&from=<byte>` | The next chunk of a run's `timeline.jsonl`, as the Runs tab reads it. |
 | `GET /gui/api/run?tree=<id>&run=<run>` | `{ run, dir, report, frames, hasTimeline, result }`: the run's ID, folder, `report.md`, frame names and `result.json`. |
 | `GET /gui/api/frame?tree=<id>&run=<run>&file=<name>.svg` | One frame. |
 
-The replay viewer for a run is `/viewer#token=<token>&tree=<id>&run=<run>`.
+A run in the Runs tab is `/gui#tab=runs&tree=<id>&run=<run>&view=workbench` (or `view=trace`), and
+`&t=<seconds>` opens it at that moment. The standalone replay viewer for a run is
+`/viewer#token=<token>&tree=<id>&run=<run>`.

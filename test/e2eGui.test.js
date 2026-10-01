@@ -232,6 +232,11 @@ test("the page needs no token and carries no data; every data route needs it", a
       assert.match(page.headers.get("content-security-policy"), /default-src 'none'; script-src 'self'/);
       assert.strictEqual(page.headers.get("x-frame-options"), "DENY");
       assert.strictEqual((await fetch(`${base}/viewer`)).status, 200);
+      for (const script of ["/gui/gui.js", "/gui/runs.js", "/gui/replay.js"]) {
+        const served = await fetch(`${base}${script}`);
+        assert.strictEqual(served.status, 200, script);
+        assert.match(served.headers.get("content-type"), /^text\/javascript/, script);
+      }
       assert.strictEqual((await fetch(`${base}/gui/api/trees`)).status, 401);
       assert.strictEqual((await fetch(`${base}/gui/api/trees`, { headers: { authorization: "Bearer nope" } })).status, 401);
       const context = await fetch(`${base}/gui/api/context`, { headers: { authorization: `Bearer ${token}` } });

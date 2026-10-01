@@ -23,7 +23,8 @@ function tempRuns() {
     fs.writeFileSync(path.join(runs, run, "timeline.jsonl"), lines.map((line) => `${JSON.stringify(line)}\n`).join(""));
     if (result) fs.writeFileSync(path.join(runs, run, "result.json"), JSON.stringify(result));
   };
-  write("old-run", [{ seq: 1, kind: "START", atMs: 1000 }], { name: "old", passed: true, exitCode: 0, missing: 0, expectations: [] });
+  write("old-run", [{ seq: 1, kind: "START", atMs: 1000 }], { name: "old", world: "starter", startedAtMs: 500, stoppedAtMs: 4500, passed: true, exitCode: 0,
+    missing: 0, expectations: [] });
   write("live-run", [{ seq: 1, kind: "START", atMs: 1000 }, { seq: 2, kind: "POS", atMs: 1500, selfID: 1, balls: [] },
     { seq: 3, kind: "DIVERGE", atMs: 2000, reason: "server-only", itemID: 7 }]);
   fs.mkdirSync(path.join(runs, "economy-only"));
@@ -72,7 +73,8 @@ test("runs list newest first with their verdicts; only runs with a timeline", as
     const body = await (await fetch(`${base}/viewer/runs`, { headers: auth })).json();
     assert.deepStrictEqual(body.runs.map((run) => run.runID), ["live-run", "old-run"]);
     assert.strictEqual(body.runs[0].result, null);
-    assert.deepStrictEqual(body.runs[1].result, { name: "old", passed: true, exitCode: 0, missing: 0, expectations: 0 });
+    assert.deepStrictEqual(body.runs[1].result, { name: "old", world: "starter", startedAtMs: 500, stoppedAtMs: 4500, passed: true, exitCode: 0,
+      missing: 0, expectations: 0 });
   } finally {
     await http.stop();
   }
