@@ -16,7 +16,8 @@
   "expect": [
     { "match": "ARRIVE who=npc", "note": "the rats appear" },
     { "match": "TARGET sourceLabel=self targetID=$mark locked", "note": "the ship locks one" },
-    { "match": "FX self", "note": "the blasters fire" },
+    { "match": "FX self targetID=$mark offensive=true", "note": "the blasters fire at it" },
+    { "match": "FX label~Hobgoblin targetID=$mark offensive=true", "note": "and so do the drones" },
     { "match": "DAMAGE itemID=$mark", "note": "the rat takes damage" },
     { "match": "DESTROYED itemID=$mark", "note": "and dies" },
     { "match": "KILLMAIL", "note": "the kill is recorded" },
