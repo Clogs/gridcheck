@@ -256,7 +256,9 @@ test("the probe reads each module's exports without loading it, and names what i
     const write = (relativePath, names) => {
       const file = path.join(tree, "src", `${relativePath}.js`);
       fs.mkdirSync(path.dirname(file), { recursive: true });
-      fs.writeFileSync(file, `throw new Error("must not load");\nmodule.exports = {\n  ${names.join(",\n  ")},\n};\n`);
+      // A later module.exports._testing, as stock's characterState.js has, isn't the exports block.
+      fs.writeFileSync(file, `throw new Error("must not load");\nmodule.exports = {\n  ${names.join(",\n  ")},\n};\n` +
+        "module.exports._testing = { nothing: true };\n");
     };
     for (const [relativePath, names] of Object.values(LOADOUT_EXPORTS)) write(relativePath, names);
     assert.deepStrictEqual(probeLoadoutExports(tree), { missing: [] });

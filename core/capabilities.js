@@ -110,7 +110,7 @@ function probeTreeOffline(serverRoot, { timeoutMs = 60_000 } = {}) {
 
 // The loadout's stock exports, read from the files without loading them: the
 // ship runtime pulls in the whole space runtime. A name counts when it appears
-// in the file's last module.exports block.
+// in the file's last `module.exports =` block (not `module.exports._testing`).
 function probeLoadoutExports(serverRoot) {
   const missing = [];
   for (const [relativePath, names] of Object.values(LOADOUT_EXPORTS)) {
@@ -121,7 +121,8 @@ function probeLoadoutExports(serverRoot) {
       missing.push(`${relativePath} is not in the tree`);
       continue;
     }
-    const exportsBlock = text.slice(text.lastIndexOf("module.exports"));
+    const assignments = [...text.matchAll(/module\.exports\s*=/g)];
+    const exportsBlock = assignments.length ? text.slice(assignments[assignments.length - 1].index) : "";
     const absent = names.filter((name) => !new RegExp(`\\b${name}\\b`).test(exportsBlock));
     if (absent.length) missing.push(`${relativePath} has no ${absent.join(", ")}`);
   }
