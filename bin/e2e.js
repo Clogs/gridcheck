@@ -465,7 +465,8 @@ function createLogTailer({ file, pid, pattern, keep, onEvent }) {
     carry = lines.pop();
     for (const line of lines) {
       const parsed = parseLogLine(line);
-      if (!parsed || (pid && parsed.pid !== pid) || !pattern.test(parsed.text) || !keep(parsed.text)) continue;
+      // A line with no pid tag (stock's logger) can't be told apart, so it stays.
+      if (!parsed || (pid && parsed.pid !== null && parsed.pid !== pid) || !pattern.test(parsed.text) || !keep(parsed.text)) continue;
       onEvent({ kind: "LOG", atMs: parsed.atMs, level: parsed.level, text: parsed.text });
     }
   }
@@ -1003,12 +1004,12 @@ async function cmdLogout() {
 
 // Reads the tail of the shared server log. Every process that boots this tree
 // writes to it, tests included, so lines are kept to the running server's pid
-// unless --any-pid.
+// unless --any-pid. Stock's logger tags no pid, so its lines all stay.
 function selectLogLines(text, { grep, pid, lines }) {
   const pattern = grep ? new RegExp(grep, "i") : null;
   const pidTag = pid ? `[pid ${pid}]` : null;
   const kept = text.split(/\r?\n/).filter((line) =>
-    line && (!pidTag || line.includes(pidTag)) && (!pattern || pattern.test(line)));
+    line && (!pidTag || line.includes(pidTag) || !/^\[[^\]]+\] \[pid \d+\]/.test(line)) && (!pattern || pattern.test(line)));
   return kept.slice(-lines);
 }
 

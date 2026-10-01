@@ -13,7 +13,7 @@ const { CORE_COMMANDS, helpText, parseArgs, selectLogLines, upOptions } = requir
 const { selectScouts } = require("../plugins/lu/tool/commands");
 
 // These read the lu plugin through the default registry, so they need a tree
-// with the mod (npm run test:tree -- <tree>).
+// it applies to: the fixture tree npm test names, or one with the mod.
 const LU = needsPlugin("lu");
 
 test("scouts are single-hull pirate flights, holding ones first", () => {
@@ -52,6 +52,19 @@ test("log lines keep the server's pid and the pattern, newest last", () => {
   ]);
   assert.strictEqual(selectLogLines(text, { grep: "PirateHunt", pid: null, lines: 40 }).length, 3);
   assert.deepStrictEqual(selectLogLines(text, { pid: 10, lines: 1 }), ["[t4] [pid 10] [LOG] [piratehunt] committed"]);
+});
+
+test("stock's log lines carry no pid, so they all stay, and parse with a null pid", () => {
+  const { parseLogLine } = require("../core/timeline");
+  const text = [
+    "[2026-10-01T16:42:38.947Z] [LOG] [CharService] Space restore completed",
+    "[2026-10-01T16:42:39.135Z] [pid 10] [LOG] [NpcController] tagged by a fork",
+    "[2026-10-01T16:42:40.101Z] [WRN] [MarketDaemonClient] Unable to reach market daemon RPC",
+  ].join("\n");
+  assert.strictEqual(selectLogLines(text, { pid: 99, lines: 40 }).length, 2, "the fork line of another pid goes");
+  assert.deepStrictEqual(parseLogLine("[2026-10-01T16:42:38.947Z] [LOG] [CharService] restored"),
+    { atMs: Date.parse("2026-10-01T16:42:38.947Z"), pid: null, level: "LOG", text: "[CharService] restored" });
+  assert.strictEqual(parseLogLine("[2026-10-01T16:42:39.135Z] [pid 10] [LOG] [X] y").pid, 10);
 });
 
 test("distances read as m, km or AU", () => {

@@ -152,7 +152,7 @@ function scanSource(serverRoot, names) {
 // moves when the tree's source reads its variable; the rest stay on their
 // stock ports, so two such trees can't run at once.
 // pluginListeners: core/plugins.js registry.listeners.
-function probeListeners(serverRoot, { pluginListeners = [], market = true } = {}) {
+function probeListeners(serverRoot, { pluginListeners = [] } = {}) {
   const variables = { ...LISTENER_ENV };
   for (const listener of pluginListeners) if (listener.env) variables[listener.name] = listener.env;
   const found = scanSource(serverRoot, Object.values(variables));
@@ -166,7 +166,8 @@ function probeListeners(serverRoot, { pluginListeners = [], market = true } = {}
     } else if (name === "agentBridge") {
       listeners[name] = { movable: true, via: "EVEJS_AGENT_BRIDGE_PORT" };
     } else if (name === "marketHttp") {
-      listeners[name] = { movable: Boolean(market), via: "the market's generated TOML" };
+      // `e2e up` writes the market's TOML itself, so this one always moves.
+      listeners[name] = { movable: true, via: "the market's generated TOML" };
     } else {
       listeners[name] = { movable: false, via: "nothing this tool knows" };
     }
@@ -179,7 +180,7 @@ function probeTree(treeRoot, { env = process.env, pluginListeners = [], mode = "
   const config = defaultConfig(treeRoot, env);
   config.mode = mode;
   const serverRoot = path.join(treeRoot, config.serverDir);
-  config.listeners = probeListeners(serverRoot, { pluginListeners, market: config.daemons.market.enabled });
+  config.listeners = probeListeners(serverRoot, { pluginListeners });
   const notes = [];
   if (config.start[0] !== "node") notes.push(`server start script is not a node command: ${config.start.join(" ")}`);
   if (!fs.existsSync(path.join(treeRoot, ...config.manifest.split("/")))) {

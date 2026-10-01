@@ -10,7 +10,8 @@ const { defaultRegistry, extOf } = require("./plugins");
 
 const KIND_WIDTH = 10;
 const BODY_WIDTH = 58;
-const LOG_LINE = /^\[([^\]]+)\] \[pid (\d+)\] \[(\w+)\] (.*)$/;
+// Stock EveJS writes no [pid N] tag; the LU fork does.
+const LOG_LINE = /^\[([^\]]+)\](?: \[pid (\d+)\])? \[(\w+)\] (.*)$/;
 
 function formatOffset(ms) {
   const value = Number(ms) || 0;
@@ -246,7 +247,7 @@ function parseLogLine(line) {
   if (!match) return null;
   const atMs = Date.parse(match[1]);
   return Number.isFinite(atMs)
-    ? { atMs, pid: Number(match[2]), level: match[3], text: match[4] }
+    ? { atMs, pid: match[2] ? Number(match[2]) : null, level: match[3], text: match[4] }
     : null;
 }
 
