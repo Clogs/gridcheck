@@ -1,37 +1,32 @@
 "use strict";
 
 // Client-fidelity capture (bridge/destiny.js): every payload here is built by
-// the stock destiny encoders, so a change to the wire layout fails these tests
-// rather than silently corrupting the client model. The encoders are the tree's,
-// so most of these need one (npm run test:tree -- <tree>).
+// the tree's destiny encoders, so a change to the wire layout fails these tests
+// rather than silently corrupting the client model. npm test replays the
+// encoders' recorded output (test/fixtures/destiny.json); the compatibility
+// script records it again from each tree and fails when it changed.
 
 const test = require("node:test");
 const assert = require("node:assert");
 
 const {
+  PROBE_ENTITIES,
+  PROBE_STAMP,
   createClientModel,
   createDestinyTee,
   createDivergenceChecker,
   decodeBallState,
   decodeDestinyUpdate,
+  probeDestinyLayout,
 } = require("../bridge/destiny");
-const { needsTree, serverModule } = require("./tree");
+const { encoders } = require("./fixtures/encoders");
 
-const TREE = needsTree();
-// A tree module, loaded when a test first reads it.
-function lazy(relativePath) {
-  let loaded = null;
-  return new Proxy({}, { get: (_target, key) => (loaded || (loaded = serverModule(relativePath)))[key] });
-}
-const statePayloads = lazy("space/destiny/stream/statePayloads");
-const actions = lazy("space/destiny/stream/actions");
-const packagedAction = lazy("space/destiny/batching/packagedAction");
-const marshal = lazy("network/tcp/utils/marshal");
-const serviceHelpers = lazy("services/_shared/serviceHelpers");
-const buildPackagedActionPayload = (...args) => packagedAction.buildPackagedActionPayload(...args);
-const marshalDecodeExact = (...args) => marshal.marshalDecodeExact(...args);
-const buildDict = (...args) => serviceHelpers.buildDict(...args);
-const buildKeyVal = (...args) => serviceHelpers.buildKeyVal(...args);
+const encoded = encoders();
+// The tree's modules as these tests use them, through the recording.
+const statePayloads = { buildAddBallsStateBuffer: (stamp, entities) => encoded.ballState(stamp, entities) };
+const actions = new Proxy({}, { get: (_target, name) => (...args) => encoded.action(String(name), ...args) });
+const buildPackagedActionPayload = (pairs) => encoded.packaged(pairs);
+const marshalDecodeExact = (bytes) => encoded.marshalDecode(bytes);
 const { createAgentBridgeRoutes } = require("../bridge/routes");
 
 const BIG_NPC_ID = 9_007_199_254_740_993n; // past 2^53
@@ -51,36 +46,23 @@ function ship(itemID, overrides = {}) {
   };
 }
 
-const slimDeps = {
-  buildSlimItemDict: (entity) => buildKeyVal([["itemID", entity.itemID], ["typeID", entity.typeID || 0]]),
-};
-const setStateDeps = {
-  buildSlimItemObject: (entity) => buildKeyVal([["itemID", entity.itemID], ["typeID", entity.typeID || 0]]),
-  buildDroneState: () => buildDict([]),
-  buildSolItem: () => buildKeyVal([]),
-  hasDamageableHealth: (entity) => entity.kind === "ship",
-  buildDamageState: () => [[{ type: "real", value: 1 }, { type: "real", value: 1 }, { type: "long", value: 1n }],
-    { type: "real", value: 1 }, { type: "real", value: 1 }],
-};
-
 function destinyUpdate(...payloads) {
-  return statePayloads.buildDestinyUpdatePayload(payloads.map((payload) => ({ stamp: 100, payload })));
+  return encoded.destinyUpdate(...payloads);
 }
 
 function setState(entities, ego = 1) {
-  return destinyUpdate(statePayloads.buildSetStatePayload(100, { itemID: 30002537 }, ego, entities,
-    132000000000000000n, [], [], setStateDeps));
+  return encoded.setState(entities, ego);
 }
 
 function addBalls(entities) {
-  return destinyUpdate(statePayloads.buildAddBalls2Payload(100, entities, 132000000000000000n, slimDeps));
+  return encoded.addBalls(entities);
 }
 
 function apply(model, tuple, atMs) {
   return model.apply(decodeDestinyUpdate(tuple, { decodePackaged: marshalDecodeExact }).updates, atMs);
 }
 
-test("the ball state decoder reads every ball the stock encoder writes", TREE, () => {
+test("the ball state decoder reads every ball the stock encoder writes", () => {
   const entities = [
     ship(1),
     ship(2, { mode: "GOTO", targetPoint: { x: 5e6, y: 0, z: 0 }, velocity: { x: 120, y: -3, z: 0 } }),
@@ -118,7 +100,7 @@ test("the ball state decoder reads every ball the stock encoder writes", TREE, (
   assert.deepStrictEqual(byID.get("9").position, { x: -1.5, y: 2.25, z: 1e12 });
 });
 
-test("a truncated ball state keeps the balls before the break and says where it stopped", TREE, () => {
+test("a truncated ball state keeps the balls before the break and says where it stopped", () => {
   const buffer = statePayloads.buildAddBallsStateBuffer(1, [ship(1), ship(2)]);
   const decoded = decodeBallState(buffer.subarray(0, buffer.length - 3));
   assert.deepStrictEqual(decoded.balls.map((ball) => ball.itemID), ["1"]);
@@ -126,7 +108,7 @@ test("a truncated ball state keeps the balls before the break and says where it 
   assert.strictEqual(decodeBallState(null).error, "no ball state buffer");
 });
 
-test("packaged actions are unpacked into the updates they carry", TREE, () => {
+test("packaged actions are unpacked into the updates they carry", () => {
   const packaged = buildPackagedActionPayload([
     [100, actions.buildOrbitPayload(2, 1, 2500)],
     [100, actions.buildStopPayload(3)],
@@ -140,7 +122,7 @@ test("packaged actions are unpacked into the updates they carry", TREE, () => {
   assert.deepStrictEqual(unread.errors, ["PackagedAction not decoded"]);
 });
 
-test("the client model follows SetState, AddBalls, movement, damage, effects and removal", TREE, () => {
+test("the client model follows SetState, AddBalls, movement, damage, effects and removal", () => {
   const model = createClientModel();
   let events = apply(model, setState([ship(1), ship(2, { typeID: 17932 })]), 1000);
   assert.deepStrictEqual(events.map((event) => event.op), ["SetState"]);
@@ -177,7 +159,7 @@ test("the client model follows SetState, AddBalls, movement, damage, effects and
   assert.deepStrictEqual([...model.balls.keys()], ["1"]);
 });
 
-test("updates for a ball the client never got are kept as orphans", TREE, () => {
+test("updates for a ball the client never got are kept as orphans", () => {
   const model = createClientModel();
   apply(model, destinyUpdate(actions.buildOrbitPayload(5, 1, 500)), 500);
   assert.strictEqual(model.orphans.size, 0, "no baseline yet: nothing to compare with");
@@ -197,7 +179,52 @@ function gatewaySession(original = () => undefined) {
   };
 }
 
-test("the tee wraps gateway sessions only and returns the original's result", TREE, () => {
+// The bridge's layout check (probeDestinyLayout) against the tree's own encoder.
+const treeEncoder = (stamp, entities) => statePayloads.buildAddBallsStateBuffer(stamp, entities);
+// The same balls with one byte more after the header, as a tree that grew a field would write them.
+const shiftedEncoder = (stamp, entities) => {
+  const buffer = treeEncoder(stamp, entities);
+  return Buffer.concat([buffer.subarray(0, 13), Buffer.from([0]), buffer.subarray(13)]);
+};
+
+test("the layout check reads back every probe ball the tree's encoder writes", () => {
+  const probe = probeDestinyLayout(treeEncoder);
+  assert.deepStrictEqual(probe, { ok: true, error: null, balls: PROBE_ENTITIES.length });
+  assert.strictEqual(decodeBallState(treeEncoder(PROBE_STAMP, PROBE_ENTITIES.map((entity) => ({ ...entity })))).stamp, PROBE_STAMP);
+});
+
+test("a changed destiny layout turns the client view off with a clear message", async () => {
+  const probe = probeDestinyLayout(shiftedEncoder);
+  assert.strictEqual(probe.ok, false);
+  assert.match(probe.error, /^this tree's destiny ball layout is not the one the decoder reads: /);
+  assert.match(probe.error, /ball 1 modeName read as "GOTO", written as "STOP"/);
+
+  const tee = createDestinyTee({ decodePackaged: marshalDecodeExact, off: probe.error });
+  const session = gatewaySession();
+  const original = session.sendNotification;
+  assert.deepStrictEqual(tee.attach(session), { ok: false, error: `client view off: ${probe.error}` });
+  assert.strictEqual(session.sendNotification, original, "nothing wraps the session");
+
+  const { createGridWatch } = require("../bridge/watch");
+  let clock = 0;
+  const watch = createGridWatch({
+    findSession: () => session,
+    readGrid: () => ({ inSpace: true, solarSystemID: 30000142, systemName: "Jita", self: { itemID: 1 },
+      entities: [{ kind: "ship", itemID: 1, isSelf: true, typeName: "Rifter", mode: "STOP", position: { x: 0, y: 0, z: 0 } }] }),
+    destinyTee: tee,
+    now: () => clock,
+    perfNow: () => clock,
+    wait: async (ms) => { clock += ms; },
+  });
+  const lines = [];
+  await watch.run({ characterID: 90000001, forMs: 4_000, everyMs: 2_000, offGridEveryMs: 60_000, clientMode: "all" },
+    { write: (event) => lines.push(event), closed: () => false });
+  assert.deepStrictEqual([lines[0].kind, lines[0].clientMode, lines[0].clientOff], ["START", "off", probe.error]);
+  assert.ok(!lines.some((event) => event.kind === "CLIENT" || event.kind === "DIVERGE"),
+    lines.map((event) => event.kind).join(" "));
+});
+
+test("the tee wraps gateway sessions only and returns the original's result", () => {
   const seen = [];
   const tee = createDestinyTee({ decodePackaged: marshalDecodeExact, now: () => 1000 });
   const session = gatewaySession((name) => { seen.push(name); return name === "Refuse" ? false : undefined; });
@@ -219,7 +246,7 @@ test("the tee wraps gateway sessions only and returns the original's result", TR
   assert.strictEqual(tee.attach(retail).ok, false);
 });
 
-test("the tee ring is bounded and a slow reader is told how many events it missed", TREE, () => {
+test("the tee ring is bounded and a slow reader is told how many events it missed", () => {
   const tee = createDestinyTee({ decodePackaged: marshalDecodeExact, ringSize: 3, now: () => 1000 });
   const session = gatewaySession();
   const { state } = tee.attach(session);
@@ -241,7 +268,7 @@ function row(itemID, overrides = {}) {
   return { kind: "ship", itemID, mode: "STOP", position: { x: 1000, y: 2000, z: 3000 }, ...overrides };
 }
 
-test("a ship that warped in is position-checked at sub-warp speed, not its warp velocity", TREE, () => {
+test("a ship that warped in is position-checked at sub-warp speed, not its warp velocity", () => {
   const model = createClientModel();
   apply(model, setState([ship(1)]), 0);
   apply(model, addBalls([ship(5, { mode: "WARP", velocity: { x: 150_000, y: 0, z: 0 },
@@ -256,7 +283,7 @@ test("a ship that warped in is position-checked at sub-warp speed, not its warp 
   assert.deepStrictEqual(checker.step(serverGrid([row(1), row(5, { position: { x: 4000, y: 0, z: 0 } })]), model, 7000), []);
 });
 
-test("docking throws the client's ballpark away; in space without a SetState is one DIVERGE", TREE, () => {
+test("docking throws the client's ballpark away; in space without a SetState is one DIVERGE", () => {
   let clock = 0;
   const changes = [];
   const session = { ...gatewaySession(), sendSessionChange: (value) => { changes.push(value); return "sent"; } };
@@ -287,7 +314,7 @@ test("docking throws the client's ballpark away; in space without a SetState is 
     [["no-ballpark", "cleared", 10_000]]);
 });
 
-test("missiles are never position-checked", TREE, () => {
+test("missiles are never position-checked", () => {
   const model = createClientModel();
   apply(model, setState([ship(1)]), 0);
   apply(model, addBalls([{ kind: "missile", itemID: 42, typeID: 209, radius: 1, position: { x: 0, y: 0, z: 0 },
@@ -299,7 +326,7 @@ test("missiles are never position-checked", TREE, () => {
 });
 
 // The phase's done-when, in miniature: an AddBalls path that skips one ball.
-test("a watch over a teed session reports a ball the AddBalls path skipped as DIVERGE", TREE, async () => {
+test("a watch over a teed session reports a ball the AddBalls path skipped as DIVERGE", async () => {
   const { createGridWatch } = require("../bridge/watch");
   let clock = 1_000;
   const session = gatewaySession();
@@ -348,7 +375,7 @@ test("a watch over a teed session reports a ball the AddBalls path skipped as DI
   assert.strictEqual(end.client.notifications, 1);
 });
 
-test("client mode fx keeps the client's special effects and DIVERGE, without CLIENT lines", TREE, async () => {
+test("client mode fx keeps the client's special effects and DIVERGE, without CLIENT lines", async () => {
   const { createGridWatch } = require("../bridge/watch");
   let clock = 1_000;
   const session = gatewaySession();
@@ -430,7 +457,7 @@ test("/tee attaches gateway sessions and /watch passes the client options throug
   assert.deepStrictEqual([calls[0].clientMode, calls[0].divergeMeters], ["diverge", 2000]);
 });
 
-test("a ball the server shows but the client never got opens a DIVERGE, and clears when it arrives", TREE, () => {
+test("a ball the server shows but the client never got opens a DIVERGE, and clears when it arrives", () => {
   const model = createClientModel();
   apply(model, setState([ship(1)]), 0);
   const checker = createDivergenceChecker();
@@ -448,7 +475,7 @@ test("a ball the server shows but the client never got opens a DIVERGE, and clea
   assert.deepStrictEqual(cleared.map((event) => [event.reason, event.status, event.durationMs]), [["server-only", "cleared", 4000]]);
 });
 
-test("one-sided balls, mode mismatches, position errors, bad warp landings and orphans are reported", TREE, () => {
+test("one-sided balls, mode mismatches, position errors, bad warp landings and orphans are reported", () => {
   const model = createClientModel();
   apply(model, setState([ship(1), ship(2), ship(3, { mode: "ORBIT", targetEntityID: 1, orbitDistance: 500 })]), 0);
   // Ball 4 lands far from where the client was told it warps to.
@@ -478,7 +505,7 @@ test("one-sided balls, mode mismatches, position errors, bad warp landings and o
   assert.deepStrictEqual([mode.clientMode, mode.serverMode], ["ORBIT", "STOP"]);
 });
 
-test("a WarpTo is only checked on landing once the server has shown the warp", TREE, () => {
+test("a WarpTo is only checked on landing once the server has shown the warp", () => {
   const model = createClientModel();
   apply(model, setState([ship(1)]), 0);
   apply(model, destinyUpdate(actions.buildWarpToPayload(1, { x: 1e9, y: 0, z: 0 }, 0, 3000)), 0);

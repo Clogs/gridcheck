@@ -9,9 +9,9 @@
 //
 // Files come from git objects, not the checkout's working files, so each keeps
 // the line endings it was committed with and uncommitted work is never
-// vendored. test/ and the repo's dotfiles stay behind: the tests run from the
-// repo (npm run test:tree -- <tree>), and a .gitattributes inside the copy
-// would change how the tree's own git reads it.
+// vendored. test/ and the repo's dotfiles stay behind: the tests and the
+// compatibility script run from the repo (npm test, npm run compat), and a
+// .gitattributes inside the copy would change how the tree's own git reads it.
 
 const crypto = require("node:crypto");
 const fs = require("node:fs");

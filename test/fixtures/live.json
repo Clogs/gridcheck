@@ -1,0 +1,2922 @@
+{
+  "evejs": "0.12.9",
+  "session": {
+    "clientID": 2000000001,
+    "gatewayClientID": true,
+    "socket": true,
+    "socketWrites": false,
+    "sendNotification": true,
+    "sendSessionChange": true,
+    "characterID": 140000005,
+    "keys": [
+      "_boundObjectIDs",
+      "_boundObjectState",
+      "_characterControlDisconnected",
+      "_deferredDockedShipSessionChange",
+      "_localChatDeparted",
+      "_loginInventoryBootstrapPending",
+      "_nextInitialBallparkPreviousCapturedAtWallclockMs",
+      "_nextInitialBallparkPreviousSimTimeMs",
+      "_nextInitialBallparkPreviousTimeDilation",
+      "_pendingCommandInitialBallpark",
+      "_pendingDockedFittingBootstrap",
+      "_pendingLocalChannelSync",
+      "_skipNextInitialBallparkRebase",
+      "_space",
+      "_syncLedgerDestinyLifecycle",
+      "_syncLedgerEvents",
+      "_syncLedgerSeq",
+      "_transitionState",
+      "_undockInvulnerabilityCancelTimer",
+      "activeShipID",
+      "allianceID",
+      "allianceid",
+      "baseID",
+      "bloodlineID",
+      "bloodlineid",
+      "characterID",
+      "characterName",
+      "characterTypeID",
+      "charid",
+      "clientID",
+      "cloneStationID",
+      "clonestationid",
+      "connectTime",
+      "constellationID",
+      "constellationid",
+      "corpAccountKey",
+      "corpaccountkey",
+      "corpid",
+      "corporationID",
+      "corprole",
+      "currentBoundObjectID",
+      "factionID",
+      "factionid",
+      "fleetid",
+      "fleetrole",
+      "genderID",
+      "genderid",
+      "homeStationID",
+      "homestationid",
+      "hqID",
+      "lastActivity",
+      "lastBoundObjectID",
+      "locationid",
+      "plexBalance",
+      "raceID",
+      "raceid",
+      "regionID",
+      "regionid",
+      "role",
+      "rolesAtAll",
+      "rolesAtBase",
+      "rolesAtHQ",
+      "rolesAtOther",
+      "schoolID",
+      "schoolid",
+      "sendNotification",
+      "sendServiceNotification",
+      "sendSessionChange",
+      "shipID",
+      "shipName",
+      "shipTypeID",
+      "shipid",
+      "skillPoints",
+      "socket",
+      "solarsystemid",
+      "solarsystemid2",
+      "squadid",
+      "stationID",
+      "stationid",
+      "stationid2",
+      "structureID",
+      "structureTypeID",
+      "structureid",
+      "userName",
+      "userid",
+      "warFactionID",
+      "warfactionid",
+      "wingid",
+      "worldspaceid"
+    ]
+  },
+  "grid": {
+    "characterID": 140000005,
+    "characterName": "Agent Observer",
+    "solarSystemID": 30100032,
+    "systemName": "Manifest",
+    "security": 1,
+    "stationID": null,
+    "structureID": null,
+    "inSpace": true,
+    "sampledAtMs": 1790873302720,
+    "self": {
+      "itemID": 9988400000114,
+      "typeID": 601,
+      "typeName": "Ibis",
+      "name": "Ibis",
+      "mode": "GOTO",
+      "protection": {
+        "active": true,
+        "untilMs": 1790873330591,
+        "remainingMs": 27871,
+        "cloaked": false
+      }
+    },
+    "entities": [
+      {
+        "kind": "station",
+        "itemID": 60015249,
+        "typeID": 92885,
+        "groupID": 15,
+        "categoryID": 3,
+        "name": "Manifest V - AIR Laboratories Trade Center",
+        "ownerID": 1000413,
+        "radius": 70000,
+        "position": {
+          "x": 311989870775,
+          "y": -13069156275,
+          "z": 156646281447
+        },
+        "velocity": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "isSelf": false,
+        "shieldRatio": null,
+        "armorRatio": null,
+        "hullRatio": null,
+        "typeName": "AIR Trade Center",
+        "distanceMeters": 0
+      },
+      {
+        "kind": "ship",
+        "itemID": 9988400000114,
+        "typeID": 601,
+        "groupID": 237,
+        "categoryID": 6,
+        "name": "Ibis",
+        "ownerID": 140000005,
+        "radius": 47,
+        "position": {
+          "x": 311989850708.7316,
+          "y": -13069154040.31763,
+          "z": 156646294007.17502
+        },
+        "velocity": {
+          "x": -277.89733102504044,
+          "y": 0,
+          "z": 194.58580603209242
+        },
+        "isSelf": true,
+        "shieldRatio": 1,
+        "armorRatio": 1,
+        "hullRatio": 1,
+        "characterID": 140000005,
+        "corporationID": 1000006,
+        "allianceID": null,
+        "securityStatus": 0,
+        "maxVelocity": 339.25,
+        "mode": "GOTO",
+        "targetEntityID": null,
+        "capacitorRatio": 1,
+        "isNpc": false,
+        "npcEntityType": null,
+        "compressionFacility": null,
+        "typeName": "Ibis",
+        "distanceMeters": 0
+      },
+      {
+        "kind": "sentryGun",
+        "itemID": 8430006001524901,
+        "typeID": 3740,
+        "groupID": 99,
+        "categoryID": 11,
+        "name": "Caldari Sentry Gun I",
+        "ownerID": 1000413,
+        "radius": 45,
+        "position": {
+          "x": 311989821277.5253,
+          "y": -13069106777.525316,
+          "z": 156646281447
+        },
+        "velocity": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "isSelf": false,
+        "shieldRatio": null,
+        "armorRatio": null,
+        "hullRatio": null,
+        "typeName": "Caldari Sentry Gun I",
+        "distanceMeters": 56984.487611459714
+      },
+      {
+        "kind": "sentryGun",
+        "itemID": 8430006001524903,
+        "typeID": 3739,
+        "groupID": 99,
+        "categoryID": 11,
+        "name": "Caldari Sentry Gun III",
+        "ownerID": 1000413,
+        "radius": 45,
+        "position": {
+          "x": 311989821277.5253,
+          "y": -13069205772.474684,
+          "z": 156646281447
+        },
+        "velocity": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "isSelf": false,
+        "shieldRatio": null,
+        "armorRatio": null,
+        "hullRatio": null,
+        "typeName": "Caldari Sentry Gun III",
+        "distanceMeters": 60737.02246502393
+      },
+      {
+        "kind": "sentryGun",
+        "itemID": 8430006001524908,
+        "typeID": 3741,
+        "groupID": 99,
+        "categoryID": 11,
+        "name": "Caldari Sentry Gun II",
+        "ownerID": 1000413,
+        "radius": 45,
+        "position": {
+          "x": 311989870775,
+          "y": -13069106777.525316,
+          "z": 156646330944.47467
+        },
+        "velocity": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "isSelf": false,
+        "shieldRatio": null,
+        "armorRatio": null,
+        "hullRatio": null,
+        "typeName": "Caldari Sentry Gun II",
+        "distanceMeters": 63159.80447477916
+      },
+      {
+        "kind": "sentryGun",
+        "itemID": 8430006001524906,
+        "typeID": 3739,
+        "groupID": 99,
+        "categoryID": 11,
+        "name": "Caldari Sentry Gun III",
+        "ownerID": 1000413,
+        "radius": 45,
+        "position": {
+          "x": 311989870775,
+          "y": -13069205772.474684,
+          "z": 156646330944.47467
+        },
+        "velocity": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "isSelf": false,
+        "shieldRatio": null,
+        "armorRatio": null,
+        "hullRatio": null,
+        "typeName": "Caldari Sentry Gun III",
+        "distanceMeters": 66565.59750624804
+      },
+      {
+        "kind": "sentryGun",
+        "itemID": 8430006001524905,
+        "typeID": 3741,
+        "groupID": 99,
+        "categoryID": 11,
+        "name": "Caldari Sentry Gun II",
+        "ownerID": 1000413,
+        "radius": 45,
+        "position": {
+          "x": 311989870775,
+          "y": -13069106777.525316,
+          "z": 156646231949.52533
+        },
+        "velocity": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "isSelf": false,
+        "shieldRatio": null,
+        "armorRatio": null,
+        "hullRatio": null,
+        "typeName": "Caldari Sentry Gun II",
+        "distanceMeters": 80453.5060733662
+      },
+      {
+        "kind": "sentryGun",
+        "itemID": 8430006001524907,
+        "typeID": 3740,
+        "groupID": 99,
+        "categoryID": 11,
+        "name": "Caldari Sentry Gun I",
+        "ownerID": 1000413,
+        "radius": 45,
+        "position": {
+          "x": 311989870775,
+          "y": -13069205772.474684,
+          "z": 156646231949.52533
+        },
+        "velocity": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "isSelf": false,
+        "shieldRatio": null,
+        "armorRatio": null,
+        "hullRatio": null,
+        "typeName": "Caldari Sentry Gun I",
+        "distanceMeters": 83154.76020485089
+      },
+      {
+        "kind": "sentryGun",
+        "itemID": 8430006001524904,
+        "typeID": 3740,
+        "groupID": 99,
+        "categoryID": 11,
+        "name": "Caldari Sentry Gun I",
+        "ownerID": 1000413,
+        "radius": 45,
+        "position": {
+          "x": 311989920272.4747,
+          "y": -13069106777.525316,
+          "z": 156646281447
+        },
+        "velocity": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "isSelf": false,
+        "shieldRatio": null,
+        "armorRatio": null,
+        "hullRatio": null,
+        "typeName": "Caldari Sentry Gun I",
+        "distanceMeters": 84941.19281239092
+      },
+      {
+        "kind": "sentryGun",
+        "itemID": 8430006001524902,
+        "typeID": 3741,
+        "groupID": 99,
+        "categoryID": 11,
+        "name": "Caldari Sentry Gun II",
+        "ownerID": 1000413,
+        "radius": 45,
+        "position": {
+          "x": 311989920272.4747,
+          "y": -13069205772.474684,
+          "z": 156646281447
+        },
+        "velocity": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "isSelf": false,
+        "shieldRatio": null,
+        "armorRatio": null,
+        "hullRatio": null,
+        "typeName": "Caldari Sentry Gun II",
+        "distanceMeters": 87504.16667331124
+      },
+      {
+        "kind": "authoredSpaceProp",
+        "itemID": 8500301000320001,
+        "typeID": 95178,
+        "groupID": 1975,
+        "categoryID": 2,
+        "name": null,
+        "ownerID": 500021,
+        "radius": 1,
+        "position": {
+          "x": 311989985280,
+          "y": -13069148160,
+          "z": 156646318080
+        },
+        "velocity": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "isSelf": false,
+        "shieldRatio": null,
+        "armorRatio": null,
+        "hullRatio": null,
+        "typeName": "ENV_Oceanic_01a",
+        "distanceMeters": 136785.86024363313
+      },
+      {
+        "kind": "authoredSpaceProp",
+        "itemID": 8500301000320002,
+        "typeID": 94180,
+        "groupID": 4579,
+        "categoryID": 2,
+        "name": null,
+        "ownerID": 500021,
+        "radius": 400,
+        "position": {
+          "x": 311989865280,
+          "y": -13069948160,
+          "z": 156646218080
+        },
+        "velocity": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "isSelf": false,
+        "shieldRatio": null,
+        "armorRatio": null,
+        "hullRatio": null,
+        "typeName": "VDB_Cloud_Vortex_05d",
+        "distanceMeters": 797427.2555656424
+      },
+      {
+        "kind": "planet",
+        "itemID": 40491241,
+        "typeID": 11,
+        "groupID": 7,
+        "categoryID": 2,
+        "name": "Manifest V",
+        "ownerID": 1,
+        "radius": 8230000,
+        "position": {
+          "x": 311996432076,
+          "y": -13072069864,
+          "z": 156638324422
+        },
+        "velocity": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "isSelf": false,
+        "shieldRatio": null,
+        "armorRatio": null,
+        "hullRatio": null,
+        "typeName": "Planet (Temperate)",
+        "distanceMeters": 2509166.692339385
+      },
+      {
+        "kind": "orbital",
+        "itemID": 1200040491241,
+        "typeID": 2233,
+        "groupID": 1025,
+        "categoryID": 46,
+        "name": "Customs Office (Manifest V)",
+        "ownerID": 1,
+        "radius": 8000,
+        "position": {
+          "x": 311988681684.8576,
+          "y": -13069401190.315878,
+          "z": 156639807162
+        },
+        "velocity": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "isSelf": false,
+        "shieldRatio": 1,
+        "armorRatio": 1,
+        "hullRatio": 1,
+        "typeName": "Customs Office",
+        "distanceMeters": 6587926.033929768
+      },
+      {
+        "kind": "moon",
+        "itemID": 40491242,
+        "typeID": 14,
+        "groupID": 8,
+        "categoryID": 2,
+        "name": "Manifest V - Moon 1",
+        "ownerID": 1,
+        "radius": 640000,
+        "position": {
+          "x": 312445336641,
+          "y": -13090878130,
+          "z": 156851075947
+        },
+        "velocity": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "isSelf": false,
+        "shieldRatio": null,
+        "armorRatio": null,
+        "hullRatio": null,
+        "typeName": "Moon",
+        "distanceMeters": 499234950.8198526
+      },
+      {
+        "kind": "moon",
+        "itemID": 40491239,
+        "typeID": 14,
+        "groupID": 8,
+        "categoryID": 2,
+        "name": "Manifest IV - Moon 4",
+        "ownerID": 1,
+        "radius": 1120000,
+        "position": {
+          "x": 199813229876,
+          "y": -8371802470,
+          "z": -117550210448
+        },
+        "velocity": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "isSelf": false,
+        "shieldRatio": null,
+        "armorRatio": null,
+        "hullRatio": null,
+        "typeName": "Moon",
+        "distanceMeters": 296291610928.0653
+      },
+      {
+        "kind": "moon",
+        "itemID": 40491240,
+        "typeID": 14,
+        "groupID": 8,
+        "categoryID": 2,
+        "name": "Manifest IV - Moon 5",
+        "ownerID": 1,
+        "radius": 570000,
+        "position": {
+          "x": 199112229298,
+          "y": -8342431851,
+          "z": -117293723747
+        },
+        "velocity": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "isSelf": false,
+        "shieldRatio": null,
+        "armorRatio": null,
+        "hullRatio": null,
+        "typeName": "Moon",
+        "distanceMeters": 296321607059.53577
+      },
+      {
+        "kind": "station",
+        "itemID": 60015251,
+        "typeID": 71361,
+        "groupID": 15,
+        "categoryID": 3,
+        "name": "Manifest IV - Moon 5 - Paragon Fulfillment Center",
+        "ownerID": 1000419,
+        "radius": 20000,
+        "position": {
+          "x": 199104908279,
+          "y": -8342227086,
+          "z": -117294707770
+        },
+        "velocity": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "isSelf": false,
+        "shieldRatio": null,
+        "armorRatio": null,
+        "hullRatio": null,
+        "typeName": "Paragon Fulfilment Center",
+        "distanceMeters": 296325858877.6688
+      },
+      {
+        "kind": "moon",
+        "itemID": 40491236,
+        "typeID": 14,
+        "groupID": 8,
+        "categoryID": 2,
+        "name": "Manifest IV - Moon 1",
+        "ownerID": 1,
+        "radius": 180000,
+        "position": {
+          "x": 199923874432,
+          "y": -8376438271,
+          "z": -118430551209
+        },
+        "velocity": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "isSelf": false,
+        "shieldRatio": null,
+        "armorRatio": null,
+        "hullRatio": null,
+        "typeName": "Moon",
+        "distanceMeters": 297065596161.28705
+      },
+      {
+        "kind": "planet",
+        "itemID": 40491235,
+        "typeID": 13,
+        "groupID": 7,
+        "categoryID": 2,
+        "name": "Manifest IV",
+        "ownerID": 1,
+        "radius": 18920000,
+        "position": {
+          "x": 199852880908,
+          "y": -8373463775,
+          "z": -118434908781
+        },
+        "velocity": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "isSelf": false,
+        "shieldRatio": null,
+        "armorRatio": null,
+        "hullRatio": null,
+        "typeName": "Planet (Gas)",
+        "distanceMeters": 297077726905.7165
+      },
+      {
+        "kind": "orbital",
+        "itemID": 1200040491235,
+        "typeID": 2233,
+        "groupID": 1025,
+        "categoryID": 46,
+        "name": "Customs Office (Manifest IV)",
+        "ownerID": 1,
+        "radius": 8000,
+        "position": {
+          "x": 199854514480.81677,
+          "y": -8392135597.736205,
+          "z": -118438142181
+        },
+        "velocity": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "isSelf": false,
+        "shieldRatio": 1,
+        "armorRatio": 1,
+        "hullRatio": 1,
+        "typeName": "Customs Office",
+        "distanceMeters": 297098721612.73096
+      },
+      {
+        "kind": "moon",
+        "itemID": 40491237,
+        "typeID": 14,
+        "groupID": 8,
+        "categoryID": 2,
+        "name": "Manifest IV - Moon 2",
+        "ownerID": 1,
+        "radius": 710000,
+        "position": {
+          "x": 199914930452,
+          "y": -8376063535,
+          "z": -118742930378
+        },
+        "velocity": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "isSelf": false,
+        "shieldRatio": null,
+        "armorRatio": null,
+        "hullRatio": null,
+        "typeName": "Moon",
+        "distanceMeters": 297357723088.0166
+      },
+      {
+        "kind": "moon",
+        "itemID": 40491238,
+        "typeID": 14,
+        "groupID": 8,
+        "categoryID": 2,
+        "name": "Manifest IV - Moon 3",
+        "ownerID": 1,
+        "radius": 790000,
+        "position": {
+          "x": 199431107435,
+          "y": -8355792251,
+          "z": -118611380539
+        },
+        "velocity": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "isSelf": false,
+        "shieldRatio": null,
+        "armorRatio": null,
+        "hullRatio": null,
+        "typeName": "Moon",
+        "distanceMeters": 297418903085.93097
+      },
+      {
+        "kind": "planet",
+        "itemID": 40491233,
+        "typeID": 2015,
+        "groupID": 7,
+        "categoryID": 2,
+        "name": "Manifest III",
+        "ownerID": 1,
+        "radius": 3740000,
+        "position": {
+          "x": 68739120207,
+          "y": -2880041210,
+          "z": -29184238750
+        },
+        "velocity": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "isSelf": false,
+        "shieldRatio": null,
+        "armorRatio": null,
+        "hullRatio": null,
+        "typeName": "Planet (Lava)",
+        "distanceMeters": 306276724257.7129
+      },
+      {
+        "kind": "orbital",
+        "itemID": 1200040491233,
+        "typeID": 2233,
+        "groupID": 1025,
+        "categoryID": 46,
+        "name": "Customs Office (Manifest III)",
+        "ownerID": 1,
+        "radius": 8000,
+        "position": {
+          "x": 68735403018.25464,
+          "y": -2880899390.641712,
+          "z": -29183800990
+        },
+        "velocity": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "isSelf": false,
+        "shieldRatio": 1,
+        "armorRatio": 1,
+        "hullRatio": 1,
+        "typeName": "Customs Office",
+        "distanceMeters": 306283114342.5054
+      },
+      {
+        "kind": "moon",
+        "itemID": 40491234,
+        "typeID": 14,
+        "groupID": 8,
+        "categoryID": 2,
+        "name": "Manifest III - Moon 1",
+        "ownerID": 1,
+        "radius": 320000,
+        "position": {
+          "x": 68677891580,
+          "y": -2877475844,
+          "z": -29251235536
+        },
+        "velocity": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "isSelf": false,
+        "shieldRatio": null,
+        "armorRatio": null,
+        "hullRatio": null,
+        "typeName": "Moon",
+        "distanceMeters": 306369507530.3489
+      },
+      {
+        "kind": "planet",
+        "itemID": 40491232,
+        "typeID": 2063,
+        "groupID": 7,
+        "categoryID": 2,
+        "name": "Manifest II",
+        "ownerID": 1,
+        "radius": 2490000,
+        "position": {
+          "x": 45389820684,
+          "y": -1901749014,
+          "z": -27764714834
+        },
+        "velocity": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "isSelf": false,
+        "shieldRatio": null,
+        "armorRatio": null,
+        "hullRatio": null,
+        "typeName": "Planet (Plasma)",
+        "distanceMeters": 324354885583.6916
+      },
+      {
+        "kind": "orbital",
+        "itemID": 1200040491232,
+        "typeID": 2233,
+        "groupID": 1025,
+        "categoryID": 46,
+        "name": "Customs Office (Manifest II)",
+        "ownerID": 1,
+        "radius": 8000,
+        "position": {
+          "x": 45387537438.306274,
+          "y": -1900534990.729845,
+          "z": -27764569794
+        },
+        "velocity": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "isSelf": false,
+        "shieldRatio": 1,
+        "armorRatio": 1,
+        "hullRatio": 1,
+        "typeName": "Customs Office",
+        "distanceMeters": 324359203600.38385
+      },
+      {
+        "kind": "sun",
+        "itemID": 40491307,
+        "typeID": 9,
+        "groupID": 6,
+        "categoryID": 2,
+        "name": "Manifest - Star",
+        "ownerID": 1,
+        "radius": 505300000,
+        "position": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "velocity": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "isSelf": false,
+        "shieldRatio": null,
+        "armorRatio": null,
+        "hullRatio": null,
+        "typeName": "Sun B0 (Blue)",
+        "distanceMeters": 348846286694.44946
+      },
+      {
+        "kind": "planet",
+        "itemID": 40491231,
+        "typeID": 2016,
+        "groupID": 7,
+        "categoryID": 2,
+        "name": "Manifest I",
+        "ownerID": 1,
+        "radius": 2210000,
+        "position": {
+          "x": -38257046238,
+          "y": 1602899039,
+          "z": 8769529738
+        },
+        "velocity": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "isSelf": false,
+        "shieldRatio": null,
+        "armorRatio": null,
+        "hullRatio": null,
+        "typeName": "Planet (Barren)",
+        "distanceMeters": 380465522320.8027
+      },
+      {
+        "kind": "orbital",
+        "itemID": 1200040491231,
+        "typeID": 2233,
+        "groupID": 1025,
+        "categoryID": 46,
+        "name": "Customs Office (Manifest I)",
+        "ownerID": 1,
+        "radius": 8000,
+        "position": {
+          "x": -38257874066.307785,
+          "y": 1605055605.4720626,
+          "z": 8769525118
+        },
+        "velocity": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "isSelf": false,
+        "shieldRatio": 1,
+        "armorRatio": 1,
+        "hullRatio": 1,
+        "typeName": "Customs Office",
+        "distanceMeters": 380468571359.924
+      },
+      {
+        "kind": "moon",
+        "itemID": 40491263,
+        "typeID": 14,
+        "groupID": 8,
+        "categoryID": 2,
+        "name": "Manifest VII - Moon 18",
+        "ownerID": 1,
+        "radius": 970000,
+        "position": {
+          "x": 206094109716,
+          "y": -8634959646,
+          "z": -549165895808
+        },
+        "velocity": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "isSelf": false,
+        "shieldRatio": null,
+        "armorRatio": null,
+        "hullRatio": null,
+        "typeName": "Moon",
+        "distanceMeters": 713724759720.408
+      },
+      {
+        "kind": "moon",
+        "itemID": 40491260,
+        "typeID": 14,
+        "groupID": 8,
+        "categoryID": 2,
+        "name": "Manifest VII - Moon 15",
+        "ownerID": 1,
+        "radius": 920000,
+        "position": {
+          "x": 206118405475,
+          "y": -8635977594,
+          "z": -550704790097
+        },
+        "velocity": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "isSelf": false,
+        "shieldRatio": null,
+        "armorRatio": null,
+        "hullRatio": null,
+        "typeName": "Moon",
+        "distanceMeters": 715243074791.569
+      },
+      {
+        "kind": "moon",
+        "itemID": 40491261,
+        "typeID": 14,
+        "groupID": 8,
+        "categoryID": 2,
+        "name": "Manifest VII - Moon 16",
+        "ownerID": 1,
+        "radius": 1350000,
+        "position": {
+          "x": 204345825688,
+          "y": -8561709799,
+          "z": -550617781121
+        },
+        "velocity": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "isSelf": false,
+        "shieldRatio": null,
+        "armorRatio": null,
+        "hullRatio": null,
+        "typeName": "Moon",
+        "distanceMeters": 715421619351.6385
+      },
+      {
+        "kind": "moon",
+        "itemID": 40491256,
+        "typeID": 14,
+        "groupID": 8,
+        "categoryID": 2,
+        "name": "Manifest VII - Moon 11",
+        "ownerID": 1,
+        "radius": 330000,
+        "position": {
+          "x": 205256802215,
+          "y": -8599878020,
+          "z": -552070671850
+        },
+        "velocity": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "isSelf": false,
+        "shieldRatio": null,
+        "armorRatio": null,
+        "hullRatio": null,
+        "typeName": "Moon",
+        "distanceMeters": 716722528359.7284
+      },
+      {
+        "kind": "moon",
+        "itemID": 40491258,
+        "typeID": 14,
+        "groupID": 8,
+        "categoryID": 2,
+        "name": "Manifest VII - Moon 13",
+        "ownerID": 1,
+        "radius": 1300000,
+        "position": {
+          "x": 204498755756,
+          "y": -8568117285,
+          "z": -552350087904
+        },
+        "velocity": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "isSelf": false,
+        "shieldRatio": null,
+        "armorRatio": null,
+        "hullRatio": null,
+        "typeName": "Moon",
+        "distanceMeters": 717111288316.3243
+      },
+      {
+        "kind": "moon",
+        "itemID": 40491250,
+        "typeID": 14,
+        "groupID": 8,
+        "categoryID": 2,
+        "name": "Manifest VII - Moon 5",
+        "ownerID": 1,
+        "radius": 270000,
+        "position": {
+          "x": 205664282472,
+          "y": -8616950685,
+          "z": -552559962041
+        },
+        "velocity": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "isSelf": false,
+        "shieldRatio": null,
+        "armorRatio": null,
+        "hullRatio": null,
+        "typeName": "Moon",
+        "distanceMeters": 717145783552.5793
+      },
+      {
+        "kind": "moon",
+        "itemID": 40491249,
+        "typeID": 14,
+        "groupID": 8,
+        "categoryID": 2,
+        "name": "Manifest VII - Moon 4",
+        "ownerID": 1,
+        "radius": 370000,
+        "position": {
+          "x": 205709759259,
+          "y": -8618856078,
+          "z": -552723751728
+        },
+        "velocity": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "isSelf": false,
+        "shieldRatio": null,
+        "armorRatio": null,
+        "hullRatio": null,
+        "typeName": "Moon",
+        "distanceMeters": 717300908898.4938
+      },
+      {
+        "kind": "planet",
+        "itemID": 40491245,
+        "typeID": 13,
+        "groupID": 7,
+        "categoryID": 2,
+        "name": "Manifest VII",
+        "ownerID": 1,
+        "radius": 26430000,
+        "position": {
+          "x": 205527491267,
+          "y": -8611219388,
+          "z": -552734393012
+        },
+        "velocity": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "isSelf": false,
+        "shieldRatio": null,
+        "armorRatio": null,
+        "hullRatio": null,
+        "typeName": "Planet (Gas)",
+        "distanceMeters": 717312448221.1875
+      },
+      {
+        "kind": "orbital",
+        "itemID": 1200040491245,
+        "typeID": 2233,
+        "groupID": 1025,
+        "categoryID": 46,
+        "name": "Customs Office (Manifest VII)",
+        "ownerID": 1,
+        "radius": 8000,
+        "position": {
+          "x": 205549222284.10263,
+          "y": -8626435609.988228,
+          "z": -552734127712
+        },
+        "velocity": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "isSelf": false,
+        "shieldRatio": 1,
+        "armorRatio": 1,
+        "hullRatio": 1,
+        "typeName": "Customs Office",
+        "distanceMeters": 717335288620.4342
+      },
+      {
+        "kind": "moon",
+        "itemID": 40491247,
+        "typeID": 14,
+        "groupID": 8,
+        "categoryID": 2,
+        "name": "Manifest VII - Moon 2",
+        "ownerID": 1,
+        "radius": 190000,
+        "position": {
+          "x": 205624918003,
+          "y": -8615301387,
+          "z": -552750866382
+        },
+        "velocity": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "isSelf": false,
+        "shieldRatio": null,
+        "armorRatio": null,
+        "hullRatio": null,
+        "typeName": "Moon",
+        "distanceMeters": 717340500895.0217
+      },
+      {
+        "kind": "moon",
+        "itemID": 40491255,
+        "typeID": 14,
+        "groupID": 8,
+        "categoryID": 2,
+        "name": "Manifest VII - Moon 10",
+        "ownerID": 1,
+        "radius": 980000,
+        "position": {
+          "x": 204874003650,
+          "y": -8583839473,
+          "z": -552658424517
+        },
+        "velocity": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "isSelf": false,
+        "shieldRatio": null,
+        "armorRatio": null,
+        "hullRatio": null,
+        "typeName": "Moon",
+        "distanceMeters": 717360230542.5723
+      },
+      {
+        "kind": "moon",
+        "itemID": 40491246,
+        "typeID": 14,
+        "groupID": 8,
+        "categoryID": 2,
+        "name": "Manifest VII - Moon 1",
+        "ownerID": 1,
+        "radius": 150000,
+        "position": {
+          "x": 205572387712,
+          "y": -8613100465,
+          "z": -552790723137
+        },
+        "velocity": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "isSelf": false,
+        "shieldRatio": null,
+        "armorRatio": null,
+        "hullRatio": null,
+        "typeName": "Moon",
+        "distanceMeters": 717387760457.8755
+      },
+      {
+        "kind": "moon",
+        "itemID": 40491248,
+        "typeID": 14,
+        "groupID": 8,
+        "categoryID": 2,
+        "name": "Manifest VII - Moon 3",
+        "ownerID": 1,
+        "radius": 320000,
+        "position": {
+          "x": 205432460127,
+          "y": -8607237760,
+          "z": -552842161881
+        },
+        "velocity": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "isSelf": false,
+        "shieldRatio": null,
+        "armorRatio": null,
+        "hullRatio": null,
+        "typeName": "Moon",
+        "distanceMeters": 717459264336.028
+      },
+      {
+        "kind": "moon",
+        "itemID": 40491253,
+        "typeID": 14,
+        "groupID": 8,
+        "categoryID": 2,
+        "name": "Manifest VII - Moon 8",
+        "ownerID": 1,
+        "radius": 440000,
+        "position": {
+          "x": 205065980885,
+          "y": -8591882962,
+          "z": -552849370355
+        },
+        "velocity": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "isSelf": false,
+        "shieldRatio": null,
+        "armorRatio": null,
+        "hullRatio": null,
+        "typeName": "Moon",
+        "distanceMeters": 717520889004.0012
+      },
+      {
+        "kind": "moon",
+        "itemID": 40491252,
+        "typeID": 14,
+        "groupID": 8,
+        "categoryID": 2,
+        "name": "Manifest VII - Moon 7",
+        "ownerID": 1,
+        "radius": 830000,
+        "position": {
+          "x": 205166392802,
+          "y": -8596090034,
+          "z": -552878173303
+        },
+        "velocity": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "isSelf": false,
+        "shieldRatio": null,
+        "armorRatio": null,
+        "hullRatio": null,
+        "typeName": "Moon",
+        "distanceMeters": 717533997799.3865
+      },
+      {
+        "kind": "moon",
+        "itemID": 40491259,
+        "typeID": 14,
+        "groupID": 8,
+        "categoryID": 2,
+        "name": "Manifest VII - Moon 14",
+        "ownerID": 1,
+        "radius": 1680000,
+        "position": {
+          "x": 207078594377,
+          "y": -8676207722,
+          "z": -553204118826
+        },
+        "velocity": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "isSelf": false,
+        "shieldRatio": null,
+        "armorRatio": null,
+        "hullRatio": null,
+        "typeName": "Moon",
+        "distanceMeters": 717572900245.4509
+      },
+      {
+        "kind": "moon",
+        "itemID": 40491251,
+        "typeID": 14,
+        "groupID": 8,
+        "categoryID": 2,
+        "name": "Manifest VII - Moon 6",
+        "ownerID": 1,
+        "radius": 370000,
+        "position": {
+          "x": 205602894987,
+          "y": -8614378663,
+          "z": -552999645545
+        },
+        "velocity": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "isSelf": false,
+        "shieldRatio": null,
+        "armorRatio": null,
+        "hullRatio": null,
+        "typeName": "Moon",
+        "distanceMeters": 717589616570.908
+      },
+      {
+        "kind": "moon",
+        "itemID": 40491254,
+        "typeID": 14,
+        "groupID": 8,
+        "categoryID": 2,
+        "name": "Manifest VII - Moon 9",
+        "ownerID": 1,
+        "radius": 530000,
+        "position": {
+          "x": 205293541168,
+          "y": -8601417314,
+          "z": -553259287840
+        },
+        "velocity": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "isSelf": false,
+        "shieldRatio": null,
+        "armorRatio": null,
+        "hullRatio": null,
+        "typeName": "Moon",
+        "distanceMeters": 717892218404.2178
+      },
+      {
+        "kind": "moon",
+        "itemID": 40491257,
+        "typeID": 14,
+        "groupID": 8,
+        "categoryID": 2,
+        "name": "Manifest VII - Moon 12",
+        "ownerID": 1,
+        "radius": 1010000,
+        "position": {
+          "x": 205770055052,
+          "y": -8621382359,
+          "z": -553572848109
+        },
+        "velocity": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "isSelf": false,
+        "shieldRatio": null,
+        "armorRatio": null,
+        "hullRatio": null,
+        "typeName": "Moon",
+        "distanceMeters": 718131051269.3867
+      },
+      {
+        "kind": "moon",
+        "itemID": 40491262,
+        "typeID": 14,
+        "groupID": 8,
+        "categoryID": 2,
+        "name": "Manifest VII - Moon 17",
+        "ownerID": 1,
+        "radius": 900000,
+        "position": {
+          "x": 203688936887,
+          "y": -8534187381,
+          "z": -554999774094
+        },
+        "velocity": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "isSelf": false,
+        "shieldRatio": null,
+        "armorRatio": null,
+        "hullRatio": null,
+        "typeName": "Moon",
+        "distanceMeters": 719853099109.1383
+      },
+      {
+        "kind": "moon",
+        "itemID": 40491244,
+        "typeID": 14,
+        "groupID": 8,
+        "categoryID": 2,
+        "name": "Manifest VI - Moon 1",
+        "ownerID": 1,
+        "radius": 1060000,
+        "position": {
+          "x": -409142461666,
+          "y": 17142307711,
+          "z": -131795670387
+        },
+        "velocity": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "isSelf": false,
+        "shieldRatio": null,
+        "armorRatio": null,
+        "hullRatio": null,
+        "typeName": "Moon",
+        "distanceMeters": 777265503749.2626
+      },
+      {
+        "kind": "planet",
+        "itemID": 40491243,
+        "typeID": 2016,
+        "groupID": 7,
+        "categoryID": 2,
+        "name": "Manifest VI",
+        "ownerID": 1,
+        "radius": 5850000,
+        "position": {
+          "x": -409559826743,
+          "y": 17159794531,
+          "z": -130975196106
+        },
+        "velocity": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "isSelf": false,
+        "shieldRatio": null,
+        "armorRatio": null,
+        "hullRatio": null,
+        "typeName": "Planet (Barren)",
+        "distanceMeters": 777344680883.126
+      },
+      {
+        "kind": "station",
+        "itemID": 60015252,
+        "typeID": 1531,
+        "groupID": 15,
+        "categoryID": 3,
+        "name": "Manifest VI - CONCORD Bureau",
+        "ownerID": 1000125,
+        "radius": 33413,
+        "position": {
+          "x": -409562326777,
+          "y": 17152839351,
+          "z": -130973881269
+        },
+        "velocity": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "isSelf": false,
+        "shieldRatio": null,
+        "armorRatio": null,
+        "hullRatio": null,
+        "typeName": "Caldari Trading Station",
+        "distanceMeters": 777352061118.0254
+      },
+      {
+        "kind": "orbital",
+        "itemID": 1200040491243,
+        "typeID": 2233,
+        "groupID": 1025,
+        "categoryID": 46,
+        "name": "Customs Office (Manifest VI)",
+        "ownerID": 1,
+        "radius": 8000,
+        "position": {
+          "x": -409562512768.0182,
+          "y": 17154522910.081202,
+          "z": -130975826806
+        },
+        "velocity": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "isSelf": false,
+        "shieldRatio": 1,
+        "armorRatio": 1,
+        "hullRatio": 1,
+        "typeName": "Customs Office",
+        "distanceMeters": 777353044476.983
+      },
+      {
+        "kind": "moon",
+        "itemID": 40491278,
+        "typeID": 14,
+        "groupID": 8,
+        "categoryID": 2,
+        "name": "Manifest VIII - Moon 14",
+        "ownerID": 1,
+        "radius": 370000,
+        "position": {
+          "x": 213714789375,
+          "y": -8954251942,
+          "z": 1880483751790
+        },
+        "velocity": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "isSelf": false,
+        "shieldRatio": null,
+        "armorRatio": null,
+        "hullRatio": null,
+        "typeName": "Moon",
+        "distanceMeters": 1726641023223.3513
+      },
+      {
+        "kind": "moon",
+        "itemID": 40491276,
+        "typeID": 14,
+        "groupID": 8,
+        "categoryID": 2,
+        "name": "Manifest VIII - Moon 12",
+        "ownerID": 1,
+        "radius": 3660000,
+        "position": {
+          "x": 220257702485,
+          "y": -9228387824,
+          "z": 1898703659500
+        },
+        "velocity": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "isSelf": false,
+        "shieldRatio": null,
+        "armorRatio": null,
+        "hullRatio": null,
+        "typeName": "Moon",
+        "distanceMeters": 1744471448164.8286
+      },
+      {
+        "kind": "moon",
+        "itemID": 40491272,
+        "typeID": 14,
+        "groupID": 8,
+        "categoryID": 2,
+        "name": "Manifest VIII - Moon 8",
+        "ownerID": 1,
+        "radius": 930000,
+        "position": {
+          "x": 228651800406,
+          "y": -9580084905,
+          "z": 1899669369020
+        },
+        "velocity": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "isSelf": false,
+        "shieldRatio": null,
+        "armorRatio": null,
+        "hullRatio": null,
+        "typeName": "Moon",
+        "distanceMeters": 1745016790281.036
+      },
+      {
+        "kind": "moon",
+        "itemID": 40491271,
+        "typeID": 14,
+        "groupID": 8,
+        "categoryID": 2,
+        "name": "Manifest VIII - Moon 7",
+        "ownerID": 1,
+        "radius": 1130000,
+        "position": {
+          "x": 226807312566,
+          "y": -9502804298,
+          "z": 1899977875490
+        },
+        "velocity": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "isSelf": false,
+        "shieldRatio": null,
+        "armorRatio": null,
+        "hullRatio": null,
+        "typeName": "Moon",
+        "distanceMeters": 1745413945701.554
+      },
+      {
+        "kind": "moon",
+        "itemID": 40491270,
+        "typeID": 14,
+        "groupID": 8,
+        "categoryID": 2,
+        "name": "Manifest VIII - Moon 6",
+        "ownerID": 1,
+        "radius": 1190000,
+        "position": {
+          "x": 227654171748,
+          "y": -9538286121,
+          "z": 1900299200700
+        },
+        "velocity": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "isSelf": false,
+        "shieldRatio": null,
+        "armorRatio": null,
+        "hullRatio": null,
+        "typeName": "Moon",
+        "distanceMeters": 1745693638035.036
+      },
+      {
+        "kind": "moon",
+        "itemID": 40491273,
+        "typeID": 14,
+        "groupID": 8,
+        "categoryID": 2,
+        "name": "Manifest VIII - Moon 9",
+        "ownerID": 1,
+        "radius": 1840000,
+        "position": {
+          "x": 224644827842,
+          "y": -9412200212,
+          "z": 1900330774370
+        },
+        "velocity": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "isSelf": false,
+        "shieldRatio": null,
+        "armorRatio": null,
+        "hullRatio": null,
+        "typeName": "Moon",
+        "distanceMeters": 1745872752639.7334
+      },
+      {
+        "kind": "moon",
+        "itemID": 40491269,
+        "typeID": 14,
+        "groupID": 8,
+        "categoryID": 2,
+        "name": "Manifest VIII - Moon 5",
+        "ownerID": 1,
+        "radius": 280000,
+        "position": {
+          "x": 227579507283,
+          "y": -9535157819,
+          "z": 1900865954960
+        },
+        "velocity": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "isSelf": false,
+        "shieldRatio": null,
+        "armorRatio": null,
+        "hullRatio": null,
+        "typeName": "Moon",
+        "distanceMeters": 1746264253424.6416
+      },
+      {
+        "kind": "moon",
+        "itemID": 40491267,
+        "typeID": 14,
+        "groupID": 8,
+        "categoryID": 2,
+        "name": "Manifest VIII - Moon 3",
+        "ownerID": 1,
+        "radius": 410000,
+        "position": {
+          "x": 228100890528,
+          "y": -9557002807,
+          "z": 1901340081780
+        },
+        "velocity": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "isSelf": false,
+        "shieldRatio": null,
+        "armorRatio": null,
+        "hullRatio": null,
+        "typeName": "Moon",
+        "distanceMeters": 1746712533152.1902
+      },
+      {
+        "kind": "moon",
+        "itemID": 40491266,
+        "typeID": 14,
+        "groupID": 8,
+        "categoryID": 2,
+        "name": "Manifest VIII - Moon 2",
+        "ownerID": 1,
+        "radius": 470000,
+        "position": {
+          "x": 227936157482,
+          "y": -9550100799,
+          "z": 1901443605680
+        },
+        "velocity": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "isSelf": false,
+        "shieldRatio": null,
+        "armorRatio": null,
+        "hullRatio": null,
+        "typeName": "Moon",
+        "distanceMeters": 1746823810154.4993
+      },
+      {
+        "kind": "moon",
+        "itemID": 40491265,
+        "typeID": 14,
+        "groupID": 8,
+        "categoryID": 2,
+        "name": "Manifest VIII - Moon 1",
+        "ownerID": 1,
+        "radius": 330000,
+        "position": {
+          "x": 227617849482,
+          "y": -9536764286,
+          "z": 1901505872870
+        },
+        "velocity": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "isSelf": false,
+        "shieldRatio": null,
+        "armorRatio": null,
+        "hullRatio": null,
+        "typeName": "Moon",
+        "distanceMeters": 1746901516742.8345
+      },
+      {
+        "kind": "moon",
+        "itemID": 40491275,
+        "typeID": 14,
+        "groupID": 8,
+        "categoryID": 2,
+        "name": "Manifest VIII - Moon 11",
+        "ownerID": 1,
+        "radius": 1830000,
+        "position": {
+          "x": 222042059458,
+          "y": -9303149061,
+          "z": 1901289204510
+        },
+        "velocity": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "isSelf": false,
+        "shieldRatio": null,
+        "armorRatio": null,
+        "hullRatio": null,
+        "typeName": "Moon",
+        "distanceMeters": 1746962300412.5117
+      },
+      {
+        "kind": "planet",
+        "itemID": 40491264,
+        "typeID": 13,
+        "groupID": 7,
+        "categoryID": 2,
+        "name": "Manifest VIII",
+        "ownerID": 1,
+        "radius": 56840000,
+        "position": {
+          "x": 227604854387,
+          "y": -9536219816,
+          "z": 1901724426190
+        },
+        "velocity": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "isSelf": false,
+        "shieldRatio": null,
+        "armorRatio": null,
+        "hullRatio": null,
+        "typeName": "Planet (Gas)",
+        "distanceMeters": 1747063933297.2898
+      },
+      {
+        "kind": "orbital",
+        "itemID": 1200040491264,
+        "typeID": 2233,
+        "groupID": 1025,
+        "categoryID": 46,
+        "name": "Customs Office (Manifest VIII)",
+        "ownerID": 1,
+        "radius": 8000,
+        "position": {
+          "x": 227656669863.0077,
+          "y": -9513150079.738457,
+          "z": 1901719415470
+        },
+        "velocity": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "isSelf": false,
+        "shieldRatio": 1,
+        "armorRatio": 1,
+        "hullRatio": 1,
+        "typeName": "Customs Office",
+        "distanceMeters": 1747113305338.1772
+      },
+      {
+        "kind": "stargate",
+        "itemID": 50016630,
+        "typeID": 93638,
+        "groupID": 10,
+        "categoryID": 2,
+        "name": "Stargate (Fortitude)",
+        "ownerID": 500006,
+        "radius": 4499,
+        "position": {
+          "x": 227683299842,
+          "y": -9528498418,
+          "z": 1901908893625
+        },
+        "velocity": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "isSelf": false,
+        "shieldRatio": null,
+        "armorRatio": null,
+        "hullRatio": null,
+        "typeName": "Stargate (CONCORD System)",
+        "distanceMeters": 1747301249498.6624
+      },
+      {
+        "kind": "moon",
+        "itemID": 40491268,
+        "typeID": 14,
+        "groupID": 8,
+        "categoryID": 2,
+        "name": "Manifest VIII - Moon 4",
+        "ownerID": 1,
+        "radius": 610000,
+        "position": {
+          "x": 227149257583,
+          "y": -9517131157,
+          "z": 1902317516990
+        },
+        "velocity": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "isSelf": false,
+        "shieldRatio": null,
+        "armorRatio": null,
+        "hullRatio": null,
+        "typeName": "Moon",
+        "distanceMeters": 1747734656479.038
+      },
+      {
+        "kind": "moon",
+        "itemID": 40491274,
+        "typeID": 14,
+        "groupID": 8,
+        "categoryID": 2,
+        "name": "Manifest VIII - Moon 10",
+        "ownerID": 1,
+        "radius": 2080000,
+        "position": {
+          "x": 230165520350,
+          "y": -9643506954,
+          "z": 1904676750170
+        },
+        "velocity": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "isSelf": false,
+        "shieldRatio": null,
+        "armorRatio": null,
+        "hullRatio": null,
+        "typeName": "Moon",
+        "distanceMeters": 1749945756823.982
+      },
+      {
+        "kind": "moon",
+        "itemID": 40491277,
+        "typeID": 14,
+        "groupID": 8,
+        "categoryID": 2,
+        "name": "Manifest VIII - Moon 13",
+        "ownerID": 1,
+        "radius": 2870000,
+        "position": {
+          "x": 241069435528,
+          "y": -10100360707,
+          "z": 1910862264720
+        },
+        "velocity": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "isSelf": false,
+        "shieldRatio": null,
+        "armorRatio": null,
+        "hullRatio": null,
+        "typeName": "Moon",
+        "distanceMeters": 1755648630373.0583
+      },
+      {
+        "kind": "stargate",
+        "itemID": 50016789,
+        "typeID": 93638,
+        "groupID": 10,
+        "categoryID": 2,
+        "name": "Stargate (Steadfast)",
+        "ownerID": 500006,
+        "radius": 4499,
+        "position": {
+          "x": 1309911890099,
+          "y": -375362078968,
+          "z": 1798376565083
+        },
+        "velocity": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "isSelf": false,
+        "shieldRatio": null,
+        "armorRatio": null,
+        "hullRatio": null,
+        "typeName": "Stargate (CONCORD System)",
+        "distanceMeters": 1955091513291.5127
+      },
+      {
+        "kind": "stargate",
+        "itemID": 50016788,
+        "typeID": 93638,
+        "groupID": 10,
+        "categoryID": 2,
+        "name": "Stargate (Rigor)",
+        "ownerID": 500006,
+        "radius": 4499,
+        "position": {
+          "x": -2573706923996,
+          "y": 401744878077,
+          "z": -718942250276
+        },
+        "velocity": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "isSelf": false,
+        "shieldRatio": null,
+        "armorRatio": null,
+        "hullRatio": null,
+        "typeName": "Stargate (CONCORD System)",
+        "distanceMeters": 3044005885011.812
+      },
+      {
+        "kind": "moon",
+        "itemID": 40491298,
+        "typeID": 14,
+        "groupID": 8,
+        "categoryID": 2,
+        "name": "Manifest IX - Moon 19",
+        "ownerID": 1,
+        "radius": 760000,
+        "position": {
+          "x": -1732529837340,
+          "y": 72589775867,
+          "z": -3211521530740
+        },
+        "velocity": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "isSelf": false,
+        "shieldRatio": null,
+        "armorRatio": null,
+        "hullRatio": null,
+        "typeName": "Moon",
+        "distanceMeters": 3941059085064.9546
+      },
+      {
+        "kind": "moon",
+        "itemID": 40491297,
+        "typeID": 14,
+        "groupID": 8,
+        "categoryID": 2,
+        "name": "Manifest IX - Moon 18",
+        "ownerID": 1,
+        "radius": 1760000,
+        "position": {
+          "x": -1741872364690,
+          "y": 72981210376,
+          "z": -3209588303180
+        },
+        "velocity": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "isSelf": false,
+        "shieldRatio": null,
+        "armorRatio": null,
+        "hullRatio": null,
+        "typeName": "Moon",
+        "distanceMeters": 3944271307117.426
+      },
+      {
+        "kind": "moon",
+        "itemID": 40491299,
+        "typeID": 14,
+        "groupID": 8,
+        "categoryID": 2,
+        "name": "Manifest IX - Moon 20",
+        "ownerID": 1,
+        "radius": 720000,
+        "position": {
+          "x": -1749689964200,
+          "y": 73308753246,
+          "z": -3206763567500
+        },
+        "velocity": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "isSelf": false,
+        "shieldRatio": null,
+        "armorRatio": null,
+        "hullRatio": null,
+        "typeName": "Moon",
+        "distanceMeters": 3945947923632.1064
+      },
+      {
+        "kind": "moon",
+        "itemID": 40491303,
+        "typeID": 14,
+        "groupID": 8,
+        "categoryID": 2,
+        "name": "Manifest IX - Moon 24",
+        "ownerID": 1,
+        "radius": 710000,
+        "position": {
+          "x": -1757851615380,
+          "y": 73650711241,
+          "z": -3202114204190
+        },
+        "velocity": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "isSelf": false,
+        "shieldRatio": null,
+        "armorRatio": null,
+        "hullRatio": null,
+        "typeName": "Moon",
+        "distanceMeters": 3946267921714.4634
+      },
+      {
+        "kind": "moon",
+        "itemID": 40491292,
+        "typeID": 14,
+        "groupID": 8,
+        "categoryID": 2,
+        "name": "Manifest IX - Moon 13",
+        "ownerID": 1,
+        "radius": 2050000,
+        "position": {
+          "x": -1740471010530,
+          "y": 72922496244,
+          "z": -3223578411510
+        },
+        "velocity": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "isSelf": false,
+        "shieldRatio": null,
+        "armorRatio": null,
+        "hullRatio": null,
+        "typeName": "Moon",
+        "distanceMeters": 3955488970120.2974
+      },
+      {
+        "kind": "moon",
+        "itemID": 40491290,
+        "typeID": 14,
+        "groupID": 8,
+        "categoryID": 2,
+        "name": "Manifest IX - Moon 11",
+        "ownerID": 1,
+        "radius": 820000,
+        "position": {
+          "x": -1741958408380,
+          "y": 72984815446,
+          "z": -3224672096160
+        },
+        "velocity": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "isSelf": false,
+        "shieldRatio": null,
+        "armorRatio": null,
+        "hullRatio": null,
+        "typeName": "Moon",
+        "distanceMeters": 3957198036765.823
+      },
+      {
+        "kind": "moon",
+        "itemID": 40491286,
+        "typeID": 14,
+        "groupID": 8,
+        "categoryID": 2,
+        "name": "Manifest IX - Moon 7",
+        "ownerID": 1,
+        "radius": 540000,
+        "position": {
+          "x": -1744091445100,
+          "y": 73074185715,
+          "z": -3224109748640
+        },
+        "velocity": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "isSelf": false,
+        "shieldRatio": null,
+        "armorRatio": null,
+        "hullRatio": null,
+        "typeName": "Moon",
+        "distanceMeters": 3957827448869.9136
+      },
+      {
+        "kind": "moon",
+        "itemID": 40491287,
+        "typeID": 14,
+        "groupID": 8,
+        "categoryID": 2,
+        "name": "Manifest IX - Moon 8",
+        "ownerID": 1,
+        "radius": 180000,
+        "position": {
+          "x": -1742870640240,
+          "y": 73023036263,
+          "z": -3224916776730
+        },
+        "velocity": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "isSelf": false,
+        "shieldRatio": null,
+        "armorRatio": null,
+        "hullRatio": null,
+        "typeName": "Moon",
+        "distanceMeters": 3957882120358.9526
+      },
+      {
+        "kind": "moon",
+        "itemID": 40491281,
+        "typeID": 14,
+        "groupID": 8,
+        "categoryID": 2,
+        "name": "Manifest IX - Moon 2",
+        "ownerID": 1,
+        "radius": 170000,
+        "position": {
+          "x": -1743494907300,
+          "y": 73049191891,
+          "z": -3224696776300
+        },
+        "velocity": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "isSelf": false,
+        "shieldRatio": null,
+        "armorRatio": null,
+        "hullRatio": null,
+        "typeName": "Moon",
+        "distanceMeters": 3958018894968.543
+      },
+      {
+        "kind": "moon",
+        "itemID": 40491280,
+        "typeID": 14,
+        "groupID": 8,
+        "categoryID": 2,
+        "name": "Manifest IX - Moon 1",
+        "ownerID": 1,
+        "radius": 170000,
+        "position": {
+          "x": -1743771611450,
+          "y": 73060785280,
+          "z": -3224568482900
+        },
+        "velocity": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "isSelf": false,
+        "shieldRatio": null,
+        "armorRatio": null,
+        "hullRatio": null,
+        "typeName": "Moon",
+        "distanceMeters": 3958053255984.509
+      },
+      {
+        "kind": "planet",
+        "itemID": 40491279,
+        "typeID": 12,
+        "groupID": 7,
+        "categoryID": 2,
+        "name": "Manifest IX",
+        "ownerID": 1,
+        "radius": 27640000,
+        "position": {
+          "x": -1743698273360,
+          "y": 73057712551,
+          "z": -3224682070800
+        },
+        "velocity": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "isSelf": false,
+        "shieldRatio": null,
+        "armorRatio": null,
+        "hullRatio": null,
+        "typeName": "Planet (Ice)",
+        "distanceMeters": 3958084663973.14
+      },
+      {
+        "kind": "moon",
+        "itemID": 40491289,
+        "typeID": 14,
+        "groupID": 8,
+        "categoryID": 2,
+        "name": "Manifest IX - Moon 10",
+        "ownerID": 1,
+        "radius": 800000,
+        "position": {
+          "x": -1742725380330,
+          "y": 73016950143,
+          "z": -3225269395620
+        },
+        "velocity": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "isSelf": false,
+        "shieldRatio": null,
+        "armorRatio": null,
+        "hullRatio": null,
+        "typeName": "Moon",
+        "distanceMeters": 3958107236596.575
+      },
+      {
+        "kind": "orbital",
+        "itemID": 1200040491279,
+        "typeID": 2233,
+        "groupID": 1025,
+        "categoryID": 46,
+        "name": "Customs Office (Manifest IX)",
+        "ownerID": 1,
+        "radius": 8000,
+        "position": {
+          "x": -1743693934570.9944,
+          "y": 73030318515.34435,
+          "z": -3224682570120
+        },
+        "velocity": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "isSelf": false,
+        "shieldRatio": 1,
+        "armorRatio": 1,
+        "hullRatio": 1,
+        "typeName": "Customs Office",
+        "distanceMeters": 3958109873148.3057
+      },
+      {
+        "kind": "moon",
+        "itemID": 40491282,
+        "typeID": 14,
+        "groupID": 8,
+        "categoryID": 2,
+        "name": "Manifest IX - Moon 3",
+        "ownerID": 1,
+        "radius": 200000,
+        "position": {
+          "x": -1743826542900,
+          "y": 73063086806,
+          "z": -3224866504450
+        },
+        "velocity": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "isSelf": false,
+        "shieldRatio": null,
+        "armorRatio": null,
+        "hullRatio": null,
+        "typeName": "Moon",
+        "distanceMeters": 3958336396716.0005
+      },
+      {
+        "kind": "moon",
+        "itemID": 40491283,
+        "typeID": 14,
+        "groupID": 8,
+        "categoryID": 2,
+        "name": "Manifest IX - Moon 4",
+        "ownerID": 1,
+        "radius": 240000,
+        "position": {
+          "x": -1743993846540,
+          "y": 73070096517,
+          "z": -3224776622160
+        },
+        "velocity": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "isSelf": false,
+        "shieldRatio": null,
+        "armorRatio": null,
+        "hullRatio": null,
+        "typeName": "Moon",
+        "distanceMeters": 3958346620931.6665
+      },
+      {
+        "kind": "moon",
+        "itemID": 40491284,
+        "typeID": 14,
+        "groupID": 8,
+        "categoryID": 2,
+        "name": "Manifest IX - Moon 5",
+        "ownerID": 1,
+        "radius": 480000,
+        "position": {
+          "x": -1743850702580,
+          "y": 73064099052,
+          "z": -3225139178370
+        },
+        "velocity": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "isSelf": false,
+        "shieldRatio": null,
+        "armorRatio": null,
+        "hullRatio": null,
+        "typeName": "Moon",
+        "distanceMeters": 3958581627098.953
+      },
+      {
+        "kind": "moon",
+        "itemID": 40491285,
+        "typeID": 14,
+        "groupID": 8,
+        "categoryID": 2,
+        "name": "Manifest IX - Moon 6",
+        "ownerID": 1,
+        "radius": 280000,
+        "position": {
+          "x": -1743960897470,
+          "y": 73068716012,
+          "z": -3225222760480
+        },
+        "velocity": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "isSelf": false,
+        "shieldRatio": null,
+        "armorRatio": null,
+        "hullRatio": null,
+        "typeName": "Moon",
+        "distanceMeters": 3958710559770.9087
+      },
+      {
+        "kind": "moon",
+        "itemID": 40491288,
+        "typeID": 14,
+        "groupID": 8,
+        "categoryID": 2,
+        "name": "Manifest IX - Moon 9",
+        "ownerID": 1,
+        "radius": 490000,
+        "position": {
+          "x": -1744638992340,
+          "y": 73097126926,
+          "z": -3224811678560
+        },
+        "velocity": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "isSelf": false,
+        "shieldRatio": null,
+        "armorRatio": null,
+        "hullRatio": null,
+        "typeName": "Moon",
+        "distanceMeters": 3958712033776.0723
+      },
+      {
+        "kind": "moon",
+        "itemID": 40491301,
+        "typeID": 14,
+        "groupID": 8,
+        "categoryID": 2,
+        "name": "Manifest IX - Moon 22",
+        "ownerID": 1,
+        "radius": 490000,
+        "position": {
+          "x": -1763551084340,
+          "y": 73889508384,
+          "z": -3213867030740
+        },
+        "velocity": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "isSelf": false,
+        "shieldRatio": null,
+        "armorRatio": null,
+        "hullRatio": null,
+        "typeName": "Moon",
+        "distanceMeters": 3959266115567.207
+      },
+      {
+        "kind": "moon",
+        "itemID": 40491293,
+        "typeID": 14,
+        "groupID": 8,
+        "categoryID": 2,
+        "name": "Manifest IX - Moon 14",
+        "ownerID": 1,
+        "radius": 1400000,
+        "position": {
+          "x": -1747890189370,
+          "y": 73233346030,
+          "z": -3224378247960
+        },
+        "velocity": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "isSelf": false,
+        "shieldRatio": null,
+        "armorRatio": null,
+        "hullRatio": null,
+        "typeName": "Moon",
+        "distanceMeters": 3960034061210.574
+      },
+      {
+        "kind": "moon",
+        "itemID": 40491291,
+        "typeID": 14,
+        "groupID": 8,
+        "categoryID": 2,
+        "name": "Manifest IX - Moon 12",
+        "ownerID": 1,
+        "radius": 1390000,
+        "position": {
+          "x": -1744858315830,
+          "y": 73106316171,
+          "z": -3226552062350
+        },
+        "velocity": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "isSelf": false,
+        "shieldRatio": null,
+        "armorRatio": null,
+        "hullRatio": null,
+        "typeName": "Moon",
+        "distanceMeters": 3960311944819.0396
+      },
+      {
+        "kind": "moon",
+        "itemID": 40491300,
+        "typeID": 14,
+        "groupID": 8,
+        "categoryID": 2,
+        "name": "Manifest IX - Moon 21",
+        "ownerID": 1,
+        "radius": 690000,
+        "position": {
+          "x": -1727547985190,
+          "y": 72381045533,
+          "z": -3238110224850
+        },
+        "velocity": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "isSelf": false,
+        "shieldRatio": null,
+        "armorRatio": null,
+        "hullRatio": null,
+        "typeName": "Moon",
+        "distanceMeters": 3961234993801.272
+      },
+      {
+        "kind": "moon",
+        "itemID": 40491294,
+        "typeID": 14,
+        "groupID": 8,
+        "categoryID": 2,
+        "name": "Manifest IX - Moon 15",
+        "ownerID": 1,
+        "radius": 2150000,
+        "position": {
+          "x": -1746846630060,
+          "y": 73189622837,
+          "z": -3228739244340
+        },
+        "velocity": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "isSelf": false,
+        "shieldRatio": null,
+        "armorRatio": null,
+        "hullRatio": null,
+        "typeName": "Moon",
+        "distanceMeters": 3963214154216.8413
+      },
+      {
+        "kind": "moon",
+        "itemID": 40491295,
+        "typeID": 14,
+        "groupID": 8,
+        "categoryID": 2,
+        "name": "Manifest IX - Moon 16",
+        "ownerID": 1,
+        "radius": 2580000,
+        "position": {
+          "x": -1751600314390,
+          "y": 73388793364,
+          "z": -3225868856050
+        },
+        "velocity": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "isSelf": false,
+        "shieldRatio": null,
+        "armorRatio": null,
+        "hullRatio": null,
+        "typeName": "Moon",
+        "distanceMeters": 3963239538033.586
+      },
+      {
+        "kind": "moon",
+        "itemID": 40491302,
+        "typeID": 14,
+        "groupID": 8,
+        "categoryID": 2,
+        "name": "Manifest IX - Moon 23",
+        "ownerID": 1,
+        "radius": 350000,
+        "position": {
+          "x": -1767603840520,
+          "y": 74059311325,
+          "z": -3221724018360
+        },
+        "velocity": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "isSelf": false,
+        "shieldRatio": null,
+        "armorRatio": null,
+        "hullRatio": null,
+        "typeName": "Moon",
+        "distanceMeters": 3968083224874.166
+      },
+      {
+        "kind": "moon",
+        "itemID": 40491296,
+        "typeID": 14,
+        "groupID": 8,
+        "categoryID": 2,
+        "name": "Manifest IX - Moon 17",
+        "ownerID": 1,
+        "radius": 2930000,
+        "position": {
+          "x": -1751537750980,
+          "y": 73386172073,
+          "z": -3232778725670
+        },
+        "velocity": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "isSelf": false,
+        "shieldRatio": null,
+        "armorRatio": null,
+        "hullRatio": null,
+        "typeName": "Moon",
+        "distanceMeters": 3969105616006.9155
+      },
+      {
+        "kind": "stargate",
+        "itemID": 50016787,
+        "typeID": 93638,
+        "groupID": 10,
+        "categoryID": 2,
+        "name": "Stargate (Celerity)",
+        "ownerID": 500006,
+        "radius": 4499,
+        "position": {
+          "x": -4175366908096,
+          "y": 174944142484,
+          "z": 2551563953031
+        },
+        "velocity": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "isSelf": false,
+        "shieldRatio": null,
+        "armorRatio": null,
+        "hullRatio": null,
+        "typeName": "Stargate (CONCORD System)",
+        "distanceMeters": 5089926347962.904
+      },
+      {
+        "kind": "planet",
+        "itemID": 40491304,
+        "typeID": 2014,
+        "groupID": 7,
+        "categoryID": 2,
+        "name": "Manifest X",
+        "ownerID": 1,
+        "radius": 3280000,
+        "position": {
+          "x": -4175370204600,
+          "y": 174940241016,
+          "z": 2551570193970
+        },
+        "velocity": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "isSelf": false,
+        "shieldRatio": null,
+        "armorRatio": null,
+        "hullRatio": null,
+        "typeName": "Planet (Oceanic)",
+        "distanceMeters": 5089928771093.071
+      },
+      {
+        "kind": "orbital",
+        "itemID": 1200040491304,
+        "typeID": 2233,
+        "groupID": 1025,
+        "categoryID": 46,
+        "name": "Customs Office (Manifest X)",
+        "ownerID": 1,
+        "radius": 8000,
+        "position": {
+          "x": -4175372601411.4727,
+          "y": 174937926442.06543,
+          "z": 2551569626130
+        },
+        "velocity": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "isSelf": false,
+        "shieldRatio": 1,
+        "armorRatio": 1,
+        "hullRatio": 1,
+        "typeName": "Customs Office",
+        "distanceMeters": 5089933803482.975
+      },
+      {
+        "kind": "stargate",
+        "itemID": 50017727,
+        "typeID": 93639,
+        "groupID": 10,
+        "categoryID": 2,
+        "name": "Stargate (Yulai)",
+        "ownerID": 500006,
+        "radius": 14051,
+        "position": {
+          "x": -4175374735975,
+          "y": 174943813002,
+          "z": 2551570031640
+        },
+        "velocity": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "isSelf": false,
+        "shieldRatio": null,
+        "armorRatio": null,
+        "hullRatio": null,
+        "typeName": "Stargate (CONCORD Region)",
+        "distanceMeters": 5089936087532.009
+      },
+      {
+        "kind": "moon",
+        "itemID": 40491306,
+        "typeID": 14,
+        "groupID": 8,
+        "categoryID": 2,
+        "name": "Manifest XI - Moon 1",
+        "ownerID": 1,
+        "radius": 250000,
+        "position": {
+          "x": 329252912966,
+          "y": -13795084298,
+          "z": -6204718579560
+        },
+        "velocity": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "isSelf": false,
+        "shieldRatio": null,
+        "armorRatio": null,
+        "hullRatio": null,
+        "typeName": "Moon",
+        "distanceMeters": 6361388088590.06
+      },
+      {
+        "kind": "planet",
+        "itemID": 40491305,
+        "typeID": 2016,
+        "groupID": 7,
+        "categoryID": 2,
+        "name": "Manifest XI",
+        "ownerID": 1,
+        "radius": 4200000,
+        "position": {
+          "x": 331076326928,
+          "y": -13871481950,
+          "z": -6205418873480
+        },
+        "velocity": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "isSelf": false,
+        "shieldRatio": null,
+        "armorRatio": null,
+        "hullRatio": null,
+        "typeName": "Planet (Barren)",
+        "distanceMeters": 6362089648102.221
+      },
+      {
+        "kind": "orbital",
+        "itemID": 1200040491305,
+        "typeID": 2233,
+        "groupID": 1025,
+        "categoryID": 46,
+        "name": "Customs Office (Manifest XI)",
+        "ownerID": 1,
+        "radius": 8000,
+        "position": {
+          "x": 331075954432.5634,
+          "y": -13875739592.322895,
+          "z": -6205419346480
+        },
+        "velocity": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "isSelf": false,
+        "shieldRatio": 1,
+        "armorRatio": 1,
+        "hullRatio": 1,
+        "typeName": "Customs Office",
+        "distanceMeters": 6362094312520.96
+      }
+    ]
+  }
+}

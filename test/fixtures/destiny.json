@@ -1,0 +1,2188 @@
+{
+  "evejs": "0.12.9",
+  "encodings": {
+    "action:2f25cf593cff7bc8870d": {
+      "call": "action",
+      "result": [
+        "Orbit",
+        [
+          2,
+          1,
+          2600
+        ]
+      ]
+    },
+    "action:55d241c7ed4a0904c140": {
+      "call": "action",
+      "result": [
+        "Stop",
+        [
+          3
+        ]
+      ]
+    },
+    "action:79cc489caa9ba242c339": {
+      "call": "action",
+      "result": [
+        "SetBallPosition",
+        [
+          2,
+          {
+            "type": "real",
+            "value": 1000
+          },
+          {
+            "type": "real",
+            "value": 2000
+          },
+          {
+            "type": "real",
+            "value": 3000
+          }
+        ]
+      ]
+    },
+    "action:7f53ef9cce869ddcae64": {
+      "call": "action",
+      "result": [
+        "SetBallVelocity",
+        [
+          5,
+          {
+            "type": "real",
+            "value": 1000
+          },
+          {
+            "type": "real",
+            "value": 0
+          },
+          {
+            "type": "real",
+            "value": 0
+          }
+        ]
+      ]
+    },
+    "action:83256ca4726f25fab368": {
+      "call": "action",
+      "result": [
+        "Stop",
+        [
+          77
+        ]
+      ]
+    },
+    "action:8f72c420e9bb306c5b21": {
+      "call": "action",
+      "result": [
+        "GotoPoint",
+        [
+          4,
+          {
+            "type": "real",
+            "value": 1
+          },
+          {
+            "type": "real",
+            "value": 2
+          },
+          {
+            "type": "real",
+            "value": 3
+          }
+        ]
+      ]
+    },
+    "action:935f148294d42a9e6f54": {
+      "call": "action",
+      "result": [
+        "Orbit",
+        [
+          5,
+          1,
+          500
+        ]
+      ]
+    },
+    "action:9b8a8e5df9b0a862e9bb": {
+      "call": "action",
+      "result": [
+        "Stop",
+        [
+          5
+        ]
+      ]
+    },
+    "action:a3cde37008b0dd470dca": {
+      "call": "action",
+      "result": [
+        "OnDamageStateChange",
+        [
+          2,
+          [
+            [
+              {
+                "type": "real",
+                "value": 0.4
+              },
+              {
+                "type": "real",
+                "value": 1
+              },
+              {
+                "type": "long",
+                "value": {
+                  "$bigint": "1"
+                }
+              }
+            ],
+            {
+              "type": "real",
+              "value": 1
+            },
+            {
+              "type": "real",
+              "value": 1
+            }
+          ]
+        ]
+      ]
+    },
+    "action:a80a386b81f72c1c029b": {
+      "call": "action",
+      "result": [
+        "WarpTo",
+        [
+          1,
+          {
+            "type": "real",
+            "value": 1000000000
+          },
+          {
+            "type": "real",
+            "value": 0
+          },
+          {
+            "type": "real",
+            "value": 0
+          },
+          {
+            "type": "real",
+            "value": 0
+          },
+          3000
+        ]
+      ]
+    },
+    "action:a8f495703277ff278e04": {
+      "call": "action",
+      "result": [
+        "WarpTo",
+        [
+          1,
+          {
+            "type": "real",
+            "value": 5000000000
+          },
+          {
+            "type": "real",
+            "value": 0
+          },
+          {
+            "type": "real",
+            "value": 0
+          },
+          {
+            "type": "real",
+            "value": 0
+          },
+          3000
+        ]
+      ]
+    },
+    "action:bb602b75a4bbc97c800e": {
+      "call": "action",
+      "result": [
+        "Orbit",
+        [
+          2,
+          1,
+          2500
+        ]
+      ]
+    },
+    "action:c22f110b7b8ef39b2c89": {
+      "call": "action",
+      "result": [
+        "SetBallPosition",
+        [
+          5,
+          {
+            "type": "real",
+            "value": 0
+          },
+          {
+            "type": "real",
+            "value": 0
+          },
+          {
+            "type": "real",
+            "value": 0
+          }
+        ]
+      ]
+    },
+    "action:c8feff66f4a1a7c6c1f5": {
+      "call": "action",
+      "result": [
+        "OnSpecialFX",
+        [
+          2,
+          77,
+          null,
+          1,
+          null,
+          "effects.ProjectileFired",
+          0,
+          0,
+          1,
+          -1,
+          null,
+          null,
+          0,
+          null
+        ]
+      ]
+    },
+    "action:cfaf66c04aebef4e5fe0": {
+      "call": "action",
+      "result": [
+        "OnSpecialFX",
+        [
+          2,
+          77,
+          484,
+          1,
+          null,
+          "effects.ProjectileFired",
+          1,
+          1,
+          1,
+          -1,
+          null,
+          null,
+          0,
+          null
+        ]
+      ]
+    },
+    "action:d24d9ddc85905a6b5eb3": {
+      "call": "action",
+      "result": [
+        "SetBallPosition",
+        [
+          5,
+          {
+            "type": "real",
+            "value": 1000000
+          },
+          {
+            "type": "real",
+            "value": 0
+          },
+          {
+            "type": "real",
+            "value": 0
+          }
+        ]
+      ]
+    },
+    "action:db907ddce9045a8a2037": {
+      "call": "action",
+      "result": [
+        "RemoveBalls",
+        [
+          {
+            "items": [
+              2,
+              3
+            ],
+            "type": "list"
+          }
+        ]
+      ]
+    },
+    "action:e7549e5a263a9424e0ea": {
+      "call": "action",
+      "result": [
+        "OnSpecialFX",
+        [
+          1,
+          77,
+          486,
+          2,
+          null,
+          "effects.ProjectileFired",
+          1,
+          1,
+          1,
+          -1,
+          1000,
+          null,
+          0,
+          null
+        ]
+      ]
+    },
+    "action:f376736fbf5e363da862": {
+      "call": "action",
+      "result": [
+        "Orbit",
+        [
+          1,
+          2,
+          2500
+        ]
+      ]
+    },
+    "addBalls:0ced4f4e55998724d4bf": {
+      "call": "addBalls",
+      "result": [
+        {
+          "items": [
+            [
+              100,
+              [
+                "AddBalls2",
+                [
+                  [
+                    {
+                      "$bytes": "016400000005000000000000000300000c420000000000408f400000000000409f40000000000070a740010000000080842e4100ffffffffffffffffffffffffffffffff0000c84300000000804f0241000000000000000000000000000000000000803f00000000ff0000000080842e4100000000000000000000000000000000010000000000000065cdcd410000000000000000b80b000000000000"
+                    },
+                    {
+                      "items": [
+                        {
+                          "args": {
+                            "entries": [
+                              [
+                                "itemID",
+                                5
+                              ],
+                              [
+                                "typeID",
+                                587
+                              ]
+                            ],
+                            "type": "dict"
+                          },
+                          "name": "util.KeyVal",
+                          "type": "object"
+                        }
+                      ],
+                      "type": "list"
+                    }
+                  ]
+                ]
+              ]
+            ]
+          ],
+          "type": "list"
+        },
+        false
+      ]
+    },
+    "addBalls:0dbecf0d14fed2477d5a": {
+      "call": "addBalls",
+      "result": [
+        {
+          "items": [
+            [
+              100,
+              [
+                "AddBalls2",
+                [
+                  [
+                    {
+                      "$bytes": "016400000002000000000000000200000c420000000000408f400000000000409f40000000000070a740010000000080842e4100ffffffffffffffffffffffffffffffff0000c8430000000000000000000000000000000000000000000000000000803f00000000ff"
+                    },
+                    {
+                      "items": [
+                        {
+                          "args": {
+                            "entries": [
+                              [
+                                "itemID",
+                                2
+                              ],
+                              [
+                                "typeID",
+                                17932
+                              ]
+                            ],
+                            "type": "dict"
+                          },
+                          "name": "util.KeyVal",
+                          "type": "object"
+                        }
+                      ],
+                      "type": "list"
+                    }
+                  ]
+                ]
+              ]
+            ]
+          ],
+          "type": "list"
+        },
+        false
+      ]
+    },
+    "addBalls:1f1dbb30d59fbf7e50cd": {
+      "call": "addBalls",
+      "result": [
+        {
+          "items": [
+            [
+              100,
+              [
+                "AddBalls2",
+                [
+                  [
+                    {
+                      "$bytes": "016400000003000000000000000300000c420000000000408f400000000000409f40000000000070a740010000000080842e4100ffffffffffffffffffffffffffffffff0000c8430000000000000000000000000000000000000000000000000000803f00000000ff00000000006af84000000000000000000000000000000000010000000000000065cdcd41000000000088a340b80b000000000000"
+                    },
+                    {
+                      "items": [
+                        {
+                          "args": {
+                            "entries": [
+                              [
+                                "itemID",
+                                3
+                              ],
+                              [
+                                "typeID",
+                                587
+                              ]
+                            ],
+                            "type": "dict"
+                          },
+                          "name": "util.KeyVal",
+                          "type": "object"
+                        }
+                      ],
+                      "type": "list"
+                    }
+                  ]
+                ]
+              ]
+            ]
+          ],
+          "type": "list"
+        },
+        false
+      ]
+    },
+    "addBalls:2820b52ba0ae590711d4": {
+      "call": "addBalls",
+      "result": [
+        {
+          "items": [
+            [
+              100,
+              [
+                "AddBalls2",
+                [
+                  [
+                    {
+                      "$bytes": "016400000004000000000000000200000c420000000000408f400000000000409f40000000000070a740010000000080842e4100ffffffffffffffffffffffffffffffff0000c8430000000000000000000000000000000000000000000000000000803f00000000ff"
+                    },
+                    {
+                      "items": [
+                        {
+                          "args": {
+                            "entries": [
+                              [
+                                "itemID",
+                                4
+                              ],
+                              [
+                                "typeID",
+                                587
+                              ]
+                            ],
+                            "type": "dict"
+                          },
+                          "name": "util.KeyVal",
+                          "type": "object"
+                        }
+                      ],
+                      "type": "list"
+                    }
+                  ]
+                ]
+              ]
+            ]
+          ],
+          "type": "list"
+        },
+        false
+      ]
+    },
+    "addBalls:4ba8e6591e08d669beca": {
+      "call": "addBalls",
+      "result": [
+        {
+          "items": [
+            [
+              100,
+              [
+                "AddBalls2",
+                [
+                  [
+                    {
+                      "$bytes": "016400000003000000000000000200000c420000000000408f400000000000409f40000000000070a740010000000080842e4100ffffffffffffffffffffffffffffffff0000c8430000000000000000000000000000000000000000000000000000803f00000000ff"
+                    },
+                    {
+                      "items": [
+                        {
+                          "args": {
+                            "entries": [
+                              [
+                                "itemID",
+                                3
+                              ],
+                              [
+                                "typeID",
+                                587
+                              ]
+                            ],
+                            "type": "dict"
+                          },
+                          "name": "util.KeyVal",
+                          "type": "object"
+                        }
+                      ],
+                      "type": "list"
+                    }
+                  ]
+                ]
+              ]
+            ]
+          ],
+          "type": "list"
+        },
+        false
+      ]
+    },
+    "addBalls:6d1201f5cb7e4fa53abb": {
+      "call": "addBalls",
+      "result": [
+        {
+          "items": [
+            [
+              100,
+              [
+                "AddBalls2",
+                [
+                  [
+                    {
+                      "$bytes": "016400000005000000000000000200000c420000000000408f400000000000409f40000000000070a740010000000080842e4100ffffffffffffffffffffffffffffffff0000c8430000000000000000000000000000000000000000000000000000803f00000000ff"
+                    },
+                    {
+                      "items": [
+                        {
+                          "args": {
+                            "entries": [
+                              [
+                                "itemID",
+                                5
+                              ],
+                              [
+                                "typeID",
+                                587
+                              ]
+                            ],
+                            "type": "dict"
+                          },
+                          "name": "util.KeyVal",
+                          "type": "object"
+                        }
+                      ],
+                      "type": "list"
+                    }
+                  ]
+                ]
+              ]
+            ]
+          ],
+          "type": "list"
+        },
+        false
+      ]
+    },
+    "addBalls:8a95118cd16bfe2c9ff1": {
+      "call": "addBalls",
+      "result": [
+        {
+          "items": [
+            [
+              100,
+              [
+                "AddBalls2",
+                [
+                  [
+                    {
+                      "$bytes": "016400000006000000000000000200000c420000000000408f400000000000409f40000000000070a740010000000080842e4100ffffffffffffffffffffffffffffffff0000c8430000000000000000000000000000000000000000000000000000803f00000000ff"
+                    },
+                    {
+                      "items": [
+                        {
+                          "args": {
+                            "entries": [
+                              [
+                                "itemID",
+                                6
+                              ],
+                              [
+                                "typeID",
+                                587
+                              ]
+                            ],
+                            "type": "dict"
+                          },
+                          "name": "util.KeyVal",
+                          "type": "object"
+                        }
+                      ],
+                      "type": "list"
+                    }
+                  ]
+                ]
+              ]
+            ]
+          ],
+          "type": "list"
+        },
+        false
+      ]
+    },
+    "addBalls:abcc1180b262657e6e6c": {
+      "call": "addBalls",
+      "result": [
+        {
+          "items": [
+            [
+              100,
+              [
+                "AddBalls2",
+                [
+                  [
+                    {
+                      "$bytes": "01640000002a00000000000000020000803f000000000000000000000000000000000000000000000000010000000080842e4100ffffffffffffffffffffffffffffffff00007a450000000000000000000000000000000000000000000000000000803f00000000ff"
+                    },
+                    {
+                      "items": [
+                        {
+                          "args": {
+                            "entries": [
+                              [
+                                "itemID",
+                                42
+                              ],
+                              [
+                                "typeID",
+                                209
+                              ]
+                            ],
+                            "type": "dict"
+                          },
+                          "name": "util.KeyVal",
+                          "type": "object"
+                        }
+                      ],
+                      "type": "list"
+                    }
+                  ]
+                ]
+              ]
+            ]
+          ],
+          "type": "list"
+        },
+        false
+      ]
+    },
+    "addBalls:d2ae3f486c38ad8869c4": {
+      "call": "addBalls",
+      "result": [
+        {
+          "items": [
+            [
+              100,
+              [
+                "AddBalls2",
+                [
+                  [
+                    {
+                      "$bytes": "016400000002000000000000000200000c420000000000408f400000000000409f40000000000070a740010000000080842e4100ffffffffffffffffffffffffffffffff0000c8430000000000000000000000000000000000000000000000000000803f00000000ff"
+                    },
+                    {
+                      "items": [
+                        {
+                          "args": {
+                            "entries": [
+                              [
+                                "itemID",
+                                2
+                              ],
+                              [
+                                "typeID",
+                                587
+                              ]
+                            ],
+                            "type": "dict"
+                          },
+                          "name": "util.KeyVal",
+                          "type": "object"
+                        }
+                      ],
+                      "type": "list"
+                    }
+                  ]
+                ]
+              ]
+            ]
+          ],
+          "type": "list"
+        },
+        false
+      ]
+    },
+    "addBalls:f9e73a281bfa39298cd8": {
+      "call": "addBalls",
+      "result": [
+        {
+          "items": [
+            [
+              100,
+              [
+                "AddBalls2",
+                [
+                  [
+                    {
+                      "$bytes": "016400000004000000000000000300000c420000000000408f400000000000409f40000000000070a740010000000080842e4100ffffffffffffffffffffffffffffffff0000c8430000000000000000000000000000000000000000000000000000803f00000000ff000000000000000000000000000000000000000000000000010000000000000065cdcd410000000000000000b80b000000000000"
+                    },
+                    {
+                      "items": [
+                        {
+                          "args": {
+                            "entries": [
+                              [
+                                "itemID",
+                                4
+                              ],
+                              [
+                                "typeID",
+                                587
+                              ]
+                            ],
+                            "type": "dict"
+                          },
+                          "name": "util.KeyVal",
+                          "type": "object"
+                        }
+                      ],
+                      "type": "list"
+                    }
+                  ]
+                ]
+              ]
+            ]
+          ],
+          "type": "list"
+        },
+        false
+      ]
+    },
+    "ballState:4ea85e30300fb8f73990": {
+      "call": "ballState",
+      "result": {
+        "$bytes": "019210000001000000000000000200000c420000000000408f400000000000409f40000000000070a740010000000080842e4100ffffffffffffffffffffffffffffffff0000c8430000000000000000000000000000000000000000000000000000803f00000000ff02000000000000000000000c420000000000408f400000000000409f40000000000070a740010000000080842e4100ffffffffffffffffffffffffffffffff0000c8430000000000005e4000000000000008c000000000000000000000803f00000000ff00000000d01253410000000000000000000000000000000003000000000000000400000c420000000000408f400000000000409f40000000000070a740010000000080842e4100ffffffffffffffffffffffffffffffff0000c8430000000000000000000000000000000000000000000000000000803f00000000ff010000000000000000401c4501000000000020000300000c420000000000408f400000000000409f40000000000070a740010000000080842e4100ffffffffffffffffffffffffffffffff0000c8430000000000000000000000000000000000000000000000000000803f00000000ff000000d088c30042000000000000f03f000000000000004007000000000000d088c3004200000000004ccd40b80b000000000000fb989303000000000200409c460000000065cdcd410000000065cddd41000000c00b5ae64106000000205fa0024200ffffffffffffffff71420f00ffffffffff015a6202000000000b001bb74a000000e8764837c20000000000000000000000205fa0224242ff0100000000000000f03f000000000000004000000000000008400000c842"
+      }
+    },
+    "ballState:5ffd3a831dbe0bdb1cf7": {
+      "call": "ballState",
+      "result": {
+        "$bytes": "010100000001000000000000000200000c420000000000408f400000000000409f40000000000070a740010000000080842e4100ffffffffffffffffffffffffffffffff0000c8430000000000000000000000000000000000000000000000000000803f00000000ff02000000000000000200000c420000000000408f400000000000409f40000000000070a740010000000080842e4100ffffffffffffffffffffffffffffffff0000c8430000000000000000000000000000000000000000000000000000803f00000000ff"
+      }
+    },
+    "ballState:c575b8e4bac29ab9bf98": {
+      "call": "ballState",
+      "result": {
+        "$bytes": "019210000001000000000000000200000c420000000000408f400000000000409f40000000000070a740010000000080842e4100ffffffffffffffffffffffffffffffff0000c8430000000000000000000000000000000000000000000000000000803f00000000ff02000000000000000000000c420000000000408f400000000000409f40000000000070a740010000000080842e4100ffffffffffffffffffffffffffffffff0000c8430000000000005e4000000000000008c000000000000000000000803f00000000ff00000000d01253410000000000000000000000000000000003000000000000000400000c420000000000408f400000000000409f40000000000070a740010000000080842e4100ffffffffffffffffffffffffffffffff0000c8430000000000000000000000000000000000000000000000000000803f00000000ff010000000000000000401c4504000000000000000100000c420000000000408f400000000000409f40000000000070a740010000000080842e4100ffffffffffffffffffffffffffffffff0000c8430000000000000000000000000000000000000000000000000000803f00000000ff01000000000000000000fa4301000000000020000300000c420000000000408f400000000000409f40000000000070a740010000000080842e4100ffffffffffffffffffffffffffffffff0000c8430000000000000000000000000000000000000000000000000000803f00000000ff000000d088c30042000000000000f03f000000000000004007000000000000d088c3004200000000004ccd40b80b000000000000060000000000000002000060410000000000001c400000000000002040000000000000224009000000000088c34000ffffffffffffffffffffffffffffffff000000000000000000000000000000000000000000000000000000000000803f00000000ff015a6202000000000b001bb74a000000e8764837c20000000000000000000000205fa0224242ff0200000000000000f03f000000000000004000000000000008400000c84200000000000010400000000000001440000000000000184000004843fb989303000000000200409c460000000065cdcd410000000065cddd41000000c00b5ae64106000000205fa0024200ffffffffffffffff71420f00ffffffffff09000000000000000200000c42000000000000f8bf0000000000000240000000a2941a6d42010000000080842e4100ffffffffffffffffffffffffffffffff0000c8430000000000000000000000000000000000000000000000000000803f00000000ff"
+      }
+    },
+    "destinyUpdate:157a98b5ea624775ed18": {
+      "call": "destinyUpdate",
+      "result": [
+        {
+          "items": [
+            [
+              100,
+              [
+                "SetBallPosition",
+                [
+                  5,
+                  {
+                    "type": "real",
+                    "value": 0
+                  },
+                  {
+                    "type": "real",
+                    "value": 0
+                  },
+                  {
+                    "type": "real",
+                    "value": 0
+                  }
+                ]
+              ]
+            ],
+            [
+              100,
+              [
+                "SetBallVelocity",
+                [
+                  5,
+                  {
+                    "type": "real",
+                    "value": 1000
+                  },
+                  {
+                    "type": "real",
+                    "value": 0
+                  },
+                  {
+                    "type": "real",
+                    "value": 0
+                  }
+                ]
+              ]
+            ]
+          ],
+          "type": "list"
+        },
+        false
+      ]
+    },
+    "destinyUpdate:35ae648e3bec6994ca37": {
+      "call": "destinyUpdate",
+      "result": [
+        {
+          "items": [
+            [
+              100,
+              [
+                "Orbit",
+                [
+                  2,
+                  1,
+                  2500
+                ]
+              ]
+            ],
+            [
+              100,
+              [
+                "Orbit",
+                [
+                  2,
+                  1,
+                  2600
+                ]
+              ]
+            ],
+            [
+              100,
+              [
+                "WarpTo",
+                [
+                  1,
+                  {
+                    "type": "real",
+                    "value": 5000000000
+                  },
+                  {
+                    "type": "real",
+                    "value": 0
+                  },
+                  {
+                    "type": "real",
+                    "value": 0
+                  },
+                  {
+                    "type": "real",
+                    "value": 0
+                  },
+                  3000
+                ]
+              ]
+            ],
+            [
+              100,
+              [
+                "OnDamageStateChange",
+                [
+                  2,
+                  [
+                    [
+                      {
+                        "type": "real",
+                        "value": 0.4
+                      },
+                      {
+                        "type": "real",
+                        "value": 1
+                      },
+                      {
+                        "type": "long",
+                        "value": {
+                          "$bigint": "1"
+                        }
+                      }
+                    ],
+                    {
+                      "type": "real",
+                      "value": 1
+                    },
+                    {
+                      "type": "real",
+                      "value": 1
+                    }
+                  ]
+                ]
+              ]
+            ],
+            [
+              100,
+              [
+                "OnSpecialFX",
+                [
+                  2,
+                  77,
+                  484,
+                  1,
+                  null,
+                  "effects.ProjectileFired",
+                  1,
+                  1,
+                  1,
+                  -1,
+                  null,
+                  null,
+                  0,
+                  null
+                ]
+              ]
+            ],
+            [
+              100,
+              [
+                "OnSpecialFX",
+                [
+                  2,
+                  77,
+                  484,
+                  1,
+                  null,
+                  "effects.ProjectileFired",
+                  1,
+                  1,
+                  1,
+                  -1,
+                  null,
+                  null,
+                  0,
+                  null
+                ]
+              ]
+            ],
+            [
+              100,
+              [
+                "OnSpecialFX",
+                [
+                  2,
+                  77,
+                  null,
+                  1,
+                  null,
+                  "effects.ProjectileFired",
+                  0,
+                  0,
+                  1,
+                  -1,
+                  null,
+                  null,
+                  0,
+                  null
+                ]
+              ]
+            ]
+          ],
+          "type": "list"
+        },
+        false
+      ]
+    },
+    "destinyUpdate:5867b94bcc0ef0ba721c": {
+      "call": "destinyUpdate",
+      "result": [
+        {
+          "items": [
+            [
+              100,
+              [
+                "SetBallPosition",
+                [
+                  2,
+                  {
+                    "type": "real",
+                    "value": 1000
+                  },
+                  {
+                    "type": "real",
+                    "value": 2000
+                  },
+                  {
+                    "type": "real",
+                    "value": 3000
+                  }
+                ]
+              ]
+            ]
+          ],
+          "type": "list"
+        },
+        false
+      ]
+    },
+    "destinyUpdate:7a23ce0642850c885698": {
+      "call": "destinyUpdate",
+      "result": [
+        {
+          "items": [
+            [
+              100,
+              [
+                "Orbit",
+                [
+                  5,
+                  1,
+                  500
+                ]
+              ]
+            ]
+          ],
+          "type": "list"
+        },
+        false
+      ]
+    },
+    "destinyUpdate:93a27a4070445a08f429": {
+      "call": "destinyUpdate",
+      "result": [
+        {
+          "items": [
+            [
+              100,
+              [
+                "RemoveBalls",
+                [
+                  {
+                    "items": [
+                      2,
+                      3
+                    ],
+                    "type": "list"
+                  }
+                ]
+              ]
+            ]
+          ],
+          "type": "list"
+        },
+        false
+      ]
+    },
+    "destinyUpdate:98fc9594e001fc3f78e5": {
+      "call": "destinyUpdate",
+      "result": [
+        {
+          "items": [
+            [
+              100,
+              [
+                "Orbit",
+                [
+                  5,
+                  1,
+                  500
+                ]
+              ]
+            ],
+            [
+              100,
+              [
+                "Stop",
+                [
+                  5
+                ]
+              ]
+            ]
+          ],
+          "type": "list"
+        },
+        false
+      ]
+    },
+    "destinyUpdate:a3d29fc37434349a4843": {
+      "call": "destinyUpdate",
+      "result": [
+        {
+          "items": [
+            [
+              100,
+              [
+                "WarpTo",
+                [
+                  1,
+                  {
+                    "type": "real",
+                    "value": 1000000000
+                  },
+                  {
+                    "type": "real",
+                    "value": 0
+                  },
+                  {
+                    "type": "real",
+                    "value": 0
+                  },
+                  {
+                    "type": "real",
+                    "value": 0
+                  },
+                  3000
+                ]
+              ]
+            ]
+          ],
+          "type": "list"
+        },
+        false
+      ]
+    },
+    "destinyUpdate:be5672715e71d7c589ca": {
+      "call": "destinyUpdate",
+      "result": [
+        {
+          "items": [
+            [
+              100,
+              [
+                "GotoPoint",
+                [
+                  4,
+                  {
+                    "type": "real",
+                    "value": 1
+                  },
+                  {
+                    "type": "real",
+                    "value": 2
+                  },
+                  {
+                    "type": "real",
+                    "value": 3
+                  }
+                ]
+              ]
+            ],
+            [
+              100,
+              [
+                "PackagedAction",
+                {
+                  "$bytes": "7e000000002c2c06642c13054f72626974140306020905c4092c06642c130453746f70250603"
+                }
+              ]
+            ]
+          ],
+          "type": "list"
+        },
+        false
+      ]
+    },
+    "destinyUpdate:be7e2b39260b83c59c90": {
+      "call": "destinyUpdate",
+      "result": [
+        {
+          "items": [
+            [
+              100,
+              [
+                "Stop",
+                [
+                  5
+                ]
+              ]
+            ],
+            [
+              100,
+              [
+                "SetBallPosition",
+                [
+                  5,
+                  {
+                    "type": "real",
+                    "value": 1000000
+                  },
+                  {
+                    "type": "real",
+                    "value": 0
+                  },
+                  {
+                    "type": "real",
+                    "value": 0
+                  }
+                ]
+              ]
+            ]
+          ],
+          "type": "list"
+        },
+        false
+      ]
+    },
+    "destinyUpdate:e35a7966c6a337289daf": {
+      "call": "destinyUpdate",
+      "result": [
+        {
+          "items": [
+            [
+              100,
+              [
+                "Orbit",
+                [
+                  1,
+                  2,
+                  2500
+                ]
+              ]
+            ],
+            [
+              100,
+              [
+                "OnSpecialFX",
+                [
+                  1,
+                  77,
+                  486,
+                  2,
+                  null,
+                  "effects.ProjectileFired",
+                  1,
+                  1,
+                  1,
+                  -1,
+                  1000,
+                  null,
+                  0,
+                  null
+                ]
+              ]
+            ]
+          ],
+          "type": "list"
+        },
+        false
+      ]
+    },
+    "destinyUpdate:e6c4e5dad19b93942cab": {
+      "call": "destinyUpdate",
+      "result": [
+        {
+          "items": [
+            [
+              100,
+              [
+                "Stop",
+                [
+                  77
+                ]
+              ]
+            ]
+          ],
+          "type": "list"
+        },
+        false
+      ]
+    },
+    "marshalDecode:f810e50674c313d26188": {
+      "call": "marshalDecode",
+      "result": [
+        [
+          100,
+          [
+            {
+              "$bytes": "4f72626974"
+            },
+            [
+              2,
+              1,
+              2500
+            ]
+          ]
+        ],
+        [
+          100,
+          [
+            {
+              "$bytes": "53746f70"
+            },
+            [
+              3
+            ]
+          ]
+        ]
+      ]
+    },
+    "packaged:6985194774ccc8cf8405": {
+      "call": "packaged",
+      "result": [
+        "PackagedAction",
+        {
+          "$bytes": "7e000000002c2c06642c13054f72626974140306020905c4092c06642c130453746f70250603"
+        }
+      ]
+    },
+    "setState:7826eb03d179dbe3cc18": {
+      "call": "setState",
+      "result": [
+        {
+          "items": [
+            [
+              100,
+              [
+                "SetState",
+                [
+                  {
+                    "args": {
+                      "entries": [
+                        [
+                          "stamp",
+                          100
+                        ],
+                        [
+                          "state",
+                          {
+                            "$bytes": "006400000001000000000000000200000c420000000000408f400000000000409f40000000000070a740010000000080842e4100ffffffffffffffffffffffffffffffff0000c8430000000000000000000000000000000000000000000000000000803f00000000ff02000000000000000200000c420000000000408f400000000000409f40000000000070a740010000000080842e4100ffffffffffffffffffffffffffffffff0000c8430000000000000000000000000000000000000000000000000000803f00000000ff"
+                          }
+                        ],
+                        [
+                          "ego",
+                          1
+                        ],
+                        [
+                          "industryLevel",
+                          0
+                        ],
+                        [
+                          "researchLevel",
+                          0
+                        ],
+                        [
+                          "damageState",
+                          {
+                            "entries": [
+                              [
+                                1,
+                                [
+                                  [
+                                    {
+                                      "type": "real",
+                                      "value": 1
+                                    },
+                                    {
+                                      "type": "real",
+                                      "value": 1
+                                    },
+                                    {
+                                      "type": "long",
+                                      "value": {
+                                        "$bigint": "1"
+                                      }
+                                    }
+                                  ],
+                                  {
+                                    "type": "real",
+                                    "value": 1
+                                  },
+                                  {
+                                    "type": "real",
+                                    "value": 1
+                                  }
+                                ]
+                              ],
+                              [
+                                2,
+                                [
+                                  [
+                                    {
+                                      "type": "real",
+                                      "value": 1
+                                    },
+                                    {
+                                      "type": "real",
+                                      "value": 1
+                                    },
+                                    {
+                                      "type": "long",
+                                      "value": {
+                                        "$bigint": "1"
+                                      }
+                                    }
+                                  ],
+                                  {
+                                    "type": "real",
+                                    "value": 1
+                                  },
+                                  {
+                                    "type": "real",
+                                    "value": 1
+                                  }
+                                ]
+                              ]
+                            ],
+                            "type": "dict"
+                          }
+                        ],
+                        [
+                          "dbuffState",
+                          {
+                            "items": [],
+                            "type": "list"
+                          }
+                        ],
+                        [
+                          "aggressors",
+                          {
+                            "entries": [],
+                            "type": "dict"
+                          }
+                        ],
+                        [
+                          "droneState",
+                          {
+                            "entries": [],
+                            "type": "dict"
+                          }
+                        ],
+                        [
+                          "slims",
+                          {
+                            "items": [
+                              {
+                                "args": {
+                                  "entries": [
+                                    [
+                                      "itemID",
+                                      1
+                                    ],
+                                    [
+                                      "typeID",
+                                      587
+                                    ]
+                                  ],
+                                  "type": "dict"
+                                },
+                                "name": "util.KeyVal",
+                                "type": "object"
+                              },
+                              {
+                                "args": {
+                                  "entries": [
+                                    [
+                                      "itemID",
+                                      2
+                                    ],
+                                    [
+                                      "typeID",
+                                      587
+                                    ]
+                                  ],
+                                  "type": "dict"
+                                },
+                                "name": "util.KeyVal",
+                                "type": "object"
+                              }
+                            ],
+                            "type": "list"
+                          }
+                        ],
+                        [
+                          "solItem",
+                          {
+                            "args": {
+                              "entries": [],
+                              "type": "dict"
+                            },
+                            "name": "util.KeyVal",
+                            "type": "object"
+                          }
+                        ],
+                        [
+                          "effectStates",
+                          {
+                            "items": [],
+                            "type": "list"
+                          }
+                        ],
+                        [
+                          "allianceBridges",
+                          {
+                            "items": [],
+                            "type": "list"
+                          }
+                        ]
+                      ],
+                      "type": "dict"
+                    },
+                    "name": "util.KeyVal",
+                    "type": "object"
+                  }
+                ]
+              ]
+            ]
+          ],
+          "type": "list"
+        },
+        false
+      ]
+    },
+    "setState:a4c640ad12c523621cc4": {
+      "call": "setState",
+      "result": [
+        {
+          "items": [
+            [
+              100,
+              [
+                "SetState",
+                [
+                  {
+                    "args": {
+                      "entries": [
+                        [
+                          "stamp",
+                          100
+                        ],
+                        [
+                          "state",
+                          {
+                            "$bytes": "006400000001000000000000000200000c420000000000408f400000000000409f40000000000070a740010000000080842e4100ffffffffffffffffffffffffffffffff0000c8430000000000000000000000000000000000000000000000000000803f00000000ff02000000000000000200000c420000000000408f400000000000409f40000000000070a740010000000080842e4100ffffffffffffffffffffffffffffffff0000c8430000000000000000000000000000000000000000000000000000803f00000000ff03000000000000000400000c420000000000408f400000000000409f40000000000070a740010000000080842e4100ffffffffffffffffffffffffffffffff0000c8430000000000000000000000000000000000000000000000000000803f00000000ff01000000000000000000fa43"
+                          }
+                        ],
+                        [
+                          "ego",
+                          1
+                        ],
+                        [
+                          "industryLevel",
+                          0
+                        ],
+                        [
+                          "researchLevel",
+                          0
+                        ],
+                        [
+                          "damageState",
+                          {
+                            "entries": [
+                              [
+                                1,
+                                [
+                                  [
+                                    {
+                                      "type": "real",
+                                      "value": 1
+                                    },
+                                    {
+                                      "type": "real",
+                                      "value": 1
+                                    },
+                                    {
+                                      "type": "long",
+                                      "value": {
+                                        "$bigint": "1"
+                                      }
+                                    }
+                                  ],
+                                  {
+                                    "type": "real",
+                                    "value": 1
+                                  },
+                                  {
+                                    "type": "real",
+                                    "value": 1
+                                  }
+                                ]
+                              ],
+                              [
+                                2,
+                                [
+                                  [
+                                    {
+                                      "type": "real",
+                                      "value": 1
+                                    },
+                                    {
+                                      "type": "real",
+                                      "value": 1
+                                    },
+                                    {
+                                      "type": "long",
+                                      "value": {
+                                        "$bigint": "1"
+                                      }
+                                    }
+                                  ],
+                                  {
+                                    "type": "real",
+                                    "value": 1
+                                  },
+                                  {
+                                    "type": "real",
+                                    "value": 1
+                                  }
+                                ]
+                              ],
+                              [
+                                3,
+                                [
+                                  [
+                                    {
+                                      "type": "real",
+                                      "value": 1
+                                    },
+                                    {
+                                      "type": "real",
+                                      "value": 1
+                                    },
+                                    {
+                                      "type": "long",
+                                      "value": {
+                                        "$bigint": "1"
+                                      }
+                                    }
+                                  ],
+                                  {
+                                    "type": "real",
+                                    "value": 1
+                                  },
+                                  {
+                                    "type": "real",
+                                    "value": 1
+                                  }
+                                ]
+                              ]
+                            ],
+                            "type": "dict"
+                          }
+                        ],
+                        [
+                          "dbuffState",
+                          {
+                            "items": [],
+                            "type": "list"
+                          }
+                        ],
+                        [
+                          "aggressors",
+                          {
+                            "entries": [],
+                            "type": "dict"
+                          }
+                        ],
+                        [
+                          "droneState",
+                          {
+                            "entries": [],
+                            "type": "dict"
+                          }
+                        ],
+                        [
+                          "slims",
+                          {
+                            "items": [
+                              {
+                                "args": {
+                                  "entries": [
+                                    [
+                                      "itemID",
+                                      1
+                                    ],
+                                    [
+                                      "typeID",
+                                      587
+                                    ]
+                                  ],
+                                  "type": "dict"
+                                },
+                                "name": "util.KeyVal",
+                                "type": "object"
+                              },
+                              {
+                                "args": {
+                                  "entries": [
+                                    [
+                                      "itemID",
+                                      2
+                                    ],
+                                    [
+                                      "typeID",
+                                      587
+                                    ]
+                                  ],
+                                  "type": "dict"
+                                },
+                                "name": "util.KeyVal",
+                                "type": "object"
+                              },
+                              {
+                                "args": {
+                                  "entries": [
+                                    [
+                                      "itemID",
+                                      3
+                                    ],
+                                    [
+                                      "typeID",
+                                      587
+                                    ]
+                                  ],
+                                  "type": "dict"
+                                },
+                                "name": "util.KeyVal",
+                                "type": "object"
+                              }
+                            ],
+                            "type": "list"
+                          }
+                        ],
+                        [
+                          "solItem",
+                          {
+                            "args": {
+                              "entries": [],
+                              "type": "dict"
+                            },
+                            "name": "util.KeyVal",
+                            "type": "object"
+                          }
+                        ],
+                        [
+                          "effectStates",
+                          {
+                            "items": [],
+                            "type": "list"
+                          }
+                        ],
+                        [
+                          "allianceBridges",
+                          {
+                            "items": [],
+                            "type": "list"
+                          }
+                        ]
+                      ],
+                      "type": "dict"
+                    },
+                    "name": "util.KeyVal",
+                    "type": "object"
+                  }
+                ]
+              ]
+            ]
+          ],
+          "type": "list"
+        },
+        false
+      ]
+    },
+    "setState:bb71e58029c11ca2a27e": {
+      "call": "setState",
+      "result": [
+        {
+          "items": [
+            [
+              100,
+              [
+                "SetState",
+                [
+                  {
+                    "args": {
+                      "entries": [
+                        [
+                          "stamp",
+                          100
+                        ],
+                        [
+                          "state",
+                          {
+                            "$bytes": "006400000001000000000000000200000c420000000000408f400000000000409f40000000000070a740010000000080842e4100ffffffffffffffffffffffffffffffff0000c8430000000000000000000000000000000000000000000000000000803f00000000ff02000000000000000200000c420000000000408f400000000000409f40000000000070a740010000000080842e4100ffffffffffffffffffffffffffffffff0000c8430000000000000000000000000000000000000000000000000000803f00000000ff"
+                          }
+                        ],
+                        [
+                          "ego",
+                          1
+                        ],
+                        [
+                          "industryLevel",
+                          0
+                        ],
+                        [
+                          "researchLevel",
+                          0
+                        ],
+                        [
+                          "damageState",
+                          {
+                            "entries": [
+                              [
+                                1,
+                                [
+                                  [
+                                    {
+                                      "type": "real",
+                                      "value": 1
+                                    },
+                                    {
+                                      "type": "real",
+                                      "value": 1
+                                    },
+                                    {
+                                      "type": "long",
+                                      "value": {
+                                        "$bigint": "1"
+                                      }
+                                    }
+                                  ],
+                                  {
+                                    "type": "real",
+                                    "value": 1
+                                  },
+                                  {
+                                    "type": "real",
+                                    "value": 1
+                                  }
+                                ]
+                              ],
+                              [
+                                2,
+                                [
+                                  [
+                                    {
+                                      "type": "real",
+                                      "value": 1
+                                    },
+                                    {
+                                      "type": "real",
+                                      "value": 1
+                                    },
+                                    {
+                                      "type": "long",
+                                      "value": {
+                                        "$bigint": "1"
+                                      }
+                                    }
+                                  ],
+                                  {
+                                    "type": "real",
+                                    "value": 1
+                                  },
+                                  {
+                                    "type": "real",
+                                    "value": 1
+                                  }
+                                ]
+                              ]
+                            ],
+                            "type": "dict"
+                          }
+                        ],
+                        [
+                          "dbuffState",
+                          {
+                            "items": [],
+                            "type": "list"
+                          }
+                        ],
+                        [
+                          "aggressors",
+                          {
+                            "entries": [],
+                            "type": "dict"
+                          }
+                        ],
+                        [
+                          "droneState",
+                          {
+                            "entries": [],
+                            "type": "dict"
+                          }
+                        ],
+                        [
+                          "slims",
+                          {
+                            "items": [
+                              {
+                                "args": {
+                                  "entries": [
+                                    [
+                                      "itemID",
+                                      1
+                                    ],
+                                    [
+                                      "typeID",
+                                      587
+                                    ]
+                                  ],
+                                  "type": "dict"
+                                },
+                                "name": "util.KeyVal",
+                                "type": "object"
+                              },
+                              {
+                                "args": {
+                                  "entries": [
+                                    [
+                                      "itemID",
+                                      2
+                                    ],
+                                    [
+                                      "typeID",
+                                      17932
+                                    ]
+                                  ],
+                                  "type": "dict"
+                                },
+                                "name": "util.KeyVal",
+                                "type": "object"
+                              }
+                            ],
+                            "type": "list"
+                          }
+                        ],
+                        [
+                          "solItem",
+                          {
+                            "args": {
+                              "entries": [],
+                              "type": "dict"
+                            },
+                            "name": "util.KeyVal",
+                            "type": "object"
+                          }
+                        ],
+                        [
+                          "effectStates",
+                          {
+                            "items": [],
+                            "type": "list"
+                          }
+                        ],
+                        [
+                          "allianceBridges",
+                          {
+                            "items": [],
+                            "type": "list"
+                          }
+                        ]
+                      ],
+                      "type": "dict"
+                    },
+                    "name": "util.KeyVal",
+                    "type": "object"
+                  }
+                ]
+              ]
+            ]
+          ],
+          "type": "list"
+        },
+        false
+      ]
+    },
+    "setState:f997a28290dcdf29fcb8": {
+      "call": "setState",
+      "result": [
+        {
+          "items": [
+            [
+              100,
+              [
+                "SetState",
+                [
+                  {
+                    "args": {
+                      "entries": [
+                        [
+                          "stamp",
+                          100
+                        ],
+                        [
+                          "state",
+                          {
+                            "$bytes": "006400000001000000000000000200000c420000000000408f400000000000409f40000000000070a740010000000080842e4100ffffffffffffffffffffffffffffffff0000c8430000000000000000000000000000000000000000000000000000803f00000000ff"
+                          }
+                        ],
+                        [
+                          "ego",
+                          1
+                        ],
+                        [
+                          "industryLevel",
+                          0
+                        ],
+                        [
+                          "researchLevel",
+                          0
+                        ],
+                        [
+                          "damageState",
+                          {
+                            "entries": [
+                              [
+                                1,
+                                [
+                                  [
+                                    {
+                                      "type": "real",
+                                      "value": 1
+                                    },
+                                    {
+                                      "type": "real",
+                                      "value": 1
+                                    },
+                                    {
+                                      "type": "long",
+                                      "value": {
+                                        "$bigint": "1"
+                                      }
+                                    }
+                                  ],
+                                  {
+                                    "type": "real",
+                                    "value": 1
+                                  },
+                                  {
+                                    "type": "real",
+                                    "value": 1
+                                  }
+                                ]
+                              ]
+                            ],
+                            "type": "dict"
+                          }
+                        ],
+                        [
+                          "dbuffState",
+                          {
+                            "items": [],
+                            "type": "list"
+                          }
+                        ],
+                        [
+                          "aggressors",
+                          {
+                            "entries": [],
+                            "type": "dict"
+                          }
+                        ],
+                        [
+                          "droneState",
+                          {
+                            "entries": [],
+                            "type": "dict"
+                          }
+                        ],
+                        [
+                          "slims",
+                          {
+                            "items": [
+                              {
+                                "args": {
+                                  "entries": [
+                                    [
+                                      "itemID",
+                                      1
+                                    ],
+                                    [
+                                      "typeID",
+                                      587
+                                    ]
+                                  ],
+                                  "type": "dict"
+                                },
+                                "name": "util.KeyVal",
+                                "type": "object"
+                              }
+                            ],
+                            "type": "list"
+                          }
+                        ],
+                        [
+                          "solItem",
+                          {
+                            "args": {
+                              "entries": [],
+                              "type": "dict"
+                            },
+                            "name": "util.KeyVal",
+                            "type": "object"
+                          }
+                        ],
+                        [
+                          "effectStates",
+                          {
+                            "items": [],
+                            "type": "list"
+                          }
+                        ],
+                        [
+                          "allianceBridges",
+                          {
+                            "items": [],
+                            "type": "list"
+                          }
+                        ]
+                      ],
+                      "type": "dict"
+                    },
+                    "name": "util.KeyVal",
+                    "type": "object"
+                  }
+                ]
+              ]
+            ]
+          ],
+          "type": "list"
+        },
+        false
+      ]
+    }
+  }
+}

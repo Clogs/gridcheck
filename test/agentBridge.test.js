@@ -16,7 +16,7 @@ const { createAgentBridgeRoutes } = require("../bridge/routes");
 const { createLuRoutes } = require("../plugins/lu/server/routes");
 const { createAgentBridgeHttp, removeHandshake } =
   require("../bridge/http");
-const { needsPlugin, serverModule } = require("./tree");
+const { needsTree, serverModule } = require("./tree");
 // What a tree's shim exports. Nothing reads the server root until exec().
 const agentBridgeService = require("../bridge/entry").createService({ serverRoot: path.join(os.tmpdir(), "no-tree", "server") });
 
@@ -227,8 +227,8 @@ test("the service is off unless EVEJS_AGENT_BRIDGE turns it on", () => {
 // ---------- triggers (agentBridgeTriggers.js) ----------
 
 const { createAgentBridgeTriggers } = require("../plugins/lu/server/triggers");
-// The real scout module, so these need a tree with the mod.
-const LU = needsPlugin("lu");
+// The real scout module, so these need a real tree with the mod.
+const LU = needsTree("lu");
 const scouts = () => serverModule("_secondary/pirateScouts");
 
 // One system (1) with the character's ship, a scout and a gang; the hunt tick is

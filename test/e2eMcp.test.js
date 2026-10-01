@@ -17,7 +17,7 @@ const { renderReport } = require("../core/scenario");
 const MCP_PATH = path.resolve(__dirname, "..", "bin", "mcp.js");
 
 // These read the lu plugin through the default registry, so they need a tree
-// with the mod (npm run test:tree -- <tree>).
+// it applies to: the fixture tree npm test names, or one with the mod.
 const LU = needsPlugin("lu");
 
 test("the spec's tools are listed, plugin tools named for their plugin, each with an object schema", LU, () => {

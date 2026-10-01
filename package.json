@@ -13,6 +13,7 @@
   },
   "scripts": {
     "test": "node test/run.js",
-    "test:tree": "node test/run.js --tree"
+    "fixtures:capture": "node test/fixtures/capture.js",
+    "compat": "node test/compat.js"
   }
 }

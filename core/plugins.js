@@ -42,8 +42,8 @@ const path = require("node:path");
 const API_VERSION = 1;
 const DEFAULT_PLUGINS_DIR = path.join(__dirname, "..", "plugins");
 // tools/evejs-e2e/core -> the tree the copy is vendored into. EVEJS_E2E_TREE
-// names another tree, so this repo's tests and CLI can run against one
-// (npm run test:tree -- <tree>).
+// names another tree, so this repo's tests and CLI can run against one (npm
+// test names test/fixtures/tree; npm run compat names real ones).
 const DEFAULT_TREE_ROOT = String(process.env.EVEJS_E2E_TREE || "").trim()
   ? path.resolve(process.env.EVEJS_E2E_TREE.trim())
   : path.resolve(__dirname, "..", "..", "..");
