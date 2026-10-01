@@ -54,7 +54,7 @@ ${MANAGED
     : "This tree is in attach mode: its server is started by hand with EVEJS_AGENT_BRIDGE=1 set, and the tools work on that live server. e2e_up and e2e_down refuse, and a run uses the server as it is: its world is not restored and the server stays up. If no server is up, ask the user to start one."}
 
 To verify a feature, write a scenario and run it (e2e_run_scenario). A scenario is JSON:
-{ "description": "...", "world": "<a saved world e2e_status lists, or fresh>",
+{ "description": "...", "world": "<a saved world e2e_status lists, or fresh>" (or "recipe": "starter" instead, a world the run builds from worlds/starter.recipe.json: every skill and a fitted Tristan docked in Amamake),
   "setup": ["undock", { "teleport": "Siseide" }, { "slash": "/gaterats on" }, { "waitFor": "ARRIVE who=npc", "timeout": 120 }],
   "until": { "any": ["DESTROYED self"], "timeout": 300, "grace": 10 },
   "expect": ["ARRIVE who=npc", { "match": "TARGET self locked", "note": "why it matters" }, "no DIVERGE status=open"] }
@@ -503,7 +503,8 @@ const TOOLS = [
     inputSchema: schema(),
     async run(_params, context) {
       const parts = [];
-      for (const [title, args] of [["Server", ["status"]], ["Saved worlds", ["world", "list"]], ["Scenarios", ["run"]]]) {
+      for (const [title, args] of [["Server", ["status"]], ["Saved worlds", ["world", "list"]], ["World recipes", ["world", "recipes"]],
+        ["Scenarios", ["run"]]]) {
         const reply = await runCli(args, context);
         parts.push(`## ${title}\n${reply.output}`);
       }

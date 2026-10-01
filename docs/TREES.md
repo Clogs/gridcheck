@@ -50,9 +50,10 @@ listener it can onto the tree's own port block, starts the server in the backgro
 until a character can log in. `e2e down` stops it cleanly. A run boots its scenario's world and
 stops the server at the end.
 
-A scenario names a saved world, or `"world": "fresh"` for a new game store seeded from the
-reference data. `e2e run <scenario> --world <name>` boots another world than the one the scenario
-names. `smoke-undock` and `selftest-unmet` use `fresh`, so they run in any tree.
+A scenario names a saved world, `"world": "fresh"` for a new game store seeded from the
+reference data, or `"recipe": "<name>"` for a world the tool builds ([WORLDS.md](WORLDS.md)).
+`e2e run <scenario> --world <name>` boots another world than the one the scenario names. Every
+core scenario uses `fresh` or the `starter` recipe, so they all run in any tree.
 
 ## What `e2e doctor` checks
 
@@ -74,6 +75,8 @@ when no server is up. `--offline` always reads the files; `--json` prints the wh
   port until the `xmpp-port` patch is applied.
 - **session**: with a character logged in, whether its session is one the client view can attach
   to.
+- **loadout**: whether the tree has the stock ship helpers `e2e loadout` builds a ship from.
+  Without a running server it reads each module's exports from its file, without loading it.
 
 ## Stock EveJS's differences
 
@@ -113,7 +116,9 @@ reuses the unpacked tree while the zip is unchanged. It builds the zip's referen
 extracted SDE (`--sde`, `EVEJS_E2E_SDE_DIR`, or the one the LU tree's data comes from) and vendors
 this checkout's HEAD into each tree. Then it runs `init`, `doctor`, `login`, `undock`, `grid`,
 `watch` and `smoke-undock`: on stock in managed and in attach mode, on LU in managed mode on its
-saved world `lowsec-docked`. It records the fixtures again and fails if they no longer match the
+saved world `lowsec-docked`. On stock with the three patches applied it also checks that a
+fresh character's loadout is refused with its missing skills, builds `starter`, and runs the five
+core scenarios on it. It records the fixtures again and fails if they no longer match the
 committed ones: the encodings exactly, the session and grid by shape. It runs the tests that need a
 real tree and puts LU's vendored copy back (`--keep-lu` leaves it). The lanes run one after the
 other, because two large servers at once can lose a persistence lease on one machine.

@@ -8,8 +8,10 @@
 // checkout's HEAD, boots the server, runs the round trips an agent would
 // (init, doctor, login, undock, grid, watch, smoke-undock), records the
 // fixtures again and compares them with the committed ones, and runs the
-// tests that need a real tree. Writes compat-report.md and exits 1 on any
-// failure.
+// tests that need a real tree. On stock with the three patches applied it
+// also refuses a loadout the character hasn't the skills for, builds the
+// starter world and runs the five core scenarios on it. Writes
+// compat-report.md and exits 1 on any failure.
 //
 // stock  the zip is unpacked once into --scratch (F:/LU/_compat by default,
 //        outside every repo) and reused while the zip is unchanged. Its
@@ -283,13 +285,14 @@ function requireDoctor(report, { plugin = null, patches = {} } = {}) {
   if (!report.gateway.known) problems.push(`gateway unknown: ${report.gateway.error}`);
   else if (report.gateway.missing.length) problems.push(`refused calls: ${report.gateway.missing.map((call) => `${call.service}.${call.method}`).join(", ")}`);
   if (!report.destiny.ok) problems.push(`destiny: ${report.destiny.error}`);
+  if (report.loadout && !report.loadout.ok) problems.push(`loadout: ${report.loadout.missing.join("; ")}`);
   if (plugin && !report.plugins.active.includes(plugin)) problems.push(`plugin ${plugin} not active: ${JSON.stringify(report.plugins.skipped)}`);
   for (const [id, state] of Object.entries(patches)) {
     const row = report.patches.find((patch) => patch.id === id);
     if (!row || row.state !== state) problems.push(`patch ${id} is ${row ? row.state : "unknown"}, expected ${state}`);
   }
   if (problems.length) throw new CompatError(problems.join("; "));
-  return `${report.gateway.calls.length} gateway calls allowed, client view on, ` +
+  return `${report.gateway.calls.length} gateway calls allowed, client view on, ${report.loadout ? "loadout on, " : ""}` +
     `patches ${report.patches.map((patch) => `${patch.id} ${patch.state}`).join(", ")}, ` +
     `plugins ${report.plugins.active.join(", ") || "none"} active`;
 }
@@ -341,11 +344,37 @@ async function compareFixtures(lane, tree, sections) {
   }
 }
 
-async function runScenario(tree, args) {
-  const out = cliIn(tree, ["run", "smoke-undock", ...args]);
+async function runScenario(tree, args, name = "smoke-undock") {
+  const out = cliIn(tree, ["run", name, ...args]);
   const verdict = out.split(/\r?\n/).find((line) => /^(passed|FAILED|did not complete):/.test(line));
   if (!verdict || !verdict.startsWith("passed")) throw new CompatError(out.split(/\r?\n/).slice(-12).join("\n"));
   return verdict;
+}
+
+// selftest-unmet passes by failing: exit 1, and only its deliberate miss MISSING.
+function runSelftest(tree) {
+  const out = cliIn(tree, ["run", "selftest-unmet"], { expect: 1 });
+  const missing = out.split(/\r?\n/).filter((line) => /^MISSING /.test(line));
+  const verdict = out.split(/\r?\n/).find((line) => /^(passed|FAILED|did not complete):/.test(line)) || "";
+  if (missing.length !== 1 || !/SYSTEM toSystemName=Jita/.test(missing[0]) || !verdict.startsWith("FAILED")) {
+    throw new CompatError(`expected exactly the Jita expectation MISSING:\n${out.split(/\r?\n/).slice(-12).join("\n")}`);
+  }
+  return `${verdict.split(";")[0]}, ${missing[0]}`;
+}
+
+const CORE_SCENARIOS = ["smoke-undock", "gate-rats", "concord-highsec", "loadout-npc-fight"];
+const NO_SKILLS_LOADOUT = ["loadout", "Tristan", "--modules", "Light Neutron Blaster II x2", "--drones", "Hobgoblin II x5"];
+
+// A fresh character hasn't the skills for a Tristan with Hobgoblins: the
+// loadout is refused with the list, and the character keeps its ship.
+function loadoutRefused(tree) {
+  const out = cliIn(tree, NO_SKILLS_LOADOUT, { expect: 2 });
+  const missing = out.split(/\r?\n/).filter((line) => /^\s+missing /.test(line));
+  if (!/refused: missing \d+ skill\(s\); nothing was changed/.test(out) || !missing.length ||
+    !missing.some((line) => /Gallente Frigate/.test(line))) {
+    throw new CompatError(`expected a refusal listing the missing skills:\n${out}`);
+  }
+  return `refused with ${missing.length} missing skill(s): ${missing.map((line) => line.trim().replace(/^missing /, "").split(" (")[0]).join(", ")}`;
 }
 
 // ---------- attach mode: a server started by hand ----------
@@ -441,9 +470,21 @@ async function stockPatchRoundTrip(lane, tree) {
           if (!/doesn't say whether it refused/.test(unknown)) throw new CompatError(`/where should be unreported:\n${unknown}`);
           return "/dock ok, /fit of a missing module refused, /where unreported";
         });
+        await check(lane, "loadout without the skills refused (patched)", () => loadoutRefused(tree));
       } finally {
         await check(lane, "down (patched)", () => lastLine(cliIn(tree, ["down"])));
       }
+    }
+    // A patched tree from nothing to a fitted ship: build the starter world,
+    // then the core scenarios on it.
+    if (await check(lane, "world build starter (patched)", () => {
+      const out = cliIn(tree, ["world", "build", "starter"]);
+      const boarded = out.split(/\r?\n/).find((line) => /^boarded Tristan/.test(line));
+      if (!boarded) throw new CompatError(`no Tristan boarded:\n${out.split(/\r?\n/).slice(-12).join("\n")}`);
+      return `${lastLine(out)}; ${boarded}`;
+    })) {
+      for (const name of CORE_SCENARIOS) await check(lane, `run ${name} (patched)`, () => runScenario(tree, [], name));
+      await check(lane, "run selftest-unmet (patched)", () => runSelftest(tree));
     }
   } finally {
     await check(lane, "patch revert (all three), byte-identical", () => {
