@@ -12,6 +12,14 @@ if (require.main === module && process.argv[2] === "vendor") {
   process.exitCode = require("../core/vendor").main(process.argv.slice(3));
   return;
 }
+// `e2e gui` manages trees other than this copy's, so it reads no tree config here.
+if (require.main === module && process.argv[2] === "gui") {
+  require("../core/gui").main(process.argv.slice(3)).then((code) => { process.exitCode = code; }, (error) => {
+    console.error(`e2e: ${error.stack || error.message}`);
+    process.exitCode = 1;
+  });
+  return;
+}
 
 const { spawn, spawnSync } = require("node:child_process");
 const fs = require("node:fs");
@@ -1673,6 +1681,8 @@ function cmdPatch(positionals, flags) {
     console.log(`${verb} ${id} in ${result.files.join(", ")}`);
     for (const line of result.preview) console.log(line);
     for (const note of result.notes) console.log(`note: ${note}`);
+    for (const blocker of result.blockers || []) console.log(`refused when run: ${blocker}`);
+    if (result.blockers && result.blockers.length) process.exitCode = 1;
     results.push(result);
   }
   if (!flags["dry-run"]) {
@@ -1686,15 +1696,16 @@ function cmdInit(flags) {
   const mode = flags.mode === undefined ? "attach" : String(flags.mode);
   if (!treeConfig.MODES.includes(mode)) throw new CliError(`--mode takes ${treeConfig.MODES.join(" or ")}`);
   const { config, notes } = treeConfig.probeTree(REPO_ROOT, { pluginListeners: LISTENERS, mode });
+  const dryRun = Boolean(flags["dry-run"]);
   let file;
   try {
-    file = treeConfig.writeTreeConfig(REPO_ROOT, config, { force: Boolean(flags.force) });
+    file = treeConfig.writeTreeConfig(REPO_ROOT, config, { force: Boolean(flags.force), dryRun });
   } catch (error) {
     throw error instanceof treeConfig.TreeConfigError ? new CliError(error.message) : error;
   }
   const listeners = Object.entries(config.listeners);
   const lines = [
-    `wrote ${relativePath(file)}, mode ${config.mode}`,
+    `${dryRun ? "would write" : "wrote"} ${relativePath(file)}, mode ${config.mode}`,
     `  server     ${config.serverDir}: ${config.start.join(" ")}`,
     `  data       ${config.dataDir}; game store ${config.gameStore}`,
     `  log        ${config.logFile}`,
@@ -1703,11 +1714,12 @@ function cmdInit(flags) {
     `  listeners  move: ${listeners.filter(([, row]) => row.movable).map(([name]) => name).join(", ") || "none"}` +
       `${listeners.some(([, row]) => !row.movable) ? `; stay on stock ports: ${listeners.filter(([, row]) => !row.movable).map(([name]) => name).join(", ")}` : ""}`,
     ...notes.map((note) => `note: ${note}`),
-    config.mode === "managed"
+    ...(dryRun ? ["nothing was written (--dry-run). The file would be:", JSON.stringify(config, null, 2)] : []),
+    dryRun ? null : config.mode === "managed"
       ? "next: e2e up --fresh (a new world) or e2e up --world <name>, then e2e login"
       : "next: start the server with EVEJS_AGENT_BRIDGE=1 set (`npm start` in the server folder, or StartServer.bat " +
         "from a shell that has it), then e2e login",
-  ];
+  ].filter((line) => line !== null);
   for (const line of lines) console.log(line);
   return lines.join("\n");
 }
@@ -1836,7 +1848,7 @@ function upUsage() {
 // (registry.commands) run with pluginIO() and can't take a core name.
 const CORE_COMMANDS = {
   init: {
-    usage: ["init [--mode attach|managed] [--force]"],
+    usage: ["init [--mode attach|managed] [--force] [--dry-run]"],
     run: (_positionals, flags) => cmdInit(flags),
   },
   doctor: {
@@ -1849,7 +1861,7 @@ const CORE_COMMANDS = {
     run: cmdWorld,
   },
   vendor: {
-    usage: ["vendor update [--from <checkout|tag>] [--tree <path>] [--force] | vendor check [--tree <path>]"],
+    usage: ["vendor update [--from <checkout|tag>] [--tree <path>] [--force] [--dry-run] | vendor check [--tree <path>]"],
     run: cmdVendor,
   },
   patch: {
@@ -1893,6 +1905,11 @@ const CORE_COMMANDS = {
     run: cmdAct,
   },
   view: { usage: ["view [<run>] [--serve] [--port N]"], run: cmdView },
+  gui: {
+    usage: ["gui [--port N] [--tree <path>]... [--open]"],
+    run: (positionals, flags) => require("../core/gui").main([...positionals,
+      ...Object.entries(flags).flatMap(([key, value]) => (value === true ? [`--${key}`] : [`--${key}`, String(value)]))]),
+  },
   run: { usage: ["run [<scenario>] [--check] [--run <id>] [--world <name>|fresh] [--keep-up]"], run: cmdRun },
   log: { usage: ["log [--grep NpcController] [--lines 40] [--any-pid]"], run: (_positionals, flags) => cmdLog(flags) },
   help: { usage: ["help"], run: () => { console.log(helpText()); } },
@@ -1916,7 +1933,7 @@ function helpText() {
 }
 
 // Commands that run even when e2e.config.json is broken: they fix or report it.
-const CONFIG_EXEMPT = new Set(["init", "doctor", "help", "vendor"]);
+const CONFIG_EXEMPT = new Set(["init", "doctor", "help", "vendor", "gui"]);
 
 async function main(argv) {
   const { command, positionals, flags } = parseArgs(argv);

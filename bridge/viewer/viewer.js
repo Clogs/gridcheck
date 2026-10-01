@@ -2,7 +2,7 @@
 
 // The e2e viewer: draws a run's timeline.jsonl as a top-down tactical view
 // with a replay scrubber, live while the run writes it. Served by the agent
-// bridge (bridge/viewer.js) or by `e2e view`. Positions come from the
+// bridge (bridge/viewer.js), by `e2e view` or by `e2e gui`. Positions come from the
 // watch's POS events, the rest from the timeline's own events; DIVERGE events
 // (what the client was sent disagreeing with the server) are marked on the
 // map, the scrubber and their own list. Guide: docs/E2E-GRID-TESTING.md "Viewer".
@@ -29,6 +29,8 @@
   const params = new URLSearchParams(location.hash.slice(1));
   const token = params.get("token") || sessionStorage.getItem("e2eViewerToken") || "";
   if (params.get("token")) sessionStorage.setItem("e2eViewerToken", token);
+  // `e2e gui` serves runs from several trees and names one; the bridge serves its own.
+  const tree = params.get("tree") || "";
 
   const state = {
     runID: params.get("run") || null,
@@ -118,7 +120,8 @@
   }
 
   async function api(route) {
-    const response = await fetch(route, { headers: { authorization: `Bearer ${token}` }, cache: "no-store" });
+    const url = tree ? `${route}${route.includes("?") ? "&" : "?"}tree=${encodeURIComponent(tree)}` : route;
+    const response = await fetch(url, { headers: { authorization: `Bearer ${token}` }, cache: "no-store" });
     const body = await response.json().catch(() => ({}));
     if (!response.ok || body.ok === false) throw new Error(body.error || `HTTP ${response.status}`);
     return body;
@@ -160,7 +163,7 @@
     state.generation += 1;
     Object.assign(state, { runID, events: [], positions: [], bytes: 0, result: null, ended: false, mtimeMs: 0, nowMs: 0,
       t0: null, tEnd: null, at: null, playing: false, current: -1, palette: new Map(), destroyedAt: new Map() });
-    history.replaceState(null, "", `#run=${encodeURIComponent(runID)}`);
+    history.replaceState(null, "", `#run=${encodeURIComponent(runID)}${tree ? `&tree=${encodeURIComponent(tree)}` : ""}`);
     $("events").textContent = "";
     $("diverges").textContent = "";
     $("play").textContent = "Play";

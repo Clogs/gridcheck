@@ -377,17 +377,20 @@ function changePatch(action, id, { treeRoot, serverRoot, patches = loadPatches()
   const plan = action === "apply" ? planApply(patch, read) : planRevert(patch, read);
   if (!plan.ok) throw new PatchError(`${action} ${id} refused: ${plan.problems.join("; ")}`);
   const preview = previewLines(plan, { removing: action === "revert" });
-  if (dryRun) return { id, action, files: plan.files.map((entry) => entry.file), preview, notes, dryRun: true };
-  if (serverUp) throw new PatchError(`${action} ${id} refused: ${serverUp}. Stop it first (e2e down)`);
+  // What would stop the real change. A dry run reports them, so a preview
+  // says up front that the change would be refused.
+  const blockers = [];
+  if (serverUp) blockers.push(`${serverUp}. Stop it first (e2e down)`);
   if (action === "apply") {
     const status = dirtyCheck(treeRoot, plan.files.map((entry) => read.absolute(entry.file)));
     if (!status.git) notes.push("this tree isn't a git checkout, so uncommitted changes to the targets weren't checked");
-    else if (status.dirty.length) {
-      throw new PatchError(`apply ${id} refused: uncommitted changes in ${status.dirty.join(", ")}. Commit or discard them first`);
-    }
+    else if (status.dirty.length) blockers.push(`uncommitted changes in ${status.dirty.join(", ")}. Commit or discard them first`);
   }
+  const files = plan.files.map((entry) => entry.file);
+  if (dryRun) return { id, action, files, preview, notes, blockers, dryRun: true };
+  if (blockers.length) throw new PatchError(`${action} ${id} refused: ${blockers[0]}`);
   writeAll(read, plan.files, "after");
-  return { id, action, files: plan.files.map((entry) => entry.file), preview, notes };
+  return { id, action, files, preview, notes };
 }
 
 module.exports = {

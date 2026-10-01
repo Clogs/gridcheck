@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>evejs-e2e</title>
+<link rel="stylesheet" href="/gui/gui.css">
+</head>
+<body>
+<header>
+  <strong>evejs-e2e</strong>
+  <span id="context" class="muted"></span>
+  <label>Tree <select id="tree"></select></label>
+  <span id="tree-badges"></span>
+  <span id="message" role="status"></span>
+</header>
+<nav id="tabs" role="tablist">
+  <button type="button" role="tab" data-tab="runs">Runs</button>
+  <button type="button" role="tab" data-tab="install">Install</button>
+  <button type="button" role="tab" data-tab="patches">Patches</button>
+</nav>
+
+<main>
+  <section id="tab-runs" class="tab" hidden>
+    <div class="split">
+      <div class="pane list-pane">
+        <div class="bar">
+          <h2>Runs</h2>
+          <button id="runs-refresh" type="button">Refresh</button>
+        </div>
+        <p id="runs-where" class="muted"></p>
+        <table id="runs" class="rows">
+          <thead><tr><th>Run</th><th>Verdict</th><th>Expectations</th><th>When</th></tr></thead>
+          <tbody></tbody>
+        </table>
+        <p id="runs-empty" class="muted" hidden>No runs with a timeline in this tree yet. <code>e2e run &lt;scenario&gt;</code> makes one.</p>
+      </div>
+      <div class="pane detail-pane">
+        <div id="run-empty" class="muted">Pick a run to see its report and frames.</div>
+        <div id="run-detail" hidden>
+          <div class="bar">
+            <h2 id="run-title"></h2>
+            <span id="run-verdict" class="badge"></span>
+            <a id="run-replay" class="button" target="_blank" rel="noopener noreferrer">Open replay</a>
+          </div>
+          <p id="run-dir" class="muted"></p>
+          <h3>Frames</h3>
+          <div id="run-frames" class="frames"></div>
+          <h3>Report</h3>
+          <article id="run-report" class="report"></article>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="tab-install" class="tab" hidden>
+    <div class="split">
+      <div class="pane list-pane">
+        <h2>Trees</h2>
+        <ul id="trees" class="cards"></ul>
+        <form id="add-tree" class="add">
+          <label for="add-path">Add a tree by its path</label>
+          <div class="row">
+            <input id="add-path" type="text" placeholder="F:/EveJS-0.12.9" autocomplete="off" spellcheck="false">
+            <button type="submit">Add</button>
+          </div>
+        </form>
+      </div>
+      <div class="pane detail-pane">
+        <div id="install-empty" class="muted">Pick or add a tree.</div>
+        <div id="install-detail" hidden>
+          <div class="bar"><h2 id="install-title"></h2><button id="install-refresh" type="button">Refresh</button></div>
+          <p id="install-root" class="muted"></p>
+          <ol class="steps">
+            <li>
+              <h3>The vendored copy</h3>
+              <p id="copy-status"></p>
+              <ul id="copy-problems" class="problems"></ul>
+              <div class="row" id="copy-from-row" hidden>
+                <label for="copy-from">Update from the evejs-e2e checkout</label>
+                <input id="copy-from" type="text" placeholder="F:/evejs-e2e" autocomplete="off" spellcheck="false">
+              </div>
+              <div class="row">
+                <label id="copy-force-label" hidden><input id="copy-force" type="checkbox"> replace edited files (--force)</label>
+                <button id="copy-preview" type="button">Preview install</button>
+              </div>
+              <p class="muted">Shim <code>server/src/_secondary/agentBridge/server.js</code>: <span id="shim-status"></span></p>
+            </li>
+            <li>
+              <h3>The tree's config</h3>
+              <p id="config-status"></p>
+              <ul id="config-problems" class="problems"></ul>
+              <div class="row">
+                <label>Mode <select id="config-mode">
+                  <option value="managed">managed: e2e starts and stops the server</option>
+                  <option value="attach">attach: you start the server</option>
+                </select></label>
+                <button id="config-preview" type="button">Preview config</button>
+              </div>
+            </li>
+            <li>
+              <h3>What the tree needs to run</h3>
+              <ul id="prereqs" class="checks"></ul>
+              <p id="server-status"></p>
+            </li>
+            <li>
+              <h3>Plugins and doctor</h3>
+              <ul id="plugins" class="checks"></ul>
+              <div class="row"><button id="doctor-run" type="button">Run e2e doctor</button><span id="doctor-command" class="muted"></span></div>
+              <pre id="doctor-output" hidden></pre>
+            </li>
+            <li>
+              <h3>Next</h3>
+              <p id="next-steps"></p>
+            </li>
+          </ol>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="tab-patches" class="tab" hidden>
+    <div class="pane">
+      <div class="bar"><h2>Patches</h2><button id="patches-refresh" type="button">Refresh</button><span id="patches-command" class="muted"></span></div>
+      <p class="muted">Optional edits to stock EveJS, written as anchored insertions with a marker comment. Revert gives each file
+        back byte for byte. The tree's server must be down.</p>
+      <table id="patches" class="rows">
+        <thead><tr><th>Patch</th><th>State</th><th>What it does</th><th></th></tr></thead>
+        <tbody></tbody>
+      </table>
+      <p id="patches-empty" class="muted" hidden></p>
+    </div>
+  </section>
+</main>
+
+<dialog id="preview" aria-labelledby="preview-title">
+  <div class="dialog">
+    <h2 id="preview-title">Preview</h2>
+    <ul id="preview-refused" class="problems"></ul>
+    <div id="preview-steps"></div>
+    <p id="preview-note" class="muted"></p>
+    <div class="row end">
+      <button id="preview-close" type="button">Close</button>
+      <button id="preview-run" type="button" class="primary">Run</button>
+    </div>
+  </div>
+</dialog>
+
+<dialog id="frame-view" aria-label="Frame">
+  <div class="dialog wide">
+    <img id="frame-image" alt="">
+    <div class="row end"><button id="frame-close" type="button">Close</button></div>
+  </div>
+</dialog>
+
+<script src="/gui/gui.js"></script>
+</body>
+</html>

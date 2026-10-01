@@ -33,6 +33,16 @@ const PAGE_FILES = Object.freeze({
   "/viewer/viewer.css": ["viewer.css", "text/css; charset=utf-8"],
 });
 
+// A run's directory under the runs directory, or null for anything that would
+// leave it.
+function resolveRunDir(runsDir, runID) {
+  const root = path.resolve(runsDir);
+  const id = String(runID || "");
+  if (!RUN_ID.test(id)) return null;
+  const dir = path.resolve(root, id);
+  return path.dirname(dir) === root ? dir : null;
+}
+
 const KIND_IN_LINE = /"kind":"([A-Z_]+)"/;
 // A timeline line's text without its "t+00:00:00  KIND" head.
 const LINE_HEAD = /^t[+-]\d\d:\d\d:\d\d {2}\S+\s+/;
@@ -80,12 +90,7 @@ function createAgentBridgeViewer({ runsDir, pageDir = path.join(__dirname, "view
     }
   }
 
-  function runDir(runID) {
-    const id = String(runID || "");
-    if (!RUN_ID.test(id)) return null;
-    const dir = path.resolve(root, id);
-    return path.dirname(dir) === root ? dir : null;
-  }
+  const runDir = (runID) => resolveRunDir(root, runID);
 
   function readResult(dir) {
     try {
@@ -181,4 +186,4 @@ function createAgentBridgeViewer({ runsDir, pageDir = path.join(__dirname, "view
   return { handle, handlePublic };
 }
 
-module.exports = { MAX_CHUNK_BYTES, createAgentBridgeViewer };
+module.exports = { MAX_CHUNK_BYTES, createAgentBridgeViewer, resolveRunDir };

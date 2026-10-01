@@ -34,7 +34,7 @@ function sendRaw(response, result) {
     "X-Frame-Options": "DENY",
     "Referrer-Policy": "no-referrer",
     "Content-Security-Policy": "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; " +
-      "img-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+      "img-src 'self' data: blob:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
   });
   response.end(body);
 }
@@ -95,6 +95,7 @@ function removeHandshake(handshakePath, options = {}) {
 }
 
 // handshakeExtra(): more fields for the handshake, read once at listen.
+// handshakePath null: no handshake file (`e2e gui` prints its URL instead).
 function createAgentBridgeHttp({ routes, port, handshakePath, log, serviceName = "agentBridge", handshakeExtra = null }) {
   const logger = log || { debug() {}, err() {} };
   const token = crypto.randomBytes(32).toString("hex");
@@ -164,6 +165,7 @@ function createAgentBridgeHttp({ routes, port, handshakePath, log, serviceName =
   }
 
   function writeHandshake(boundPort) {
+    if (!handshakePath) return;
     fs.mkdirSync(path.dirname(handshakePath), { recursive: true });
     let extra = {};
     if (typeof handshakeExtra === "function") {
@@ -190,7 +192,7 @@ function createAgentBridgeHttp({ routes, port, handshakePath, log, serviceName =
       });
       created.once("error", (error) => {
         logger.err(`[AgentBridge] could not listen on ${LOOPBACK_HOST}:${port}: ${error.message}`);
-        removeHandshake(handshakePath, { onlyIfOurs: true });
+        if (handshakePath) removeHandshake(handshakePath, { onlyIfOurs: true });
         reject(error);
       });
       created.listen(port, LOOPBACK_HOST, () => {
@@ -204,7 +206,7 @@ function createAgentBridgeHttp({ routes, port, handshakePath, log, serviceName =
   }
 
   function stop() {
-    removeHandshake(handshakePath);
+    if (handshakePath) removeHandshake(handshakePath);
     if (!server) return Promise.resolve();
     const closing = server;
     server = null;

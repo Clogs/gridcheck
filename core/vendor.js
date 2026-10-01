@@ -30,7 +30,9 @@ const OWN_CHECKOUT = path.resolve(__dirname, "..");
 const OWN_TREE = String(process.env.EVEJS_E2E_TREE || "").trim()
   ? path.resolve(process.env.EVEJS_E2E_TREE.trim())
   : path.resolve(__dirname, "..", "..", "..");
-const USAGE = "usage: e2e vendor update [--from <checkout|tag>] [--tree <path>] [--force] | vendor check [--tree <path>]";
+const USAGE = "usage: e2e vendor update [--from <checkout|tag>] [--tree <path>] [--force] [--dry-run] | vendor check [--tree <path>]";
+// How many files of each kind a dry run lists.
+const DRY_RUN_FILES = 40;
 
 class VendorError extends Error {}
 
@@ -226,7 +228,7 @@ function problemLines(problems) {
 // Replace tree/tools/evejs-e2e with the source commit's files, install the
 // shim and write VENDOR.json. Refuses a copy that has drifted, or a folder that
 // was never vendored, unless force.
-function updateVendored({ tree, from, force = false }) {
+function updateVendored({ tree, from, force = false, dryRun = false }) {
   const { treeRoot, target, shim } = treePaths(tree);
   if (!fs.existsSync(path.join(treeRoot, "server", "src"))) throw new VendorError(`${treeRoot} is not an EveJS tree (no server/src)`);
   const source = readSource({ from });
@@ -247,6 +249,19 @@ function updateVendored({ tree, from, force = false }) {
   const before = new Map(walk(target).filter((entry) => entry.isFile && entry.file !== MANIFEST_NAME)
     .map((entry) => [entry.file, sha256(fs.readFileSync(entry.full))]));
   const manifest = buildManifest(source);
+  const changes = { added: [], changed: [], removed: [], same: 0 };
+  for (const [file, hash] of Object.entries(manifest.files)) {
+    if (!before.has(file)) changes.added.push(file);
+    else if (before.get(file) !== hash) changes.changed.push(file);
+    else changes.same += 1;
+  }
+  for (const file of before.keys()) if (!manifest.files[file]) changes.removed.push(file);
+  const counts = { added: changes.added.length, changed: changes.changed.length, removed: changes.removed.length, same: changes.same };
+  const shimBytes = source.files.get(SHIM_SOURCE);
+  const shimBefore = fs.existsSync(shim) ? fs.readFileSync(shim) : null;
+  const shimState = shimBefore === null ? "installed" : shimBefore.equals(shimBytes) ? "unchanged" : "replaced";
+  const result = { manifest, target, treeRoot, checkout: source.checkout, dirty: source.dirty, counts, changes, shim: shimState };
+  if (dryRun) return { ...result, dryRun: true };
 
   const parent = path.dirname(target);
   fs.mkdirSync(parent, { recursive: true });
@@ -272,33 +287,36 @@ function updateVendored({ tree, from, force = false }) {
   }
   fs.rmSync(retired, { recursive: true, force: true });
 
-  const shimBytes = source.files.get(SHIM_SOURCE);
-  const shimBefore = fs.existsSync(shim) ? fs.readFileSync(shim) : null;
   fs.mkdirSync(path.dirname(shim), { recursive: true });
   fs.writeFileSync(shim, shimBytes);
-
-  const counts = { added: 0, changed: 0, removed: 0, same: 0 };
-  for (const [file, hash] of Object.entries(manifest.files)) {
-    if (!before.has(file)) counts.added += 1;
-    else if (before.get(file) !== hash) counts.changed += 1;
-    else counts.same += 1;
-  }
-  for (const file of before.keys()) if (!manifest.files[file]) counts.removed += 1;
-  return {
-    manifest, target, treeRoot, checkout: source.checkout, dirty: source.dirty, counts,
-    shim: shimBefore === null ? "installed" : shimBefore.equals(shimBytes) ? "unchanged" : "replaced",
-  };
+  return result;
 }
 
 const slashed = (file) => String(file).split(path.sep).join("/");
 
 // `e2e vendor <action>` -> the lines to print; a VendorError when it fails.
-function runVendor(action, { tree = OWN_TREE, from, force = false } = {}) {
+function runVendor(action, { tree = OWN_TREE, from, force = false, dryRun = false } = {}) {
   const treeRoot = path.resolve(String(tree));
   const target = slashed(path.join(treeRoot, VENDOR_DIR));
   if (action === "update") {
-    const result = updateVendored({ tree: treeRoot, from, force });
+    const result = updateVendored({ tree: treeRoot, from, force, dryRun });
     const { manifest, counts } = result;
+    if (dryRun) {
+      const listed = (label, files) => {
+        const shown = files.slice(0, DRY_RUN_FILES).map((file) => `    ${label} ${file}`);
+        return files.length > DRY_RUN_FILES ? [...shown, `    ... and ${files.length - DRY_RUN_FILES} more`] : shown;
+      };
+      return [
+        `would vendor ${manifest.name} ${manifest.version} at ${manifest.commit.slice(0, 8)} (${manifest.ref}) from ${slashed(result.checkout)}`,
+        `  ${target}: ${Object.keys(manifest.files).length} files, ${counts.added} added, ${counts.changed} changed, ` +
+          `${counts.removed} removed, ${counts.same} the same; shim ${result.shim === "unchanged" ? "unchanged" : `would be ${result.shim}`}`,
+        ...listed("+", result.changes.added),
+        ...listed("~", result.changes.changed),
+        ...listed("-", result.changes.removed),
+        ...(result.dirty ? [`  ${slashed(result.checkout)} has uncommitted changes; they wouldn't be vendored`] : []),
+        "  nothing was written (--dry-run)",
+      ];
+    }
     return [
       `vendored ${manifest.name} ${manifest.version} at ${manifest.commit.slice(0, 8)} (${manifest.ref}) from ${slashed(result.checkout)}`,
       `  ${target}: ${Object.keys(manifest.files).length} files, ${counts.added} added, ${counts.changed} changed, ` +
@@ -325,6 +343,7 @@ function parseVendorArgs(argv) {
   for (let index = 0; index < argv.length; index += 1) {
     const token = argv[index];
     if (token === "--force") options.force = true;
+    else if (token === "--dry-run") options.dryRun = true;
     else if (token === "--tree" || token === "--from") {
       const value = argv[index + 1];
       if (value === undefined || value.startsWith("--")) throw new VendorError(`${token} needs a value`);

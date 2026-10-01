@@ -124,6 +124,26 @@ test("update takes a commit, not the working files, and a removed file leaves th
   assert.deepStrictEqual(fs.readdirSync(path.dirname(s.target)), ["evejs-e2e"], "no staging folders are left");
 });
 
+test("a dry run makes the same checks, lists what would change and writes nothing", (t) => {
+  const s = setup(t);
+  const first = vendor.updateVendored({ tree: s.tree, from: s.source, dryRun: true });
+  assert.strictEqual(first.dryRun, true);
+  assert.deepStrictEqual(first.counts, { added: 5, changed: 0, removed: 0, same: 0 });
+  assert.strictEqual(first.shim, "installed");
+  assert.ok(!fs.existsSync(s.target) && !fs.existsSync(s.shim), "nothing was written");
+  vendor.updateVendored({ tree: s.tree, from: s.source });
+  fs.writeFileSync(path.join(s.target, "bridge", "entry.js"), "// edited\n");
+  assert.throws(() => vendor.updateVendored({ tree: s.tree, from: s.source, dryRun: true }), /differs from its VENDOR\.json/);
+  const forced = vendor.updateVendored({ tree: s.tree, from: s.source, dryRun: true, force: true });
+  assert.deepStrictEqual(forced.changes.changed, ["bridge/entry.js"]);
+  assert.strictEqual(fs.readFileSync(path.join(s.target, "bridge", "entry.js"), "utf8"), "// edited\n");
+  const lines = vendor.runVendor("update", { tree: s.tree, from: s.source, force: true, dryRun: true });
+  assert.match(lines[0], /^would vendor evejs-e2e 1\.2\.3/);
+  assert.ok(lines.includes("    ~ bridge/entry.js"), lines.join("\n"));
+  assert.strictEqual(lines.at(-1), "  nothing was written (--dry-run)");
+  assert.deepStrictEqual(vendor.parseVendorArgs(["update", "--dry-run"]), { action: "update", dryRun: true });
+});
+
 test("a tag is read from the checkout the tool runs from; anything else that isn't a checkout is refused", (t) => {
   const s = setup(t);
   assert.throws(() => vendor.updateVendored({ tree: s.tree, from: path.join(s.source, "core") }), /not the root of an evejs-e2e checkout/);

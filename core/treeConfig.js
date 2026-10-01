@@ -307,12 +307,12 @@ function defaultTreeConfig() {
   return cachedDefault;
 }
 
-function writeTreeConfig(treeRoot, config, { force = false } = {}) {
+function writeTreeConfig(treeRoot, config, { force = false, dryRun = false } = {}) {
   const file = path.join(treeRoot, CONFIG_NAME);
   if (fs.existsSync(file) && !force) throw new TreeConfigError(`${CONFIG_NAME} exists; pass --force to replace it`);
   const problems = validateConfig(config);
   if (problems.length) throw new TreeConfigError(`refusing to write a bad ${CONFIG_NAME}: ${problems.join("; ")}`);
-  fs.writeFileSync(file, `${JSON.stringify(config, null, 2)}\n`);
+  if (!dryRun) fs.writeFileSync(file, `${JSON.stringify(config, null, 2)}\n`);
   return file;
 }
 

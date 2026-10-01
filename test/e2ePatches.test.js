@@ -100,9 +100,13 @@ test("apply refuses an applied, partly applied or equivalent patch, a running se
     /uncommitted changes in server\/src\/a\.js/);
   assert.equal(bytes(root, "a.js").toString("utf8"), MIXED, "a refusal writes nothing");
 
-  const dryRun = changePatch("apply", "demo", { ...options, serverUp: "up", dryRun: true });
+  const dryRun = changePatch("apply", "demo", { ...options, serverUp: "up", dryRun: true,
+    dirtyCheck: () => ({ git: true, dirty: ["server/src/a.js"] }) });
   assert.equal(dryRun.dryRun, true, "a dry run previews even with the server up");
   assert.ok(dryRun.preview.some((line) => /a\.js:5 inserts 2 lines before "return port;" \(CRLF\)/.test(line)), dryRun.preview.join("\n"));
+  assert.deepEqual(dryRun.blockers, ["up. Stop it first (e2e down)", "uncommitted changes in server/src/a.js. Commit or discard them first"],
+    "and says what would refuse the real change");
+  assert.equal(bytes(root, "a.js").toString("utf8"), MIXED, "a dry run writes nothing");
 
   changePatch("apply", "demo", options);
   assert.throws(() => changePatch("apply", "demo", options), /already applied \(v2\)/);
