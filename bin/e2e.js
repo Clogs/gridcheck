@@ -147,6 +147,13 @@ function readRun() {
   return readJSON(RUN_PATH);
 }
 
+
+// A run `e2e down` stopped is over, even when Windows has since handed its
+// pid to another process.
+function runLive(run) {
+  return Boolean(run && !run.stoppedAtMs && pidAlive(run.pid));
+}
+
 function writeRun(run) {
   fs.mkdirSync(E2E_DIR, { recursive: true });
   fs.writeFileSync(RUN_PATH, `${JSON.stringify(run, null, 2)}\n`);
@@ -158,7 +165,7 @@ function writeRun(run) {
 // gateway of a server whose bridge predates the handshake's ports.
 function activePorts() {
   const run = readRun();
-  if (run && run.ports && pidAlive(run.pid)) return run.ports;
+  if (run && run.ports && runLive(run)) return run.ports;
   const handshake = readHandshake();
   if (handshake && handshake.ports && handshake.ports.gateway) {
     return { slot: null, attached: true, game: handshake.ports.game, gateway: handshake.ports.gateway, agentBridge: handshake.port };
@@ -1367,7 +1374,7 @@ async function cmdDown(flags) {
   requireManaged("down");
   const run = readRun() || {};
   const handshake = readHandshake();
-  const serverPid = handshake ? handshake.pid : pidAlive(run.pid) ? run.pid : null;
+  const serverPid = handshake ? handshake.pid : runLive(run) ? run.pid : null;
   if (serverPid) {
     const timeoutMs = Math.max(5, Number(flags.timeout) || 120) * 1000;
     const startedAt = Date.now();
@@ -1458,7 +1465,7 @@ function serverUpReason() {
   const handshake = readHandshake();
   if (handshake) return `this tree's server is up (pid ${handshake.pid})`;
   const run = readRun();
-  if (run && pidAlive(run.pid)) return `this tree's server is up (pid ${run.pid}, started by e2e up)`;
+  if (runLive(run)) return `this tree's server is up (pid ${run.pid}, started by e2e up)`;
   return null;
 }
 
@@ -1647,7 +1654,7 @@ async function cmdStatus() {
   const [gatewayUp, marketUp] = await Promise.all([gatewayReady(ports), ports.marketHttp ? httpOK(marketHealthURL(ports)) : false]);
   console.log(`mode   ${CONFIG.mode}${CONFIG.exists ? "" : ` (no ${treeConfig.CONFIG_NAME}; e2e init writes one)`}`);
   console.log(`ports  ${describePorts(ports)}`);
-  if (run && pidAlive(run.pid)) {
+  if (runLive(run)) {
     console.log(run.readyAtMs
       ? `server pid ${run.pid}  booted in ${run.bootSeconds}s, up ${formatClock(Date.now() - run.readyAtMs)}  world ${run.world}`
       : `server pid ${run.pid}  booting for ${formatClock(Date.now() - run.startedAtMs)}  world ${run.world}`);
