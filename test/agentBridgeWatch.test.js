@@ -1,8 +1,9 @@
 "use strict";
 
-// `e2e watch`, server side (server/src/_secondary/agentBridge/agentBridgeWatch.js):
-// the grid differ, the LU join, the off-grid tracker, the /watch route and the
-// NDJSON stream, each from injected seams so no booted server is needed.
+// `e2e watch`, server side (bridge/watch.js, and the Living Universe plugin's
+// join and off-grid tracker): the grid differ, the LU join, the off-grid
+// tracker, the plugin hooks, the /watch route and the NDJSON stream, each from
+// injected seams so no booted server is needed.
 
 const test = require("node:test");
 const assert = require("node:assert");
@@ -14,11 +15,10 @@ const {
   createGridDiffer,
   createGridWatch,
   createKillmailFinder,
-  createLuJoin,
-  createOffGridTracker,
-  describeDecision,
   healthBand,
 } = require("../bridge/watch");
+const { createLuJoin, describeDecision } = require("../plugins/lu/server/join");
+const { createOffGridTracker } = require("../plugins/lu/server/offGrid");
 const { createAgentBridgeRoutes } = require("../bridge/routes");
 const { createAgentBridgeHttp } = require("../bridge/http");
 

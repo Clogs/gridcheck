@@ -13,12 +13,10 @@
 //                                     client: "all" (default), "diverge" or "off"
 //   POST /tee      { characterID }    start keeping the client's view of that gateway session
 //   POST /shutdown                    graceful stop, as if the process got SIGTERM
-//   GET  /clock                       Living Universe clock, warp state, backlog, pulse timing
-//   GET  /economy  ?since=<simMs>     economy status and telemetry snapshots since then
-//   POST /warp     { forSeconds, stepMs, sliceMs }  NDJSON stream; runs off-grid LU faster
-//   POST /warp/stop                   end a running warp at the next slice
-//   POST /trigger/<name>  { characterID, ... }  scout, hunt, fleet or materialize; see
-//                                     plugins/lu/server/triggers.js. Answers the flight or hunt ID.
+//
+// Plugins add their own routes through the route table (plugins.js); the
+// Living Universe plugin's are /clock, /economy, /warp, /warp/stop and
+// /trigger/<name>. A plugin can't replace a core route.
 
 const { LIMITS } = require("./watch");
 
@@ -37,9 +35,52 @@ const CLIENT_MODES = new Set(["all", "fx", "diverge", "off"]);
 
 const NOT_ONLINE = "That character has no live session. Log it in first (e2e login).";
 
+// "METHOD /path" -> handler, where a path ending in /* matches everything
+// under it and passes the remainder as `rest`. Core routes are added first and
+// win; a plugin route that collides with one is dropped with a warning.
+function createRouteTable(log) {
+  const exact = new Map();
+  const prefixes = [];
+
+  function add(key, handler, owner) {
+    const match = /^(GET|POST|PUT|DELETE) (\/\S*)$/.exec(String(key));
+    if (!match || typeof handler !== "function") {
+      log.warn(`[AgentBridge] ${owner}: ignored route ${JSON.stringify(key)}; expected "METHOD /path" and a function`);
+      return false;
+    }
+    const [, method, routePath] = match;
+    if (routePath.endsWith("/*")) {
+      const prefix = routePath.slice(0, -1);
+      if (prefixes.some((entry) => entry.method === method && entry.prefix === prefix)) {
+        log.warn(`[AgentBridge] ${owner}: ${key} is taken`);
+        return false;
+      }
+      prefixes.push({ method, prefix, handler, owner });
+      prefixes.sort((left, right) => right.prefix.length - left.prefix.length);
+      return true;
+    }
+    const id = `${method} ${routePath}`;
+    if (exact.has(id)) {
+      log.warn(`[AgentBridge] ${owner}: ${key} is taken by ${exact.get(id).owner}`);
+      return false;
+    }
+    exact.set(id, { handler, owner });
+    return true;
+  }
+
+  function find(method, route) {
+    const hit = exact.get(`${method} ${route}`);
+    if (hit) return { ...hit, rest: "" };
+    const prefixed = prefixes.find((entry) => entry.method === method && route.startsWith(entry.prefix));
+    return prefixed ? { ...prefixed, rest: route.slice(prefixed.prefix.length) } : null;
+  }
+
+  return { add, find };
+}
+
 function createAgentBridgeRoutes({
-  findSession, executeChatCommand, readGrid, watcher, requestShutdown, log, warp = null, warpBridge = null,
-  destinyTee = null, triggers = null, gridAnnotate = null, viewer = null,
+  findSession, executeChatCommand, readGrid, watcher, requestShutdown, log, destinyTee = null, gridAnnotate = null,
+  viewer = null, extraRoutes = [],
 }) {
   const logger = log || { debug() {} };
 
@@ -81,12 +122,13 @@ function createAgentBridgeRoutes({
     return result && typeof result.then === "function" ? result.then(settle) : settle(result);
   }
 
-  // ?lu=1 adds each LU ship's flightID and family, so a player action can
-  // pick its target by flight (`e2e act lock flight=$fleet`).
+  // ?ext=1 (or the older ?lu=1) runs the plugins' annotate hooks on each row,
+  // so a player action can pick its target by flight (`e2e act lock flight=$fleet`).
   function grid(query) {
     const found = sessionFor(query && query.characterID);
     if (found.error) return found.error;
-    const options = query && query.lu === "1" && typeof gridAnnotate === "function"
+    const wantsExt = query && (query.ext === "1" || query.lu === "1");
+    const options = wantsExt && typeof gridAnnotate === "function"
       ? { annotate: (row, entity) => gridAnnotate(row, entity, found.session) } : {};
     return { statusCode: 200, body: { ok: true, grid: readGrid(found.session, options) } };
   }
@@ -161,67 +203,20 @@ function createAgentBridgeRoutes({
     return { statusCode: 202, body: { ok: true, stopping: true } };
   }
 
-  function clock() {
-    if (!warpBridge) return { statusCode: 503, body: { ok: false, error: "This server has no Living Universe clock." } };
-    return { statusCode: 200, body: { ok: true, clock: warpBridge.clockStatus() } };
-  }
-
-  function economy(query) {
-    if (!warpBridge) return { statusCode: 503, body: { ok: false, error: "This server has no living economy." } };
-    return { statusCode: 200, body: { ok: true, economy: warpBridge.economyReport(query && query.since) } };
-  }
-
-  // Answers a stream: START, PROGRESS every 2 s, then END with the final numbers.
-  // The warp stops if the caller hangs up, so a dead CLI never leaves a world
-  // racing ahead.
-  function startWarp(body) {
-    if (!warp) return { statusCode: 503, body: { ok: false, error: "This server has no warp driver." } };
-    const forSeconds = Number(body && body.forSeconds);
-    let sinkRef = null;
-    const started = warp.start({
-      forMs: forSeconds * 1000,
-      stepMs: body && body.stepMs,
-      sliceMs: body && body.sliceMs,
-      economyBudgetMs: body && body.economyBudgetMs,
-    }, (progress) => {
-      if (!sinkRef) return;
-      if (sinkRef.closed()) { warp.stop(); return; }
-      sinkRef.write({ kind: "PROGRESS", ...progress });
-    });
-    if (!started.ok) return { statusCode: 409, body: { ok: false, error: started.error } };
-    logger.debug(`[AgentBridge] warp ${forSeconds}s`);
-    return {
-      statusCode: 200,
-      stream: async (sink) => {
-        sinkRef = sink;
-        sink.write({ kind: "START", ...started.status() });
-        const final = await started.done;
-        sink.write({ kind: "END", ...final });
-      },
-    };
-  }
-
-  function stopWarp() {
-    if (!warp) return { statusCode: 503, body: { ok: false, error: "This server has no warp driver." } };
-    return { statusCode: 200, body: { ok: true, stopping: warp.stop() } };
+  const table = createRouteTable({ warn: (message) => typeof logger.warn === "function" && logger.warn(message) });
+  table.add("POST /slash", ({ body }) => slash(body), "core");
+  table.add("GET /grid", ({ query }) => grid(query), "core");
+  table.add("POST /watch", ({ body }) => watch(body), "core");
+  table.add("POST /tee", ({ body }) => tee(body), "core");
+  table.add("POST /shutdown", () => shutdown(), "core");
+  for (const { owner, routes } of extraRoutes) {
+    for (const [key, handler] of Object.entries(routes || {})) table.add(key, handler, owner);
   }
 
   function handle(method, route, query, body) {
-    if (method === "GET" && route === "/clock") return clock();
-    if (method === "GET" && route === "/economy") return economy(query);
-    if (method === "POST" && route === "/warp") return startWarp(body || {});
-    if (method === "POST" && route === "/warp/stop") return stopWarp();
-    if (method === "POST" && route === "/slash") return slash(body);
-    if (method === "GET" && route === "/grid") return grid(query);
-    if (method === "POST" && route === "/watch") return watch(body || {});
-    if (method === "POST" && route === "/tee") return tee(body || {});
-    if (method === "POST" && route === "/shutdown") return shutdown();
     if (viewer && route.startsWith("/viewer/")) return viewer.handle(method, route, query);
-    if (method === "POST" && route.startsWith("/trigger/")) {
-      if (!triggers) return { statusCode: 503, body: { ok: false, error: "This server has no Living Universe triggers." } };
-      logger.debug(`[AgentBridge] trigger ${route.slice(9)}`);
-      return triggers.run(route.slice("/trigger/".length), body || {});
-    }
+    const found = table.find(method, route);
+    if (found) return found.handler({ query: query || {}, body: body || {}, route, rest: found.rest });
     return { statusCode: 404, body: { ok: false, error: `no such route: ${method} ${route}` } };
   }
 
@@ -236,4 +231,5 @@ function createAgentBridgeRoutes({
 
 module.exports = {
   createAgentBridgeRoutes,
+  createRouteTable,
 };

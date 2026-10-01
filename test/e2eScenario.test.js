@@ -23,7 +23,8 @@ const {
   triggerIDs,
   validateScenario,
 } = require("../core/scenario");
-const { createGridDiffer, createOffGridTracker } = require("../bridge/watch");
+const { createGridDiffer } = require("../bridge/watch");
+const { createOffGridTracker } = require("../plugins/lu/server/offGrid");
 
 const ARRIVE = {
   seq: 9, t: 138_000, kind: "ARRIVE", flightID: "living_flight_4420", count: 4, who: "npc", warpIn: true,

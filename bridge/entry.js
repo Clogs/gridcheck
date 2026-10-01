@@ -6,23 +6,24 @@
  * shipped mod never listens on it. `e2e up` sets the variable.
  *
  * The tree loads this through its shim, server/src/_secondary/agentBridge/server.js,
- * which passes the server root in. Routes are in routes.js. Guide:
- * docs/E2E-GRID-TESTING.md.
+ * which passes the server root in. The core reads stock modules only
+ * (stock.js); anything mod-specific is a plugin (plugins.js). Routes are in
+ * routes.js. Guide: docs/E2E-GRID-TESTING.md.
  */
 
 "use strict";
 
+const fs = require("fs");
 const path = require("path");
 
 const { createAgentBridgeHttp, removeHandshake } = require("./http");
 const { createAgentBridgeRoutes } = require("./routes");
 const { createGridReader } = require("./grid");
-const { createGridWatch, createLuJoin } = require("./watch");
+const { annotateRow, createGridWatch } = require("./watch");
 const { createDestinyTee } = require("./destiny");
 const { createAgentBridgeViewer } = require("./viewer");
-const { createStock } = require("./stock");
-const { createAgentBridgeWarp } = require("../plugins/lu/server/warp");
-const { createAgentBridgeTriggers } = require("../plugins/lu/server/triggers");
+const { createStock, serverRequire } = require("./stock");
+const { DEFAULT_PLUGINS_DIR, loadPlugins, startPlugins, stopPlugins } = require("./plugins");
 
 const DEFAULT_PORT = 26052;
 
@@ -56,14 +57,25 @@ function quietLogger() {
   return { debug() {}, info() {}, warn() {}, err() {} };
 }
 
+// A module path under server/src, as a file, a .js file or a folder; null when
+// the tree has none. Plugins decide whether they apply with it.
+function resolveUnder(serverRoot) {
+  const srcRoot = path.join(serverRoot, "src");
+  return (relativePath) => {
+    const base = path.join(srcRoot, relativePath);
+    for (const candidate of [base, `${base}.js`, path.join(base, "index.js")]) {
+      if (fs.existsSync(candidate) && fs.statSync(candidate).isFile()) return candidate;
+    }
+    return null;
+  };
+}
+
 function buildSeams(stock) {
   const itemTypes = stock.itemTypeRegistry;
   const worldData = stock.worldData;
   return {
     findSession: (characterID) => stock.sessionRegistry.findSessionByCharacterID(characterID),
     executeChatCommand: stock.chatCommands.executeChatCommand,
-    space: stock.space,
-    projectEntity: stock.webGateway.projectSpaceEntity,
     describeType: (typeID) => {
       const record = itemTypes.resolveItemByTypeID(typeID);
       return record && record.name ? String(record.name) : null;
@@ -80,79 +92,30 @@ function buildSeams(stock) {
   };
 }
 
-// What `e2e watch` joins each NPC to. All optional: a tree without Living
-// Universe still gets the grid changes, without the flight columns.
-function buildWatchSeams(engine, stock) {
-  const lu = optional(() => engine.livingUniverseRuntime);
-  const inspect = optional(() => lu && lu.inspect);
-  const registry = optional(() => stock.npcRegistry);
-  const huntOrders = optional(() => engine.pirateHuntOrders);
-  return {
-    inspect,
-    luJoin: createLuJoin({
-      inspect,
-      controllerFor: registry ? (entityID) => registry.getControllerByEntityID(entityID) : null,
-      huntOrderFor: huntOrders ? (entity, nowMs) => huntOrders.get(entity, nowMs) : null,
-    }),
-    killmails: optional(() => stock.killmailState),
-  };
-}
-
-// `e2e warp`: the Living Universe clock and its step driver. The host is
-// resolved on first use, because the space tick creates it with the profiler's
-// section hook and must be the first to ask.
-function buildWarp(engine, stock, log) {
-  const clock = optional(() => engine.livingSimClock.getDefaultLivingSimClock());
-  const economy = optional(() => engine.livingEconomyRuntime);
-  const universe = optional(() => engine.livingUniverseRuntime);
-  if (!clock || !economy || !universe) return { warp: null, warpBridge: null };
-  let warpBridge = null;
-  const warp = engine.livingSimWarp.createSimWarp({
-    clock,
-    getHost: () => engine.livingModuleHost.getDefaultLivingModuleHost(),
-    getRuntime: () => stock.space,
-    economy,
-    getBacklog: () => warpBridge.backlog(),
-    log,
-  });
-  warpBridge = createAgentBridgeWarp({ warp, clock, economy, universe });
-  return { warp, warpBridge };
-}
-
-// `e2e trigger`: optional like the watch seams, so a tree without Living
-// Universe still serves every other route.
-function buildTriggers(engine, stock, seams, scouts) {
-  const lu = optional(() => engine.livingUniverseRuntime);
-  const clock = optional(() => engine.livingSimClock);
-  if (!lu || !clock || !scouts) return null;
-  return createAgentBridgeTriggers({
-    findSession: seams.findSession,
-    space: seams.space,
-    lu,
-    hunts: optional(() => engine.livingPirateHunts),
-    simNow: () => clock.simNow(),
-    staticAnchors: (systemID) => stock.worldData.getStaticSceneForSystem(systemID) || [],
-    executeChatCommand: seams.executeChatCommand,
-    scouts,
-  });
-}
-
-function createService({ serverRoot }) {
+// stock, pluginsDir, env and port are for tests; the shim passes serverRoot only.
+function createService({ serverRoot, stock: givenStock = null, pluginsDir = DEFAULT_PLUGINS_DIR, env = process.env,
+  port = null }) {
   const treeRoot = path.resolve(serverRoot, "..");
   let bridge = null;
+  let pluginStatus = null;
 
   function start() {
     if (bridge) return bridge;
-    const stock = createStock(serverRoot);
+    const stock = givenStock || createStock(serverRoot);
     const log = optional(() => stock.logger) || quietLogger();
     const seams = buildSeams(stock);
-    // Living Universe reaches go through this fork's modApi until they move
-    // behind the plugin loader.
-    const engine = optional(() => require(path.join(serverRoot, "src", "modApi"))) || {};
-    const scouts = optional(() => require(path.join(serverRoot, "src", "_secondary", "pirateScouts")));
-    const { warp, warpBridge } = buildWarp(engine, stock, log);
-    const grid = createGridReader(seams);
-    const watchSeams = buildWatchSeams(engine, stock);
+    const tree = { treeRoot, serverRoot, resolve: resolveUnder(serverRoot) };
+    const loaded = loadPlugins({ pluginsDir, tree, log });
+    const { hooks, skipped } = startPlugins(loaded, {
+      stock, require: serverRequire(serverRoot), log, treeRoot, serverRoot, seams,
+    }, { log });
+    pluginStatus = { active: hooks.map((hook) => hook.name), skipped };
+    const grid = createGridReader({
+      space: stock.space,
+      projectEntity: stock.webGateway.projectSpaceEntity,
+      describeType: seams.describeType,
+      describeSystem: seams.describeSystem,
+    });
     // A PackagedAction carries its updates as marshalled bytes.
     const destinyTee = createDestinyTee({
       decodePackaged: (bytes) => stock.marshal.marshalDecodeExact(bytes),
@@ -160,13 +123,10 @@ function createService({ serverRoot }) {
     const watcher = createGridWatch({
       findSession: seams.findSession,
       readGrid: grid.readGrid,
-      luJoin: watchSeams.luJoin,
-      inspect: watchSeams.inspect,
-      killmails: watchSeams.killmails,
-      describeSystem: seams.describeSystem,
+      hooks,
+      killmails: optional(() => stock.killmailState),
       describeType: seams.describeType,
       destinyTee,
-      luNowMs: optional(() => engine.livingSimClock) ? () => engine.livingSimClock.simNow() : null,
     });
     const routes = createAgentBridgeRoutes({
       findSession: seams.findSession,
@@ -178,28 +138,23 @@ function createService({ serverRoot }) {
       // stop Windows offers a detached server. Deferred so the reply goes first.
       requestShutdown: () => setTimeout(() => process.emit("SIGTERM", "SIGTERM"), 100),
       log,
-      warp,
-      warpBridge,
       destinyTee,
-      triggers: buildTriggers(engine, stock, seams, scouts),
-      gridAnnotate: (row, entity, session) => {
-        if (!row.isNpc && !(entity && entity.livingUniverseFlightID)) return;
-        const lu = watchSeams.luJoin.annotate(entity, Date.now(), session && session.characterID);
-        if (lu) {
-          row.flightID = lu.flightID;
-          row.family = lu.family;
-        }
-      },
+      gridAnnotate: (row, entity, session) => annotateRow(hooks, row, entity, {
+        nowMs: Date.now(),
+        characterID: session && session.characterID,
+      }),
+      extraRoutes: hooks.map((hook) => ({ owner: `plugin ${hook.name}`, routes: hook.routes })),
       viewer: createAgentBridgeViewer({ runsDir: path.join(treeRoot, "_local", "e2e", "runs") }),
     });
     bridge = createAgentBridgeHttp({
       routes,
-      port: resolvePort(),
-      handshakePath: handshakePath(treeRoot),
+      port: port === null ? resolvePort(env) : port,
+      handshakePath: handshakePath(treeRoot, env),
       log,
     });
     bridge.start().catch(() => { bridge = null; });
     stock.gameStore.registerShutdownHook("agent-bridge", () => {
+      stopPlugins(hooks, log);
       const stopping = bridge ? bridge.stop() : Promise.resolve();
       bridge = null;
       return stopping;
@@ -211,8 +166,8 @@ function createService({ serverRoot }) {
     enabled: true,
     serviceName: "agentBridge",
     exec() {
-      if (!isEnabledByEnvironment()) {
-        removeHandshake(handshakePath(treeRoot), { onlyIfOurs: true });
+      if (!isEnabledByEnvironment(env)) {
+        removeHandshake(handshakePath(treeRoot, env), { onlyIfOurs: true });
         return null;
       }
       return start();
@@ -220,8 +175,9 @@ function createService({ serverRoot }) {
     __testing: {
       DEFAULT_HANDSHAKE_PATH: defaultHandshakePath(treeRoot),
       DEFAULT_PORT,
-      handshakePath: (env) => handshakePath(treeRoot, env),
+      handshakePath: (overrides) => handshakePath(treeRoot, overrides),
       isEnabledByEnvironment,
+      pluginStatus: () => pluginStatus,
       resolvePort,
     },
   };

@@ -13,6 +13,7 @@ const path = require("path");
 const { createGridReader, describeProtection, surfaceDistanceMeters } =
   require("../bridge/grid");
 const { createAgentBridgeRoutes } = require("../bridge/routes");
+const { createLuRoutes } = require("../plugins/lu/server/routes");
 const { createAgentBridgeHttp, removeHandshake } =
   require("../bridge/http");
 const agentBridgeService = require("../../../server/src/_secondary/agentBridge/server");
@@ -389,10 +390,14 @@ test("a trigger whose tick comes too late answers 503 and then does nothing", as
 
 test("POST /trigger/<name> reaches the trigger with its body", async () => {
   const seen = [];
-  const routes = createAgentBridgeRoutes({ findSession: () => null, readGrid: () => null,
+  const withPlugin = (deps) => createAgentBridgeRoutes({ findSession: () => null, readGrid: () => null,
+    extraRoutes: [{ owner: "plugin lu", routes: createLuRoutes(deps) }] });
+  const routes = withPlugin({
     triggers: { run: (name, body) => { seen.push([name, body]); return { statusCode: 200, body: { ok: true } }; } } });
   assert.strictEqual((await routes.handle("POST", "/trigger/hunt", {}, { characterID: 7 })).statusCode, 200);
   assert.deepStrictEqual(seen, [["hunt", { characterID: 7 }]]);
+  assert.strictEqual(withPlugin({}).handle("POST", "/trigger/hunt", {}, {}).statusCode, 503,
+    "the plugin without its triggers says so");
   const none = createAgentBridgeRoutes({ findSession: () => null, readGrid: () => null });
-  assert.strictEqual(none.handle("POST", "/trigger/hunt", {}, {}).statusCode, 503);
+  assert.strictEqual(none.handle("POST", "/trigger/hunt", {}, {}).statusCode, 404, "without the plugin there is no route");
 });

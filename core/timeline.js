@@ -239,7 +239,7 @@ function eventBody(event) {
         : "";
       return [`${event.reason}: ${event.samples} samples, ${event.events} events`,
         `sample ${costs.sampleMsAvg}/${costs.sampleMsMax} ms, off grid ${costs.offGridMsAvg}/${costs.offGridMsMax} ms ` +
-        `over ${costs.flightsScanned} flights (avg/max)${client}`];
+        `${costs.flightsScanned === undefined ? "" : `over ${costs.flightsScanned} flights `}(avg/max)${client}`];
     }
     default:
       return [JSON.stringify(event), ""];

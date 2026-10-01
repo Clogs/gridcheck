@@ -1,20 +1,13 @@
 "use strict";
 
 // `e2e watch`, server side. Samples one character's grid every few seconds and
-// reports only what changed, with each NPC joined to its Living Universe
-// flight, hunt and current decision. Off-grid context for the same system
-// (hunts, flights heading there, fights and losses) comes from one walk of the
-// flights per scan, and only while a watch runs.
+// reports only what changed. Plugins add to it through two hooks (plugins.js):
+// annotate joins each row to the plugin's own state, and offGrid adds context
+// from outside the grid, scanned less often and only while a watch runs. The
+// watch times both per sample and reports them in END.
 //
-// Read-only, like livingUniverseInspector: nothing here writes to a flight, a
-// controller or a hunter report. hunterIntel.fresh() prunes the reports it
-// reads, so sightings are read off controller.hunterReports directly.
-//
-// Three parts, each testable alone:
-//   createLuJoin        entity -> { flightID, family, hunt, order, decision }
 //   createGridDiffer    grid sample -> ARRIVE, LEAVE, MODE, TARGET, DAMAGE, ...
-//   createOffGridTracker system -> HUNT, INCOMING, ENTER, EXIT, ENGAGEMENT, LOSS
-// createGridWatch runs them on a timer and streams the events.
+//   createGridWatch     runs the differ and the hooks on a timer and streams the events.
 
 const { createDivergenceChecker } = require("./destiny");
 
@@ -84,94 +77,6 @@ function filetimeToMs(value) {
   }
 }
 
-// What the controller is doing, from state it already keeps. The NPC engine
-// records no per-think reason, so this reads the fields that decide one:
-// paused, a manual order, a hunt order, a target, the way home.
-function describeDecision(controller, order) {
-  if (!controller) return null;
-  if (controller.controllerPaused) return `paused:${controller.pausedReason || "paused"}`;
-  const manual = controller.manualOrder && controller.manualOrder.kind;
-  // pirateHuntOrders answers "staging" for every living pirate with no hunt;
-  // only an order a hunt issued (it carries huntID) is a hunt decision.
-  const hunting = order && order.mode && (order.huntID || order.mode !== "staging");
-  const huntText = hunting ? `hunt:${order.mode}${order.role ? `/${order.role}` : ""}` : null;
-  const targetID = toPositiveInt(controller.currentTargetID);
-  // The branch the last think returned through (npcBehaviorLoop tickController).
-  const last = typeof controller.lastDecision === "string" ? controller.lastDecision : "";
-  if (last) {
-    if (last === "engage") return huntText && order.mode !== "staging" ? `${huntText}+engaging:${targetID}` : `engaging:${targetID}`;
-    if (last === "flee" || last === "flee-warp") return `${last === "flee" ? "fleeing" : "flee-warp"}:${targetID}`;
-    if (last === "hunt-order") return huntText || last;
-    if (last.startsWith("order-") && manual) return `${last}:${manual}`;
-    return last;
-  }
-  // Before the first think: read the fields that decide one.
-  if (manual) return `order:${manual}`;
-  if (hunting && order.mode !== "staging") return huntText;
-  if (targetID) return `engaging:${targetID}`;
-  if (controller.returningHome) return "returning-home";
-  if (hunting) return huntText;
-  return "idle";
-}
-
-function createLuJoin({ inspect = null, controllerFor = null, huntOrderFor = null } = {}) {
-  const flightByID = (flightID) => (flightID && inspect && typeof inspect.getFlightByID === "function"
-    ? safe(() => inspect.getFlightByID(flightID))
-    : null);
-
-  function huntOf(flight) {
-    if (!flight) return { leader: null, hunt: null };
-    if (flight.pirateHunt && typeof flight.pirateHunt === "object") return { leader: flight, hunt: flight.pirateHunt };
-    if (flight.huntLeaderID) {
-      const leader = flightByID(flight.huntLeaderID);
-      if (leader && leader.pirateHunt) return { leader, hunt: leader.pirateHunt };
-    }
-    return { leader: null, hunt: null };
-  }
-
-  // One O(1) flight lookup, at most one more for the hunt leader, one
-  // controller lookup and one order lookup per NPC on the watched grid.
-  function annotate(entity, nowMs, characterID = 0) {
-    if (!entity) return null;
-    const flightID = entity.livingUniverseFlightID ? String(entity.livingUniverseFlightID) : "";
-    const controller = typeof controllerFor === "function" ? safe(() => controllerFor(entity.itemID)) : null;
-    if (!flightID && !controller) return null;
-    const order = typeof huntOrderFor === "function" ? safe(() => huntOrderFor(entity, nowMs)) : null;
-    const flight = flightByID(flightID);
-    const { leader, hunt } = huntOf(flight);
-    const journey = flight && flight.missionJourney && typeof flight.missionJourney === "object"
-      ? flight.missionJourney : null;
-    const reports = controller && Array.isArray(controller.hunterReports) && characterID
-      ? controller.hunterReports.filter((report) => report && toPositiveInt(report.targetCharacterID) === characterID)
-      : [];
-    return {
-      flightID: flightID || null,
-      actorID: entity.livingUniverseActorID ? String(entity.livingUniverseActorID) : null,
-      family: flight && flight.family ? String(flight.family) : null,
-      faction: flight && flight.homeFactionName ? String(flight.homeFactionName) : null,
-      corporation: flight && flight.homeCorporationName ? String(flight.homeCorporationName) : null,
-      pirateRole: flight && flight.pirateRole ? String(flight.pirateRole) : null,
-      phase: flight && flight.phase ? String(flight.phase) : null,
-      journeyKind: journey ? String(journey.kind || "") || null : null,
-      journeyStage: journey ? String(journey.stage || "") || null : null,
-      huntID: hunt ? String(hunt.id || "") || null : null,
-      huntRole: hunt ? (leader === flight ? "leader" : "support") : null,
-      huntPhase: hunt ? String(hunt.phase || "") || null : null,
-      huntReason: hunt ? String(hunt.reason || "") || null : null,
-      order: order && order.mode ? { mode: String(order.mode), role: order.role ? String(order.role) : null } : null,
-      decision: describeDecision(controller, order),
-      sightings: reports.map((report) => ({
-        observerID: toPositiveInt(report.observerID),
-        source: String(report.source || ""),
-        certainty: report.certainty ? String(report.certainty) : null,
-        observedAtMs: Number(report.observedAtMs) || 0,
-        observerFlightID: report.observerFlightID ? String(report.observerFlightID) : null,
-      })),
-    };
-  }
-
-  return { annotate, flightByID, huntOf };
-}
 
 function labelOf(row) {
   if (!row) return null;
@@ -588,287 +493,6 @@ function createGridDiffer() {
   };
 }
 
-function journeyDestinationSystemID(journey) {
-  const destination = journey && ((journey.pending && journey.pending.destination) || journey.destination);
-  return toPositiveInt(destination && destination.systemID);
-}
-
-function flightSummary(flight, describeSystem) {
-  const systemID = toPositiveInt(flight.currentSystemID);
-  const system = systemID && typeof describeSystem === "function" ? safe(() => describeSystem(systemID)) : null;
-  return {
-    flightID: String(flight.flightID || ""),
-    family: flight.family ? String(flight.family) : null,
-    faction: flight.homeFactionName ? String(flight.homeFactionName) : null,
-    corporation: flight.homeCorporationName ? String(flight.homeCorporationName) : null,
-    pirateRole: flight.pirateRole ? String(flight.pirateRole) : null,
-    phase: flight.phase ? String(flight.phase) : null,
-    count: Array.isArray(flight.actorIDs) ? flight.actorIDs.length : 0,
-    systemID: systemID || null,
-    systemName: system && system.name ? system.name : null,
-  };
-}
-
-// luNowMs: the Living Universe clock. Hunt traces and journey deadlines are on it,
-// and a restored or warped world runs it apart from the real time the watch keeps.
-function createOffGridTracker({ inspect = null, describeSystem = null, characterID = 0, startedAtMs = Date.now(),
-  luNowMs = null } = {}) {
-  let first = true;
-  let inSystem = new Set();
-  let lastSystemID = 0;
-  const incoming = new Map();
-  const hunts = new Map();
-  const encounters = new Map();
-  let lastLossAtMs = startedAtMs;
-  const systemName = (id) => {
-    const row = id && typeof describeSystem === "function" ? safe(() => describeSystem(id)) : null;
-    return row && row.name ? row.name : null;
-  };
-
-  function huntRelevant(flight, hunt, systemID) {
-    const report = hunt.report || {};
-    return toPositiveInt(report.systemID) === systemID ||
-      toPositiveInt(flight.currentSystemID) === systemID ||
-      toPositiveInt(report.location && report.location.exitSystemID) === systemID ||
-      (characterID > 0 && toPositiveInt(report.targetCharacterID) === characterID);
-  }
-
-  function huntEvent(flight, hunt, entry, context, systemID, extra = {}) {
-    const report = hunt.report || {};
-    const contactSystemID = toPositiveInt(report.systemID);
-    const position = report.location && report.location.position;
-    const ego = context.egoPosition;
-    return {
-      kind: "HUNT",
-      atMs: Number(entry.atMs) ? Number(entry.atMs) + (context.luOffsetMs || 0) : context.nowMs,
-      huntID: String(hunt.id || ""),
-      phase: String(entry.phase || hunt.phase || ""),
-      reason: String(entry.reason || hunt.reason || ""),
-      source: report.source ? String(report.source) : null,
-      targetSelf: characterID > 0 && toPositiveInt(report.targetCharacterID) === characterID,
-      targetLabel: context.labelFor ? context.labelFor(report.targetID) : null,
-      observerID: toPositiveInt(report.observerID) || null,
-      observerLabel: context.labelFor ? context.labelFor(report.observerID) : null,
-      contactSystemID: contactSystemID || null,
-      contactSystemName: systemName(contactSystemID),
-      distanceMeters: contactSystemID === systemID && position && ego ? centreDistance(position, ego) : null,
-      supportFlightIDs: (Array.isArray(hunt.supportIDs) ? hunt.supportIDs : []).map(String),
-      leader: flightSummary(flight, describeSystem),
-      ...extra,
-    };
-  }
-
-  function scanHunt(flight, systemID, context, events, seen) {
-    const hunt = flight.pirateHunt;
-    const huntID = String(hunt.id || "");
-    if (!huntID || !huntRelevant(flight, hunt, systemID)) return;
-    seen.add(huntID);
-    const trace = (Array.isArray(hunt.trace) ? hunt.trace : []).filter(Boolean);
-    const known = hunts.get(huntID);
-    if (!known) {
-      // First sight of a running hunt: its current state, not its history.
-      const latest = trace[trace.length - 1] || { atMs: hunt.changedAtMs, phase: hunt.phase, reason: hunt.reason };
-      events.push(huntEvent(flight, hunt, latest, context, systemID, { initial: first }));
-      if (!first && trace.length > 1) {
-        // Started since the last scan: the earlier steps are news too.
-        events.splice(events.length - 1, 0, ...trace.slice(0, -1).map((entry) =>
-          huntEvent(flight, hunt, entry, context, systemID)));
-      }
-    } else {
-      for (const entry of trace) {
-        if ((Number(entry.atMs) || 0) > known.lastAtMs) events.push(huntEvent(flight, hunt, entry, context, systemID));
-      }
-    }
-    const lastAtMs = trace.length ? Number(trace[trace.length - 1].atMs) || 0 : Number(hunt.changedAtMs) || 0;
-    hunts.set(huntID, { leaderFlightID: String(flight.flightID || ""), lastAtMs: Math.max(lastAtMs, known ? known.lastAtMs : 0) });
-  }
-
-  function endedHunts(seen, context, systemID, events) {
-    for (const [huntID, known] of hunts) {
-      if (seen.has(huntID)) continue;
-      hunts.delete(huntID);
-      const leader = inspect && typeof inspect.getFlightByID === "function"
-        ? safe(() => inspect.getFlightByID(known.leaderFlightID)) : null;
-      const last = leader && leader.lastPirateHunt && String(leader.lastPirateHunt.id || "") === huntID
-        ? leader.lastPirateHunt : null;
-      if (last) {
-        for (const entry of (Array.isArray(last.trace) ? last.trace : [])) {
-          if ((Number(entry.atMs) || 0) > known.lastAtMs) events.push(huntEvent(leader, last, entry, context, systemID));
-        }
-      }
-      events.push({
-        kind: "HUNT",
-        huntID,
-        phase: "ended",
-        reason: last ? String(last.reason || "") : "hunt-cleared",
-        leader: leader ? flightSummary(leader, describeSystem) : { flightID: known.leaderFlightID },
-      });
-    }
-  }
-
-  // Encounters come from the flights already walked (flight.encounterID), not
-  // from inspect.listConflicts: that builds the whole universe status, which
-  // measured 56 ms a scan on a 1,717-flight world.
-  // Phase and kind come from one keyed read per encounter found on that walk.
-  function scanEncounters(present, events) {
-    const lookup = inspect && typeof inspect.getEncounterByID === "function" ? inspect.getEncounterByID : null;
-    for (const [id, row] of present) {
-      const encounter = lookup ? safe(() => lookup(id)) : null;
-      const phase = encounter && encounter.phase ? String(encounter.phase) : null;
-      const before = encounters.get(id);
-      const key = `${row.flightIDs.length}:${row.ships}:${phase || ""}`;
-      if (before === key) continue;
-      encounters.set(id, key);
-      events.push({
-        kind: "ENGAGEMENT",
-        status: before === undefined ? (first ? "present" : "start") : "changed",
-        encounterID: id,
-        flightIDs: row.flightIDs,
-        shipCount: row.ships,
-        phase,
-        encounterKind: encounter && encounter.kind ? String(encounter.kind) : null,
-        battleClass: encounter && encounter.battleClass ? String(encounter.battleClass) : null,
-      });
-    }
-    for (const id of [...encounters.keys()]) {
-      if (present.has(id)) continue;
-      encounters.delete(id);
-      events.push({ kind: "ENGAGEMENT", status: "end", encounterID: id });
-    }
-  }
-
-  function scanLosses(systemID, nowMs, events) {
-    if (!inspect || typeof inspect.listShipLosses !== "function") return;
-    const reply = safe(() => inspect.listShipLosses({ sinceMs: lastLossAtMs + 1, limit: 50 }, nowMs));
-    const losses = (reply && Array.isArray(reply.losses) ? reply.losses : [])
-      .filter((row) => toPositiveInt(row.systemID) === systemID)
-      .sort((a, b) => a.lostAtMs - b.lostAtMs);
-    for (const row of losses) {
-      events.push({
-        kind: "LOSS",
-        atMs: Number(row.lostAtMs) || nowMs,
-        actorID: row.actorID || null,
-        pilotName: row.pilotName || null,
-        shipName: row.shipName || null,
-        corporation: row.corporationName || null,
-        cause: row.cause || null,
-        encounterID: row.encounterID || null,
-        opponentName: row.opponentName || null,
-      });
-    }
-    const newest = reply && Array.isArray(reply.losses) && reply.losses.length
-      ? Math.max(...reply.losses.map((row) => Number(row.lostAtMs) || 0)) : 0;
-    if (newest > lastLossAtMs) lastLossAtMs = newest;
-  }
-
-  // context: { nowMs, egoPosition, labelFor }
-  function scan(systemID, context) {
-    const events = [];
-    const stats = { flights: 0 };
-    if (!inspect || typeof inspect.listFlights !== "function" || !systemID) return { events, stats };
-    if (systemID !== lastSystemID) {
-      // A new system is a new baseline: say what is there and coming, once.
-      first = true;
-      inSystem = new Set();
-      incoming.clear();
-      encounters.clear();
-      lastSystemID = systemID;
-    }
-    const nowMs = context.nowMs;
-    const luNow = typeof luNowMs === "function" ? Number(safe(luNowMs)) : NaN;
-    const luOffsetMs = Number.isFinite(luNow) ? nowMs - luNow : 0;
-    context = { ...context, luOffsetMs };
-    const flights = safe(() => inspect.listFlights()) || [];
-    stats.flights = flights.length;
-    const nowIn = new Set();
-    const huntsSeen = new Set();
-    const summaries = new Map();
-    const encountersHere = new Map();
-    for (const flight of flights) {
-      if (!flight || !flight.flightID) continue;
-      const flightID = String(flight.flightID);
-      const pilots = Array.isArray(flight.actorIDs) ? flight.actorIDs.length : 0;
-      const here = toPositiveInt(flight.currentSystemID) === systemID;
-      if (here && pilots > 0 && flight.phase !== "destroyed") {
-        nowIn.add(flightID);
-        if (!first && !inSystem.has(flightID)) summaries.set(flightID, flight);
-        if (flight.encounterID) {
-          const id = String(flight.encounterID);
-          const row = encountersHere.get(id) || { flightIDs: [], ships: 0 };
-          row.flightIDs.push(flightID);
-          row.ships += pilots;
-          encountersHere.set(id, row);
-        }
-      }
-      const journey = flight.missionJourney && typeof flight.missionJourney === "object" ? flight.missionJourney : null;
-      if (journey && !here && pilots > 0 && journey.status !== "arrived" && journeyDestinationSystemID(journey) === systemID) {
-        const key = `${journey.ownerID || journey.kind || ""}:${journey.startedAtMs || 0}`;
-        if (incoming.get(flightID) !== key) {
-          incoming.set(flightID, key);
-          const dueAtMs = Number(journey.dueAtMs) || 0;
-          const cursor = toPositiveInt(journey.cursor);
-          const route = Array.isArray(journey.systemIDs) ? journey.systemIDs : [];
-          events.push({
-            kind: "INCOMING",
-            ...flightSummary(flight, describeSystem),
-            toSystemID: systemID,
-            toSystemName: systemName(systemID),
-            journeyKind: journey.kind ? String(journey.kind) : null,
-            stage: journey.stage ? String(journey.stage) : null,
-            ownerID: journey.ownerID ? String(journey.ownerID) : null,
-            dueAtMs: dueAtMs ? dueAtMs + luOffsetMs : null,
-            etaMs: dueAtMs ? Math.max(0, dueAtMs + luOffsetMs - nowMs) : null,
-            jumpsRemaining: route.length ? Math.max(0, route.length - cursor - 1) : null,
-            initial: first,
-          });
-        }
-      } else if (incoming.has(flightID)) {
-        incoming.delete(flightID);
-      }
-      if (flight.pirateHunt && typeof flight.pirateHunt === "object") {
-        scanHunt(flight, systemID, { ...context, nowMs }, events, huntsSeen);
-      }
-    }
-    if (first && nowIn.size) {
-      // Who is in the system off grid, so later lines about them have a start.
-      const here = [...nowIn].map((flightID) => safe(() => inspect.getFlightByID(flightID)))
-        .filter(Boolean).map((flight) => flightSummary(flight, describeSystem));
-      const byFamily = {};
-      for (const flight of here) byFamily[flight.family || "other"] = (byFamily[flight.family || "other"] || 0) + 1;
-      events.unshift({
-        kind: "HERE",
-        systemID,
-        systemName: systemName(systemID),
-        count: here.length,
-        byFamily,
-        // Pirates first: they are the flights a grid check is usually about.
-        flights: here.sort((a, b) => Number(b.family === "pirate") - Number(a.family === "pirate") ||
-          a.flightID.localeCompare(b.flightID)).slice(0, 40),
-      });
-    }
-    if (!first) {
-      for (const [flightID, flight] of summaries) {
-        events.push({ kind: "ENTER", ...flightSummary(flight, describeSystem) });
-        incoming.delete(flightID);
-      }
-      for (const flightID of inSystem) {
-        if (nowIn.has(flightID)) continue;
-        const flight = inspect.getFlightByID ? safe(() => inspect.getFlightByID(flightID)) : null;
-        events.push(flight
-          ? { kind: "EXIT", ...flightSummary(flight, describeSystem), fromSystemName: systemName(systemID) }
-          : { kind: "EXIT", flightID, fromSystemName: systemName(systemID), phase: "gone" });
-      }
-    }
-    inSystem = nowIn;
-    endedHunts(huntsSeen, context, systemID, events);
-    scanEncounters(encountersHere, events);
-    scanLosses(systemID, nowMs, events);
-    first = false;
-    return { events, stats };
-  }
-
-  return { scan };
-}
 
 // Killmails are written after the wreck appears. Look for one naming this
 // victim type in this system, written since the watch started.
@@ -980,22 +604,77 @@ function createClientWatch({ tee, differ, describeType, clientMode, divergeMeter
   return { step, reset: () => checker.reset(), costs };
 }
 
+function round2(value) {
+  return Math.round(value * 100) / 100;
+}
+
+// A plugin's annotate answer: its data at row.ext[<plugin>], and the first
+// groupKey any plugin gives.
+function applyAnnotation(row, name, result) {
+  if (!row.ext) row.ext = {};
+  row.ext[name] = result.ext === undefined ? null : result.ext;
+  if (result.groupKey && !row.groupKey) row.groupKey = String(result.groupKey);
+}
+
+// The differ, the CLI and the scenarios still read the Living Universe join at
+// row.lu, and a /grid row's flight and family flat on the row.
+function legacyLuField(row) {
+  if (row.ext && row.ext.lu !== undefined) row.lu = row.ext.lu;
+}
+
+function legacyGridFields(row) {
+  const lu = row.ext && row.ext.lu;
+  if (!lu) return;
+  row.flightID = lu.flightID;
+  row.family = lu.family;
+}
+
+// Runs the plugins' annotate hooks on one /grid row, outside a watch.
+function annotateRow(hooks, row, entity, { nowMs, characterID }) {
+  for (const hook of hooks) {
+    if (!hook || typeof hook.annotate !== "function") continue;
+    const result = safe(() => hook.annotate(entity, { row, nowMs, characterID }));
+    if (result) applyAnnotation(row, hook.name, result);
+  }
+  legacyGridFields(row);
+}
+
+// Each plugin hook's cost: one entry per sample for annotate (all rows), one
+// per scan for offGrid, so a plugin can't add whole-world cost unseen.
+function createHookTimer() {
+  const timings = new Map();
+  function record(key, ms) {
+    const entry = timings.get(key) || { runs: 0, msTotal: 0, msMax: 0 };
+    entry.runs += 1;
+    entry.msTotal += ms;
+    entry.msMax = Math.max(entry.msMax, ms);
+    timings.set(key, entry);
+  }
+  function report() {
+    const out = {};
+    for (const [key, entry] of timings) {
+      out[key] = { runs: entry.runs, msAvg: round2(entry.msTotal / entry.runs), msMax: round2(entry.msMax) };
+    }
+    return out;
+  }
+  return { record, report };
+}
+
 function createGridWatch({
   findSession,
   readGrid,
-  luJoin = createLuJoin(),
-  inspect = null,
-  describeSystem = null,
+  hooks = [],
   killmails = null,
   destinyTee = null,
   describeType = null,
-  luNowMs = null,
   now = Date.now,
   perfNow = () => Number(process.hrtime.bigint()) / 1e6,
   wait = sleep,
   maxConcurrent = LIMITS.maxConcurrent,
 } = {}) {
   let active = 0;
+  const annotators = hooks.filter((hook) => hook && typeof hook.annotate === "function");
+  const offGridHooks = hooks.filter((hook) => hook && hook.offGrid && typeof hook.offGrid.watch === "function");
 
   function busy() {
     return active >= maxConcurrent;
@@ -1020,18 +699,30 @@ function createGridWatch({
       sink.write({ seq: ++seq, t: atMs - startedAtMs, atMs, kind, ...rest });
     };
     const differ = createGridDiffer();
-    const offGrid = createOffGridTracker({ inspect, describeSystem, characterID, startedAtMs, luNowMs });
+    const scanners = [];
+    for (const hook of offGridHooks) {
+      const scanner = safe(() => hook.offGrid.watch({ characterID, startedAtMs }));
+      if (scanner && typeof scanner.scan === "function") scanners.push({ name: hook.name, scanner });
+    }
     const findKillmail = createKillmailFinder(killmails, startedAtMs);
     const pendingKillmails = [];
     const costs = { samples: 0, sampleMsTotal: 0, sampleMsMax: 0, offGridScans: 0, offGridMsTotal: 0,
-      offGridMsMax: 0, flightsScanned: 0 };
+      offGridMsMax: 0, offGridStats: {} };
+    const timer = createHookTimer();
+    const annotateMs = annotators.map(() => 0);
+    let sampleNowMs = 0;
     const annotate = (row, entity) => {
       if (entity && entity.lockedTargets instanceof Map) {
         row.lockedTargetIDs = [...entity.lockedTargets.keys()].map(Number).filter((id) => id > 0);
       }
-      if (row.isNpc || (entity && entity.livingUniverseFlightID)) {
-        row.lu = luJoin.annotate(entity, now(), characterID);
+      for (let index = 0; index < annotators.length; index += 1) {
+        const hook = annotators[index];
+        const start = perfNow();
+        const result = safe(() => hook.annotate(entity, { row, nowMs: sampleNowMs, characterID }));
+        annotateMs[index] += perfNow() - start;
+        if (result) applyAnnotation(row, hook.name, result);
       }
+      legacyLuField(row);
     };
     let lastOffGridAtMs = -Infinity;
     let lastPositionsAtMs = -Infinity;
@@ -1048,7 +739,10 @@ function createGridWatch({
       if (!session) { reason = "session-gone"; break; }
       const sampleStart = perfNow();
       const atMs = now();
+      sampleNowMs = atMs;
+      annotateMs.fill(0);
       const grid = readGrid(session, { annotate });
+      annotators.forEach((hook, index) => timer.record(`${hook.name}.annotate`, annotateMs[index]));
       const gridEvents = differ.step(grid, atMs);
       for (const event of gridEvents) {
         emit({ atMs, ...event });
@@ -1084,39 +778,42 @@ function createGridWatch({
       costs.sampleMsTotal += sampleMs;
       costs.sampleMsMax = Math.max(costs.sampleMsMax, sampleMs);
 
-      if (grid.inSpace && atMs - lastOffGridAtMs >= offGridEveryMs) {
+      if (scanners.length && grid.inSpace && atMs - lastOffGridAtMs >= offGridEveryMs) {
         lastOffGridAtMs = atMs;
-        const scanStart = perfNow();
         const self = differ.selfEntry();
-        const { events, stats } = offGrid.scan(toPositiveInt(grid.solarSystemID), {
-          nowMs: atMs,
-          egoPosition: self ? self.position : null,
-          labelFor: differ.labelFor,
-        });
-        const scanMs = perfNow() - scanStart;
+        const context = { nowMs: atMs, egoPosition: self ? self.position : null, labelFor: differ.labelFor };
+        let scanMs = 0;
+        for (const { name, scanner } of scanners) {
+          const scanStart = perfNow();
+          const answer = safe(() => scanner.scan(toPositiveInt(grid.solarSystemID), context));
+          const ms = perfNow() - scanStart;
+          scanMs += ms;
+          timer.record(`${name}.offGrid`, ms);
+          if (answer && answer.stats && typeof answer.stats === "object") Object.assign(costs.offGridStats, answer.stats);
+          for (const event of (answer && Array.isArray(answer.events) ? answer.events : [])) emit(event);
+        }
         costs.offGridScans += 1;
         costs.offGridMsTotal += scanMs;
         costs.offGridMsMax = Math.max(costs.offGridMsMax, scanMs);
-        costs.flightsScanned = stats.flights;
-        for (const event of events) emit(event);
       }
 
       if (now() - startedAtMs >= forMs) break;
       await wait(Math.max(0, everyMs - (perfNow() - sampleStart)));
     }
-    const round = (value) => Math.round(value * 100) / 100;
     emit({
       kind: "END",
       reason,
       samples: costs.samples,
       events: seq,
       costs: {
-        sampleMsAvg: costs.samples ? round(costs.sampleMsTotal / costs.samples) : 0,
-        sampleMsMax: round(costs.sampleMsMax),
+        // A plugin's scan stats, e.g. how many flights it walked. Core numbers win a name clash.
+        ...costs.offGridStats,
+        sampleMsAvg: costs.samples ? round2(costs.sampleMsTotal / costs.samples) : 0,
+        sampleMsMax: round2(costs.sampleMsMax),
         offGridScans: costs.offGridScans,
-        offGridMsAvg: costs.offGridScans ? round(costs.offGridMsTotal / costs.offGridScans) : 0,
-        offGridMsMax: round(costs.offGridMsMax),
-        flightsScanned: costs.flightsScanned,
+        offGridMsAvg: costs.offGridScans ? round2(costs.offGridMsTotal / costs.offGridScans) : 0,
+        offGridMsMax: round2(costs.offGridMsMax),
+        hooks: timer.report(),
       },
       client: client ? client.costs() : null,
     });
@@ -1130,12 +827,11 @@ module.exports = {
   LIMITS,
   POSITIONS,
   TRACKED_KINDS,
+  annotateRow,
   createGridDiffer,
   createGridWatch,
+  createHookTimer,
   createKillmailFinder,
-  createLuJoin,
-  createOffGridTracker,
-  describeDecision,
   filetimeToMs,
   healthBand,
   positionFrame,

@@ -6,6 +6,13 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 
 const { createAgentBridgeRoutes } = require("../bridge/routes");
+const { createLuRoutes } = require("../plugins/lu/server/routes");
+
+// The core routes with the Living Universe plugin's added, as the bridge builds them.
+const luRoutes = (deps) => createAgentBridgeRoutes({
+  findSession: () => null,
+  extraRoutes: [{ owner: "plugin lu", routes: createLuRoutes(deps) }],
+});
 const {
   createAgentBridgeWarp,
   projectBacklog,
@@ -40,7 +47,7 @@ function sink() {
 
 test("/warp streams START, PROGRESS and END, and a hung-up caller stops the warp", async () => {
   const warp = fakeWarp();
-  const routes = createAgentBridgeRoutes({ findSession: () => null, warp, warpBridge: {} });
+  const routes = luRoutes({ warp, warpBridge: {} });
   const reply = routes.handle("POST", "/warp", {}, { forSeconds: 7200, stepMs: 1000 });
   assert.equal(reply.statusCode, 200);
   assert.deepEqual(warp.calls[0], { forMs: 7_200_000, stepMs: 1000, sliceMs: undefined, economyBudgetMs: undefined });
@@ -56,9 +63,7 @@ test("/warp streams START, PROGRESS and END, and a hung-up caller stops the warp
 });
 
 test("/warp answers 409 with the driver's reason when it refuses", () => {
-  const routes = createAgentBridgeRoutes({
-    findSession: () => null, warp: fakeWarp({ refuse: "no e2e marker" }), warpBridge: {},
-  });
+  const routes = luRoutes({ warp: fakeWarp({ refuse: "no e2e marker" }), warpBridge: {} });
   const reply = routes.handle("POST", "/warp", {}, { forSeconds: 60 });
   assert.equal(reply.statusCode, 409);
   assert.equal(reply.body.error, "no e2e marker");
@@ -66,12 +71,14 @@ test("/warp answers 409 with the driver's reason when it refuses", () => {
 
 test("/clock and /economy answer from the warp bridge, and 503 without one", () => {
   const warpBridge = { clockStatus: () => ({ offsetMs: 5 }), economyReport: (since) => ({ since }) };
-  const routes = createAgentBridgeRoutes({ findSession: () => null, warpBridge });
+  const routes = luRoutes({ warpBridge });
   assert.deepEqual(routes.handle("GET", "/clock", {}, null).body, { ok: true, clock: { offsetMs: 5 } });
   assert.deepEqual(routes.handle("GET", "/economy", { since: "12" }, null).body, { ok: true, economy: { since: "12" } });
-  const bare = createAgentBridgeRoutes({ findSession: () => null });
+  const bare = luRoutes({});
   assert.equal(bare.handle("GET", "/clock", {}, null).statusCode, 503);
   assert.equal(bare.handle("POST", "/warp", {}, {}).statusCode, 503);
+  const core = createAgentBridgeRoutes({ findSession: () => null });
+  assert.equal(core.handle("GET", "/clock", {}, null).statusCode, 404, "without the plugin the route doesn't exist");
 });
 
 test("the projections keep what a report compares and survive missing fields", () => {
