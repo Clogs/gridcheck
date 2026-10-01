@@ -395,6 +395,67 @@ async function stopByHand(server) {
 
 // ---------- the lanes ----------
 
+const PATCH_IDS = ["xmpp-port", "last-decision", "slash-success"];
+
+function patchRows(tree) {
+  const out = cliIn(tree, ["patch", "status", "--json"]);
+  return JSON.parse(out.slice(out.indexOf("[")));
+}
+
+// The unpacked tree is reused while the zip is unchanged, so a run that
+// stopped with patches applied would leave them. Put stock's files back first.
+function stockPatchesClean(tree) {
+  const applied = patchRows(tree).filter((row) => row.state === "applied").map((row) => row.id);
+  if (applied.length) cliIn(tree, ["patch", "revert", ...applied]);
+  const bad = patchRows(tree).filter((row) => row.state !== "absent" || row.applies !== true);
+  if (bad.length) throw new CompatError(`patches that won't apply cleanly: ${JSON.stringify(bad)}`);
+  return `${applied.length ? `reverted ${applied.join(", ")} left by an earlier run; ` : ""}` +
+    `${PATCH_IDS.length} patches absent, each applies cleanly`;
+}
+
+function patchTargetHashes(tree) {
+  const { loadPatches } = require("../core/patches");
+  const files = [...new Set(loadPatches().flatMap((patch) => patch.files))];
+  return Object.fromEntries(files.map((file) => [file, sha256File(path.join(tree, "server", "src", ...file.split("/")))]));
+}
+
+// All three patches on, a boot that uses them, then all three off again.
+async function stockPatchRoundTrip(lane, tree) {
+  let before = null;
+  if (!await check(lane, "patch apply (all three)", () => {
+    before = patchTargetHashes(tree);
+    cliIn(tree, ["patch", "apply", ...PATCH_IDS]);
+    return requireDoctor(doctorJSON(tree, ["--offline"]), {
+      patches: Object.fromEntries(PATCH_IDS.map((id) => [id, "applied"])) });
+  })) return;
+  try {
+    if (await check(lane, "up --fresh (patched)", () => lastLine(cliIn(tree, ["up", "--fresh"])))) {
+      try {
+        await check(lane, "login (patched)", () => lastLine(cliIn(tree, ["login"])));
+        await check(lane, "slash outcomes (patched)", () => {
+          const done = cliIn(tree, ["slash", "/dock"]);
+          if (!/\/dock -> ok/.test(done)) throw new CompatError(`/dock didn't report ok:\n${done}`);
+          const refused = cliIn(tree, ["slash", "/fit me No Such Module Anywhere"], { expect: 2 });
+          if (!/-> refused/.test(refused)) throw new CompatError(`/fit didn't report refused:\n${refused}`);
+          const unknown = cliIn(tree, ["slash", "/where"]);
+          if (!/doesn't say whether it refused/.test(unknown)) throw new CompatError(`/where should be unreported:\n${unknown}`);
+          return "/dock ok, /fit of a missing module refused, /where unreported";
+        });
+      } finally {
+        await check(lane, "down (patched)", () => lastLine(cliIn(tree, ["down"])));
+      }
+    }
+  } finally {
+    await check(lane, "patch revert (all three), byte-identical", () => {
+      cliIn(tree, ["patch", "revert", ...PATCH_IDS]);
+      const after = patchTargetHashes(tree);
+      const changed = Object.keys(before).filter((file) => before[file] !== after[file]);
+      if (changed.length) throw new CompatError(`not byte-identical after revert: ${changed.join(", ")}`);
+      return `${Object.keys(before).length} files byte-identical to before apply`;
+    });
+  }
+}
+
 async function stockLane(flags, context) {
   const lane = "stock";
   let tree = null;
@@ -410,8 +471,9 @@ async function stockLane(flags, context) {
   await check(lane, "tests against the tree", () => treeTests(tree));
 
   await check(lane, "init (managed)", () => lastLine(cliIn(tree, ["init", "--mode", "managed", "--force"])));
+  await check(lane, "patches absent", () => stockPatchesClean(tree));
   await check(lane, "doctor (files)", () => requireDoctor(doctorJSON(tree, ["--offline"]), {
-    patches: { "xmpp-port": "absent", "last-decision": "absent" } }));
+    patches: Object.fromEntries(PATCH_IDS.map((id) => [id, "absent"])) }));
   if (await check(lane, "up --fresh (managed)", () => lastLine(cliIn(tree, ["up", "--fresh"])))) {
     try {
       for (const [name, fn] of liveRoundTrips("managed", tree)) await check(lane, name, fn);
@@ -427,6 +489,7 @@ async function stockLane(flags, context) {
     }
   }
   await check(lane, "run smoke-undock (managed)", () => runScenario(tree, []));
+  await stockPatchRoundTrip(lane, tree);
 
   await check(lane, "init (attach)", () => lastLine(cliIn(tree, ["init", "--mode", "attach", "--force"])));
   await check(lane, "up refuses (attach)", () => lastLine(cliIn(tree, ["up"], { expect: 1 })));
@@ -473,7 +536,7 @@ async function luLane(flags, context) {
     if (!hadConfig) await check(lane, "init (managed)", () => lastLine(cliIn(tree, ["init", "--mode", "managed"])));
     const mode = (readJSON(configFile) || {}).mode;
     await check(lane, "doctor (files)", () => requireDoctor(doctorJSON(tree, ["--offline"]), {
-      plugin: "lu", patches: { "xmpp-port": "detected", "last-decision": "detected" } }));
+      plugin: "lu", patches: { "xmpp-port": "detected", "last-decision": "detected", "slash-success": "detected" } }));
     await check(lane, "tests against the tree", () => treeTests(tree));
     if (mode !== "managed") {
       skip(lane, "live checks", `the tree's e2e.config.json is in ${mode} mode`);

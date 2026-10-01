@@ -81,6 +81,7 @@
       case "LEAVE": return `${group(e)} ${e.warped ? "warped off" : "left grid"}${e.groupKey ? `  ${e.groupKey}` : ""}`;
       case "PRESENT": return `${group(e)} at ${distance(e.distanceMeters)}`;
       case "MODE": return `${e.label} ${e.from || "-"} -> ${e.to || "-"}${e.targetLabel ? ` ${e.targetLabel}` : ""}`;
+      case "DECISION": return `${e.label} decided ${e.from || "-"} -> ${e.to}${e.targetLabel ? ` ${e.targetLabel}` : ""}`;
       case "TARGET": return `${e.sourceLabel} -> ${e.targetLabel} ${e.locked ? "locked" : "unlocked"}`;
       case "DAMAGE": return `${e.label} ${e.layer} ${e.fromPct} -> ${e.toPct}`;
       case "DESTROYED": return `${e.label}${e.typeName && e.typeName !== e.label ? ` (${e.typeName})` : ""} destroyed` +

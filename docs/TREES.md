@@ -64,9 +64,10 @@ when no server is up. `--offline` always reads the files; `--json` prints the wh
 - **destiny**: the bridge has the tree's own encoder write a set of test balls and reads them back
   with its decoder. If the layout differs, the client view stays off and the bridge says so in its
   log, on `/tee` and in every watch's `START` line, rather than reporting DIVERGEs that aren't there.
-- **patches**: each optional stock edit in `patches/` as `applied` (its marker comment is in the
-  file), `detected` (equivalent code without the marker, as in the LU fork), `absent`, or
-  `unknown` (no check for equivalent code yet).
+- **patches**: each optional stock edit in `patches/` as `applied` (its marker comments are in the
+  file), `partial` (some are), `detected` (equivalent code without the marker, as in the LU fork),
+  `absent`, or `no-target` (a file it changes isn't in the tree). `e2e patch` applies and reverts
+  them ([PATCHES.md](PATCHES.md)).
 - **plugins**: which are active, and why the rest were skipped.
 - **listeners**: which ports can move. A listener moves when the tree's source reads its
   variable. Stock EveJS doesn't read `EVEJS_XMPP_SERVER_PORT`, so two stock trees clash on the chat
@@ -78,6 +79,10 @@ when no server is up. `--offline` always reads the files; `--json` prints the wh
 
 - Stock's logger writes no `[pid N]` tag, so `e2e log` and a watch's log lines can't tell this
   server's lines from another process's.
+- Stock's slash commands don't say whether they refused. `e2e slash` prints `done (this tree
+  doesn't say whether it refused)` until the `slash-success` patch is applied.
+- Stock's NPCs record no decision, so grid rows have no `decision` and a watch reports no
+  `DECISION` events until the `last-decision` patch is applied.
 - Stock's reference data comes from its own database creator. The compatibility script builds it
   from an extracted SDE of the build `tools/DatabaseCreator/CreateDatabase.bat` names.
 
