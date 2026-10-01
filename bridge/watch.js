@@ -11,7 +11,7 @@
 // ext.<plugin>, and the groupKey that groups balls arriving or leaving
 // together.
 //
-//   createGridDiffer    grid sample -> ARRIVE, LEAVE, MODE, TARGET, DAMAGE, ...
+//   createGridDiffer    grid sample -> ARRIVE, LEAVE, MODE, DECISION, TARGET, DAMAGE, ...
 //   createGridWatch     runs the differ and the hooks on a timer and streams the events.
 
 const { createDivergenceChecker } = require("./destiny");
@@ -106,6 +106,7 @@ function snapshot(row) {
     characterID: row.characterID || null,
     mode: row.mode || null,
     targetEntityID: row.targetEntityID || null,
+    decision: row.decision || null,
     position: row.position || null,
     distanceMeters: row.distanceMeters === undefined ? null : row.distanceMeters,
     pcts: {
@@ -433,6 +434,20 @@ function createGridDiffer({ gridHooks = [], timed = (_name, fn) => fn() } = {}) 
           targetID: entry.targetEntityID,
           targetLabel: labelFor(entry.targetEntityID, current),
           distanceMeters: entry.distanceMeters,
+          groupKey: entry.groupKey,
+          ext: entry.ext,
+        });
+      }
+      // The branch an NPC's last think took (the last-decision patch).
+      if (entry.decision && before.decision !== entry.decision) {
+        events.push({
+          kind: "DECISION",
+          itemID: entry.itemID,
+          label: entry.label,
+          from: before.decision,
+          to: entry.decision,
+          targetID: entry.targetEntityID,
+          targetLabel: labelFor(entry.targetEntityID, current),
           groupKey: entry.groupKey,
           ext: entry.ext,
         });

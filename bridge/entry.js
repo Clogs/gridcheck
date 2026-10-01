@@ -125,6 +125,12 @@ function createService({ serverRoot, stock: givenStock = null, pluginsDir = DEFA
       projectEntity: stock.webGateway.projectSpaceEntity,
       describeType: seams.describeType,
       describeSystem: seams.describeSystem,
+      npcDecision: (entity) => {
+        const npcs = optional(() => stock.npcRegistry);
+        const controller = npcs && typeof npcs.getControllerByEntityID === "function"
+          ? npcs.getControllerByEntityID(entity.itemID) : null;
+        return controller && typeof controller.lastDecision === "string" ? controller.lastDecision : null;
+      },
     });
     const layout = probeLayout(stock);
     if (!layout.ok) log.warn(`[AgentBridge] client view off: ${layout.error}`);

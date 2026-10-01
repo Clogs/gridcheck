@@ -111,10 +111,13 @@ function createAgentBridgeRoutes({
         ok: true,
         command,
         handled: Boolean(result && result.handled),
-        success: Boolean(result && result.success),
+        // null: the tree's command didn't say (stock EveJS never does; the
+        // slash-success patch makes the commands this tool drives say).
+        success: result && typeof result.success === "boolean" ? result.success : null,
         message: String((result && result.message) || ""),
       };
-      logger.debug(`[AgentBridge] ${found.session.characterID} ${command} -> ${reply.success ? "ok" : "refused"}`);
+      logger.debug(`[AgentBridge] ${found.session.characterID} ${command} -> ` +
+        `${reply.success === null ? "done, outcome not reported" : reply.success ? "ok" : "refused"}`);
       return { statusCode: 200, body: reply };
     };
     // null chat hub: the reply comes back to the caller instead of into chat.

@@ -38,6 +38,9 @@ const EVENT_FIELDS = Object.freeze({
     itemID: "id", label: "str", from: "str", to: "str", targetID: "id", targetLabel: "str", distanceMeters: "m",
     groupKey: "str",
   },
+  DECISION: {
+    itemID: "id", label: "str", from: "str", to: "str", targetID: "id", targetLabel: "str", groupKey: "str",
+  },
   TARGET: {
     sourceID: "id", sourceLabel: "str", targetID: "id", targetLabel: "str", locked: "bool", groupKey: "str",
   },
@@ -73,7 +76,7 @@ const EVENT_FIELDS = Object.freeze({
 const KINDS = Object.freeze(Object.keys(EVENT_FIELDS));
 
 // The core kinds that carry the plugins' data about a ball, at ext.<plugin>.
-const EXT_KINDS = Object.freeze(["PRESENT", "ARRIVE", "LEAVE", "MODE", "TARGET", "DAMAGE", "DESTROYED", "KILLMAIL"]);
+const EXT_KINDS = Object.freeze(["PRESENT", "ARRIVE", "LEAVE", "MODE", "DECISION", "TARGET", "DAMAGE", "DESTROYED", "KILLMAIL"]);
 
 // Per registry: every kind's fields, plugin kinds and plugin data included.
 const TABLES = new WeakMap();

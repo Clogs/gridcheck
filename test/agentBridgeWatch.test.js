@@ -127,6 +127,19 @@ test("mode, lock and damage changes are reported once each", () => {
   assert.deepStrictEqual(healed.map((event) => `${event.kind}:${event.toPct}`), ["DAMAGE:100"], "back to full is reported");
 });
 
+test("an NPC's decision change is one DECISION event, with its target", () => {
+  const differ = createGridDiffer();
+  differ.step(grid([npc(2, { decision: "idle-anchor-orbit" }), npc(3)]), 1000);
+  const engaged = differ.step(grid([npc(2, { decision: "engage", targetEntityID: 1 }), npc(3)]), 3000);
+  assert.deepStrictEqual(kinds(engaged), ["DECISION"]);
+  assert.deepStrictEqual([engaged[0].from, engaged[0].to, engaged[0].targetLabel], ["idle-anchor-orbit", "engage", "self"]);
+  assert.strictEqual(engaged[0].ext.lu.family, "pirate");
+  assert.deepStrictEqual(kinds(differ.step(grid([npc(2, { decision: "engage", targetEntityID: 1 }), npc(3)]), 5000)), [],
+    "the same decision again is not news");
+  const { formatTimelineEvent } = require("../core/timeline");
+  assert.match(formatTimelineEvent({ ...engaged[0], t: 3000 }), /decided idle-anchor-orbit -> engage on self/);
+});
+
 test("a ship replaced by a wreck is DESTROYED; one that warps away is a LEAVE", () => {
   const differ = createGridDiffer();
   differ.step(grid([npc(2), npc(3, { mode: "WARP", groupKey: null, ext: null })]), 1000);

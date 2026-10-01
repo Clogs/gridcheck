@@ -172,6 +172,9 @@ function eventBody(event, registry) {
       return [`${event.label}  ${event.from || "-"} -> ${event.to || "-"}` +
         `${event.targetLabel ? ` on ${event.targetLabel}` : ""}` +
         `${event.distanceMeters ? `  ${distanceText(event.distanceMeters)}` : ""}`, tags()];
+    case "DECISION":
+      return [`${event.label}  decided ${event.from || "-"} -> ${event.to}` +
+        `${event.targetLabel ? ` on ${event.targetLabel}` : ""}`, tags()];
     case "TARGET":
       return [`${event.sourceLabel} -> ${event.targetLabel} (${event.locked ? "locked" : "unlocked"})`, tags()];
     case "DAMAGE":

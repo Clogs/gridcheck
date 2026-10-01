@@ -80,6 +80,20 @@ test("the grid is sorted nearest first, names types and marks self", () => {
   assert.strictEqual(grid.inSpace, true);
 });
 
+test("an NPC row carries the decision the tree recorded, and only an NPC row", () => {
+  const ego = { kind: "ship", itemID: 1, typeID: 587, radius: 40, position: { x: 0, y: 0, z: 0 } };
+  const scout = { kind: "ship", itemID: 2, typeID: 17619, radius: 30, position: { x: 5_000, y: 0, z: 0 }, nativeNpc: true };
+  const quiet = { kind: "ship", itemID: 3, typeID: 17619, radius: 30, position: { x: 6_000, y: 0, z: 0 }, nativeNpc: true };
+  const asked = [];
+  const grid = createGridReader({
+    space: { getSceneForSession: () => sceneWith(ego, [scout, quiet]) },
+    projectEntity,
+    npcDecision: (entity) => { asked.push(entity.itemID); return entity.itemID === 2 ? "engage" : null; },
+  }).readGrid(inSpaceSession);
+  assert.deepStrictEqual(grid.entities.map((row) => row.decision), [undefined, "engage", undefined]);
+  assert.deepStrictEqual(asked, [2, 3], "self and non-NPCs aren't looked up");
+});
+
 test("self is added when the visibility query leaves the ego ball out", () => {
   const ego = { kind: "ship", itemID: 1, typeID: 587, radius: 40, position: { x: 0, y: 0, z: 0 } };
   const scene = { ...sceneWith(ego, []), getVisibleEntitiesForSession: () => [] };
@@ -134,6 +148,13 @@ test("slash passes the line through with a null chat hub and returns the reply",
   });
   assert.strictEqual(calls[0].hub, null);
   assert.strictEqual(calls[0].line, "/tr me Amamake");
+});
+
+test("slash says success null when the tree's command doesn't report one (stock EveJS)", async () => {
+  const routes = routesWith({ executeChatCommand: () => ({ handled: true, message: "Docked at Jita IV." }) });
+  const result = await routes.handle("POST", "/slash", {}, { characterID: 7, command: "/dock" });
+  assert.strictEqual(result.body.handled, true);
+  assert.strictEqual(result.body.success, null);
 });
 
 test("slash settles a command that answers with a promise", async () => {

@@ -47,7 +47,9 @@ function describeProtection(entity, simNowMs) {
   };
 }
 
-function createGridReader({ space, projectEntity, describeType, describeSystem }) {
+// npcDecision(entity): the branch an NPC's last think took, where the tree
+// records one (the last-decision patch), else null.
+function createGridReader({ space, projectEntity, describeType, describeSystem, npcDecision = null }) {
   if (!space || typeof space.getSceneForSession !== "function") {
     throw new TypeError("createGridReader needs a space runtime with getSceneForSession");
   }
@@ -119,6 +121,10 @@ function createGridReader({ space, projectEntity, describeType, describeSystem }
       if (row.isSelf) sawSelf = true;
       row.typeName = typeName(row.typeID);
       row.distanceMeters = row.isSelf ? 0 : surfaceDistanceMeters(ego, entity);
+      if (npcDecision && row.isNpc) {
+        const decision = npcDecision(entity);
+        if (decision) row.decision = decision;
+      }
       if (annotate) annotate(row, entity);
       rows.push(row);
     }
