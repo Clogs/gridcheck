@@ -1,0 +1,20 @@
+{
+  "description": "CONCORD response in high sec. Jump to Rens (0.9) and commit an offence with /naughty, which sets the criminal timers and schedules CONCORD. CONCORD should arrive, lock the ship and destroy it.",
+  "world": "lowsec-docked",
+  "setup": [
+    "undock",
+    { "teleport": "Rens" },
+    { "wait": 5 },
+    { "slash": "/naughty" }
+  ],
+  "watch": { "every": 0.5 },
+  "until": { "any": ["DESTROYED self"], "timeout": 180, "grace": 20 },
+  "expect": [
+    { "match": "GRID systemName=Rens security>=0.5", "note": "the jump landed in high sec" },
+    { "match": "ARRIVE who=concord", "note": "CONCORD arrives" },
+    { "match": "TARGET self locked", "note": "CONCORD locks the ship; it can kill a frigate within 4 s of landing, hence the 0.5 s samples" },
+    { "match": "DESTROYED self", "note": "and destroys it" },
+    { "match": "KILLMAIL", "note": "the kill is recorded" },
+    { "match": "no DIVERGE reason=server-only", "note": "every CONCORD ship reached the client" }
+  ]
+}

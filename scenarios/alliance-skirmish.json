@@ -1,0 +1,18 @@
+{
+  "description": "An alliance skirmish on grid. LU Monitor's skirmish button (POST /allianceskirmish) drops a raid wing and a defence wing, 5 hulls a side, 10 km apart beside the ship. They should lock each other, trade damage and lose ships, and leave the observer alone.",
+  "world": "lowsec-docked",
+  "setup": [
+    "undock",
+    { "wait": 5 },
+    { "trigger": "skirmish", "count": 5 }
+  ],
+  "until": { "any": ["DESTROYED !self"], "timeout": 300, "grace": 60 },
+  "expect": [
+    { "match": "ARRIVE who=npc", "note": "the wings land on the grid" },
+    { "match": "TARGET locked targetLabel!=self", "note": "the wings lock each other" },
+    { "match": "DAMAGE label!=self", "note": "and trade damage" },
+    { "match": "DESTROYED !self", "note": "a hull is lost" },
+    { "match": "no TARGET self locked", "note": "neither wing locks the observer" },
+    { "match": "no DIVERGE reason=server-only", "note": "every hull reached the client" }
+  ]
+}

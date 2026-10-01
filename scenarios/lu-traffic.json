@@ -1,0 +1,50 @@
+{
+  "description": "Living Universe traffic passing through. Jump to Yrmori (0.6), which lands the ship on a stargate on the empire police patrol routes, and watch police patrol flights warp to the gate, dwell, jump out and leave the system, without touching a neutral ship.",
+  "world": "lowsec-docked",
+  "up": {
+    "offgridTravel": 5
+  },
+  "setup": [
+    "undock",
+    {
+      "teleport": "Yrmori"
+    }
+  ],
+  "until": {
+    "any": [
+      "EXIT family=police"
+    ],
+    "timeout": 600,
+    "grace": 20
+  },
+  "expect": [
+    {
+      "match": "GRID systemName=Yrmori",
+      "note": "the jump landed"
+    },
+    {
+      "match": "HERE byFamily.police>=1",
+      "note": "police patrol flights are in the system off grid"
+    },
+    {
+      "match": "ARRIVE family=police warpIn",
+      "note": "a patrol warps to the ship's gate"
+    },
+    {
+      "match": "LEAVE family=police !warped",
+      "note": "and jumps out through it"
+    },
+    {
+      "match": "EXIT family=police",
+      "note": "and leaves the system"
+    },
+    {
+      "match": "no TARGET self locked",
+      "note": "traffic leaves a neutral ship alone"
+    },
+    {
+      "match": "no DIVERGE reason=server-only",
+      "note": "every ship reached the client"
+    }
+  ]
+}

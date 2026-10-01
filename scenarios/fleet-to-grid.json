@@ -1,0 +1,38 @@
+{
+  "description": "Fleet trigger to own grid. A pirate fleet with doctrine sanshas is sent to the ship's grid through the Living Universe assignment system. Its flight should show as INCOMING, then ARRIVE warping in within 30 km of the ship. Off-grid travel x5.",
+  "world": "lowsec-docked",
+  "up": {
+    "offgridTravel": 5
+  },
+  "setup": [
+    "undock",
+    {
+      "trigger": "fleet",
+      "family": "pirate",
+      "doctrine": "sanshas",
+      "to": "self",
+      "count": 1,
+      "as": "fleet"
+    },
+    {
+      "waitFor": "INCOMING flightID=$fleet",
+      "timeout": 300
+    }
+  ],
+  "until": {
+    "any": [
+      "ARRIVE flightID=$fleet",
+      "DESTROYED self"
+    ],
+    "timeout": 600,
+    "grace": 10,
+    "from": "start"
+  },
+  "expect": [
+    "INCOMING flightID=$fleet family=pirate",
+    {
+      "match": "ARRIVE flightID=$fleet warpIn=true distanceMeters<=30000",
+      "note": "the fleet warps in within 30 km of the ship"
+    }
+  ]
+}

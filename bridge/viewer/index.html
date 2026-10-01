@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>e2e viewer</title>
+<link rel="stylesheet" href="/viewer/viewer.css">
+</head>
+<body>
+<header>
+  <strong>e2e viewer</strong>
+  <label>Run <select id="run"></select></label>
+  <span id="status" class="badge">loading</span>
+  <span id="where"></span>
+  <span id="message"></span>
+</header>
+<main>
+  <section id="map-pane">
+    <svg id="map" viewBox="0 0 640 640" role="img" aria-label="Top-down tactical view"></svg>
+    <div id="map-foot"></div>
+  </section>
+  <section id="side">
+    <h2>On grid <span id="ball-count"></span></h2>
+    <ol id="balls"></ol>
+    <h2>Divergence <span id="diverge-count"></span></h2>
+    <ol id="diverges"></ol>
+  </section>
+</main>
+<section id="controls">
+  <button id="play" type="button" title="Play or pause (space)">Play</button>
+  <button id="prev" type="button" title="Previous event (left arrow)">&lt; event</button>
+  <button id="next" type="button" title="Next event (right arrow)">event &gt;</button>
+  <button id="next-diverge" type="button" title="Next DIVERGE">DIVERGE &gt;</button>
+  <label>Speed <select id="speed">
+    <option value="1">1x</option><option value="2">2x</option><option value="4" selected>4x</option>
+    <option value="8">8x</option><option value="16">16x</option><option value="60">60x</option>
+  </select></label>
+  <label>Zoom <select id="zoom">
+    <option value="auto" selected>auto</option><option value="5000">5 km</option><option value="20000">20 km</option>
+    <option value="50000">50 km</option><option value="150000">150 km</option><option value="500000">500 km</option>
+  </select></label>
+  <label><input id="follow" type="checkbox" checked> Follow live</label>
+  <span id="clock">t+00:00:00</span>
+  <div id="track">
+    <svg id="marks" preserveAspectRatio="none" viewBox="0 0 1000 14"></svg>
+    <input id="scrub" type="range" min="0" max="0" value="0" step="100" aria-label="Replay position">
+  </div>
+</section>
+<section id="events-pane">
+  <div id="filters">
+    <label><input id="show-client" type="checkbox"> CLIENT and FX lines</label>
+    <label><input id="show-log" type="checkbox" checked> LOG lines</label>
+    <label>Filter <input id="grep" type="search" placeholder="regex, e.g. TARGET|DAMAGE"></label>
+  </div>
+  <ol id="events"></ol>
+</section>
+<script src="/viewer/viewer.js"></script>
+</body>
+</html>

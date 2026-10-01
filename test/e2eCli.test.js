@@ -1,0 +1,134 @@
+"use strict";
+
+// evejs-e2e: the pure parts of the headless observer CLI -- argument parsing,
+// log filtering and the grid table. The live path is checked by
+// docs/E2E-GRID-TESTING.md.
+
+const test = require("node:test");
+const assert = require("node:assert");
+
+const { formatDistance, formatGrid, formatClock } = require("../core/format");
+const { parseArgs, selectLogLines, selectScouts } = require("../bin/e2e");
+
+test("scouts are single-hull pirate flights, holding ones first", () => {
+  const fleets = [
+    { flightID: "f3", family: "pirate", pilotCount: 1, phase: "mission_travel" },
+    { flightID: "f2", family: "pirate", pilotCount: 4, phase: "mission_holding" },
+    { flightID: "f4", family: "pirate", pilotCount: 1, phase: "mission_holding" },
+    { flightID: "f1", family: "police", pilotCount: 1, phase: "mission_holding" },
+  ];
+  assert.deepStrictEqual(selectScouts(fleets).map((f) => f.flightID), ["f4"]);
+  assert.deepStrictEqual(selectScouts(fleets, { all: true }).map((f) => f.flightID), ["f4", "f3"]);
+});
+
+test("arguments: command, positionals, valued and boolean flags", () => {
+  assert.deepStrictEqual(parseArgs(["grid", "--range", "500", "--all"]), {
+    command: "grid", positionals: [], flags: { range: "500", all: true },
+  });
+  assert.deepStrictEqual(parseArgs(["slash", "/tr", "me", "Amamake"]).positionals, ["/tr", "me", "Amamake"]);
+  assert.deepStrictEqual(parseArgs(["log", "--grep=PirateHunt"]).flags, { grep: "PirateHunt" });
+  assert.deepStrictEqual(parseArgs(["slash", "--", "--weird"]).positionals, ["--weird"]);
+  assert.strictEqual(parseArgs([]).command, "help");
+  assert.throws(() => parseArgs(["log", "--grep"]), /needs a value/);
+});
+
+test("log lines keep the server's pid and the pattern, newest last", () => {
+  const text = [
+    "[t1] [pid 10] [LOG] [PirateHunt] sighted",
+    "[t2] [pid 99] [LOG] [PirateHunt] from a test process",
+    "[t3] [pid 10] [LOG] [SpaceRuntime] tick",
+    "[t4] [pid 10] [LOG] [piratehunt] committed",
+    "",
+  ].join("\r\n");
+  assert.deepStrictEqual(selectLogLines(text, { grep: "PirateHunt", pid: 10, lines: 40 }), [
+    "[t1] [pid 10] [LOG] [PirateHunt] sighted",
+    "[t4] [pid 10] [LOG] [piratehunt] committed",
+  ]);
+  assert.strictEqual(selectLogLines(text, { grep: "PirateHunt", pid: null, lines: 40 }).length, 3);
+  assert.deepStrictEqual(selectLogLines(text, { pid: 10, lines: 1 }), ["[t4] [pid 10] [LOG] [piratehunt] committed"]);
+});
+
+test("distances read as m, km or AU", () => {
+  assert.strictEqual(formatDistance(0), "0");
+  assert.strictEqual(formatDistance(8_200), "8,200 m");
+  assert.strictEqual(formatDistance(182_000), "182 km");
+  assert.strictEqual(formatDistance(14.2 * 149_597_870_700), "14.2 AU");
+  assert.strictEqual(formatDistance(null), "?");
+  assert.strictEqual(formatClock(252_000), "00:04:12");
+});
+
+const grid = {
+  characterID: 7,
+  characterName: "Agent Observer",
+  solarSystemID: 30002537,
+  systemName: "Amamake",
+  security: 0.4,
+  inSpace: true,
+  self: { itemID: 1, typeName: "Rifter", mode: "STOP", protection: { active: true, remainingMs: 27_500, cloaked: false } },
+  entities: [
+    { itemID: 1, kind: "ship", name: "Rifter", typeName: "Rifter", isSelf: true, mode: "STOP", distanceMeters: 0, shieldRatio: 1, armorRatio: 1, hullRatio: 1 },
+    { itemID: 2, kind: "ship", name: "Guristas Scout", typeName: "Worm", isNpc: true, npcEntityType: "npc", mode: "ORBIT", targetEntityID: 1, distanceMeters: 182_000, shieldRatio: 1, armorRatio: 0.5, hullRatio: 1 },
+    { itemID: 3, kind: "moon", name: "Amamake IV - Moon 1", typeName: "Moon", distanceMeters: 14.2 * 149_597_870_700, shieldRatio: null, armorRatio: null, hullRatio: null },
+  ],
+};
+
+test("a value exactly as wide as its column still leaves a gap", () => {
+  const sentry = {
+    itemID: 4, kind: "sentryGun", name: "Caldari Sentry Gun I", typeName: "Caldari Sentry Gun I", distanceMeters: 54_000,
+  };
+  const row = formatGrid({ ...grid, entities: [sentry] }).split("\n")[2];
+  assert.match(row, /Caldari Sentry Gun~ -/);
+});
+
+test("the grid table: header, one row per ball in range, a footer for the rest", () => {
+  const lines = formatGrid(grid, { sinceMs: 252_000 }).split("\n");
+  assert.strictEqual(lines[0], "Amamake (0.4)  t+00:04:12  self: Rifter (in space, STOP)  protected 28s");
+  assert.match(lines[1], /^dist {8}name/);
+  assert.match(lines[2], /^0 {11}\(self\) Rifter/);
+  assert.match(lines[2], /100\/100\/100$/);
+  assert.match(lines[3], /^182 km {6}Guristas Scout {10}Worm {16}npc {5}ORBIT {4}self {14}100\/50\/100$/);
+  assert.strictEqual(lines[4], "+1 beyond 10,000 km; nearest Amamake IV - Moon 1 at 14.2 AU (--all to list)");
+  assert.strictEqual(lines.length, 5);
+});
+
+test("--all lists celestials, --range narrows, docked shows where", () => {
+  assert.match(formatGrid(grid, { all: true }), /Amamake IV - Moon 1 +Moon .* -$/m);
+  assert.match(formatGrid(grid, { rangeKm: 100 }), /^\+2 beyond 100 km; nearest Guristas Scout at 182 km/m);
+  assert.strictEqual(
+    formatGrid({ ...grid, inSpace: false, stationID: 60015249 }),
+    "Amamake (0.4)  self: Agent Observer (docked in station 60015249)",
+  );
+});
+
+const { offGridMultipliers, triggerRequest } = require("../plugins/lu/tool/triggers");
+
+test("up's off-grid flags become the server's multiplier variables, 1 through 100", () => {
+  const set = offGridMultipliers({ "offgrid-travel": "10", "offgrid-activity": "4" });
+  assert.deepStrictEqual(set.env, {
+    EVEJS_LIVING_UNIVERSE_OFFGRID_TRAVEL_TIME_MULTIPLIER: "10",
+    EVEJS_LIVING_UNIVERSE_OFFGRID_ACTIVITY_TIME_MULTIPLIER: "4",
+  });
+  assert.deepStrictEqual(offGridMultipliers({}), { env: {}, values: null, text: "" });
+  for (const bad of ["0", "101", "fast"]) assert.throws(() => offGridMultipliers({ "offgrid-travel": bad }), /1 through 100/);
+});
+
+test("trigger arguments become bridge bodies; a fleet goes to your grid unless --to names a system", () => {
+  const ctx = { characterID: 7, resolveSystemID: (text) => (text === "Amamake" ? 30002537 : Number(text)) };
+  const { parseArgs } = require("../bin/e2e");
+  const body = (line) => {
+    const { positionals, flags } = parseArgs(["trigger", ...line]);
+    return triggerRequest(positionals[0], positionals.slice(1), flags, ctx);
+  };
+  assert.deepStrictEqual(body(["scout", "Amamake"]), { characterID: 7, systemID: 30002537 });
+  assert.deepStrictEqual(body(["hunt", "--phase", "committed", "--flight", "f1"]), { characterID: 7, flightID: "f1", phase: "committed" });
+  assert.deepStrictEqual(body(["fleet", "pirate", "--doctrine", "guristas", "--count", "2"]),
+    { characterID: 7, family: "pirate", doctrine: "guristas", count: 2, to: "self" });
+  assert.deepStrictEqual(body(["fleet", "police", "--to", "Amamake"]), { characterID: 7, family: "police", systemID: 30002537 });
+  assert.deepStrictEqual(body(["materialize", "f9", "--go"]), { characterID: 7, flightID: "f9", go: true });
+  assert.deepStrictEqual(body(["skirmish", "--count", "3", "--class", "cruiser", "--gap", "20000"]),
+    { characterID: 7, hullsPerSide: 3, shipClass: "cruiser", separationMeters: 20000 });
+  assert.deepStrictEqual(body(["skirmish"]), { characterID: 7 });
+  assert.throws(() => body(["skirmish", "--count", "21"]), /1 through 20/);
+  assert.throws(() => body(["fleet"]), /needs a family/);
+  assert.throws(() => body(["spawn"]), /unknown trigger spawn/);
+});

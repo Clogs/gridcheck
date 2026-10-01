@@ -1,0 +1,43 @@
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  font: 13px/1.4 Consolas, Menlo, monospace;
+  color: #24292f;
+  background: #ffffff;
+  display: grid;
+  grid-template-rows: auto auto auto 1fr;
+  height: 100vh;
+}
+header, #controls, #filters { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; padding: 6px 12px; }
+header { border-bottom: 1px solid #d0d7de; }
+#message { color: #cf222e; }
+.badge { padding: 1px 8px; border-radius: 10px; background: #eaeef2; }
+.badge.live { background: #dafbe1; color: #1a7f37; }
+.badge.passed { background: #dafbe1; color: #1a7f37; }
+.badge.failed { background: #ffebe9; color: #cf222e; }
+main { display: grid; grid-template-columns: minmax(320px, 640px) minmax(260px, 1fr); gap: 12px; padding: 8px 12px; min-height: 0; }
+#map { width: 100%; height: auto; max-height: 62vh; background: #f6f8fa; border: 1px solid #d0d7de; }
+#map text { font: 11px Consolas, Menlo, monospace; }
+#map-foot { color: #57606a; font-size: 12px; }
+#side { overflow: auto; max-height: 66vh; }
+#side h2 { font-size: 13px; margin: 4px 0; }
+#side ol { list-style: none; margin: 0 0 10px; padding: 0; }
+#side li { padding: 1px 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.swatch { display: inline-block; width: 9px; height: 9px; margin-right: 6px; }
+#diverges li { cursor: pointer; color: #8250df; }
+#controls { border-top: 1px solid #d0d7de; border-bottom: 1px solid #d0d7de; }
+#clock { font-weight: bold; min-width: 9ch; }
+#track { flex: 1 1 100%; position: relative; }
+#marks { width: 100%; height: 14px; display: block; }
+#scrub { width: 100%; margin: 0; }
+#events-pane { min-height: 0; display: flex; flex-direction: column; padding: 0 12px 8px; }
+#events { list-style: none; margin: 0; padding: 0; overflow: auto; flex: 1; min-height: 120px; }
+#events li { white-space: pre; cursor: pointer; padding: 0 4px; }
+#events li.future { color: #8c959f; }
+#events li.current { background: #ddf4ff; }
+#events li.k-DIVERGE { color: #8250df; }
+#events li.k-DESTROYED, #events li.k-KILLMAIL { font-weight: bold; }
+#events li.k-DAMAGE { color: #bc4c00; }
+#events li.k-STEP, #events li.k-STOP { color: #0969da; }
+#events li.k-LOG { color: #57606a; }
+#events li.fail { color: #cf222e; }

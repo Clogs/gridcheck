@@ -1,0 +1,40 @@
+{
+  "description": "Do NPCs shoot back? Jump to Yrmori (0.6), call one Minmatar police patrol to the ship with the fleet trigger, load the Rifter's autocannons, then lock and fire on the patrol. The report records the shots (lock, ProjectileFired, damage bands on the target) and the patrol's response: the retaliation log line, its lock on the ship and damage to the ship.",
+  "world": "lowsec-docked",
+  "up": {
+    "offgridTravel": 5
+  },
+  "setup": [
+    "undock",
+    { "teleport": "Yrmori" },
+    { "slash": "/giveitem EMP S 1000" },
+    { "loadAmmo": "weapons", "charge": "EMP S" },
+    { "trigger": "fleet", "family": "police", "to": "self", "count": 1, "as": "police" },
+    { "waitFor": "ARRIVE flightID=$police", "timeout": 300 }
+  ],
+  "during": [
+    { "wait": 5, "note": "the patrol lands out of warp" },
+    { "lock": "flight=$police", "as": "mark", "retry": { "every": 5, "for": 60 } },
+    { "activate": "weapons", "target": "$mark" },
+    { "orbit": "$mark", "range": 2000 }
+  ],
+  "watch": {
+    "client": "fx"
+  },
+  "until": {
+    "any": [
+      "DESTROYED self",
+      "DESTROYED flightID=$police"
+    ],
+    "timeout": 420,
+    "grace": 45
+  },
+  "expect": [
+    { "match": "TARGET sourceLabel=self targetID=$mark locked", "note": "the ship locks the patrol hull" },
+    { "match": "FX self targetID=$mark offensive=true", "note": "the client is told the guns fire at it" },
+    { "match": "DAMAGE itemID=$mark", "note": "the shots land" },
+    { "match": "LOG text~LivingRetaliation", "note": "being shot wakes the flight to fight back" },
+    { "match": "TARGET self flightID=$police locked", "note": "the patrol locks the ship back" },
+    { "match": "DAMAGE self", "note": "and shoots it" }
+  ]
+}

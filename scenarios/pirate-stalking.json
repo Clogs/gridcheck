@@ -1,0 +1,26 @@
+{
+  "description": "Pirate scout stalking with a fleet response. A scout is sent to the ship's system and finds it. A pirate gang in the system then starts a hunt from a report on the ship; the hunt trigger is retried until the coordinator accepts a leader. The hunt calls support gangs, commits, warps in, locks and kills the ship. Off-grid travel x5 so the gangs arrive within minutes.",
+  "world": "lowsec-docked",
+  "up": { "offgridTravel": 5 },
+  "setup": [
+    "undock",
+    { "trigger": "scout", "as": "scout" },
+    { "trigger": "hunt", "as": "hunt", "retry": { "every": 15, "for": 480 } }
+  ],
+  "until": { "any": ["DESTROYED self"], "timeout": 900, "grace": 30 },
+  "expect": [
+    { "match": "INCOMING flightID=$scout", "note": "the scout heads for the ship's system" },
+    { "match": "SIGHTING observerFlightID=$scout", "note": "the scout's sensors find the ship" },
+    { "match": "HUNT self huntID=$hunt reason~scout-discovery", "note": "the hunt starts from a report on the ship" },
+    { "match": "HUNT self huntID=$hunt reason~support-reserved", "note": "the hunt calls support" },
+    { "match": "INCOMING journeyKind=pirate_hunt_support", "note": "a support gang heads for the system" },
+    { "match": "HUNT self huntID=$hunt phase=committed", "note": "support and tackle are close enough to commit" },
+    { "match": "ARRIVE huntID=$hunt warpIn distanceMeters<=30km", "note": "the hunt's ships warp in close to the ship" },
+    { "match": "ARRIVE huntID=$hunt huntRole=support", "note": "a support gang lands on the grid" },
+    { "match": "TARGET self locked", "note": "a hunter locks the ship" },
+    { "match": "DAMAGE self", "note": "and shoots it" },
+    { "match": "DESTROYED self" },
+    { "match": "KILLMAIL", "note": "the kill is recorded" },
+    { "match": "no DIVERGE reason=server-only", "note": "every hunter the server put on grid reached the client" }
+  ]
+}

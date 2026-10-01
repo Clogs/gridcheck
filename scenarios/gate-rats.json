@@ -1,0 +1,18 @@
+{
+  "description": "Gate rats. Jump to Siseide, which lands the ship on a stargate, and turn the system's gate rats on (the stock gate operator, /gaterats, spawn group blood_raider_gate_ambush). The rats should stand up on the gate, lock the ship and shoot it.",
+  "world": "lowsec-docked",
+  "setup": [
+    "undock",
+    { "teleport": "Siseide" },
+    { "wait": 5 },
+    { "slash": "/gaterats on" }
+  ],
+  "until": { "any": ["DESTROYED self"], "timeout": 240, "grace": 20 },
+  "expect": [
+    { "match": "GRID systemName=Siseide", "note": "the jump landed" },
+    { "match": "ARRIVE who=npc !flightID", "note": "rats, NPCs with no Living Universe flight, appear on the gate grid" },
+    { "match": "TARGET self locked !flightID", "note": "a rat locks the ship" },
+    { "match": "DAMAGE self", "note": "and shoots it" },
+    { "match": "no DIVERGE reason=server-only", "note": "every rat reached the client" }
+  ]
+}
