@@ -133,7 +133,8 @@ function runHook(hook, method, ctx) {
   }
 }
 
-function saveWorld(treeRoot, name, { force = false, note = "", hooks = [] } = {}) {
+// recipe: the fingerprint of the recipe that built it (core/recipes.js).
+function saveWorld(treeRoot, name, { force = false, note = "", hooks = [], recipe = null } = {}) {
   const here = worldPaths(treeRoot);
   requireWorld(here, "this tree");
   if (name === FRESH) throw new Error(`"${FRESH}" names a new game store in a scenario; save under another name`);
@@ -158,6 +159,7 @@ function saveWorld(treeRoot, name, { force = false, note = "", hooks = [] } = {}
     tree: treeRoot,
     market,
     note: String(note || ""),
+    ...(recipe ? { recipe } : {}),
     ...(Object.keys(ext).length ? { ext } : {}),
   };
   fs.writeFileSync(path.join(staging, "world.json"), `${JSON.stringify(info, null, 2)}\n`);
@@ -227,9 +229,21 @@ function listWorlds(treeRoot) {
       } catch (_error) {
         // A hand-made folder: list it with what the files say.
       }
-      return { name: entry.name, savedAt: info.savedAt || null, market: fs.existsSync(path.join(dir, "market.sqlite")), note: info.note || "", bytes: dirBytes(dir) };
+      return { name: entry.name, savedAt: info.savedAt || null, market: fs.existsSync(path.join(dir, "market.sqlite")), note: info.note || "",
+        recipe: Boolean(info.recipe), bytes: dirBytes(dir) };
     })
     .sort((left, right) => left.name.localeCompare(right.name));
+}
+
+// A saved world's world.json, or null when there is no such world.
+function savedWorldInfo(treeRoot, name) {
+  const dir = savedWorldDir(treeRoot, name);
+  if (!fs.existsSync(path.join(dir, "gamestore.sqlite"))) return null;
+  try {
+    return JSON.parse(fs.readFileSync(path.join(dir, "world.json"), "utf8"));
+  } catch (_error) {
+    return {};
+  }
 }
 
 function dirBytes(dir) {
@@ -246,5 +260,6 @@ module.exports = {
   restoreWorld,
   saveWorld,
   savedWorldDir,
+  savedWorldInfo,
   worldPaths,
 };

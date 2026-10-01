@@ -31,7 +31,7 @@ const FRESH_WORLD = "fresh";
 // calls themselves (a trigger may take 90 s).
 const BUDGET_SECONDS = 3000;
 
-const TOP_KEYS = new Set(["name", "description", "world", "up", "setup", "during", "watch", "until", "expect"]);
+const TOP_KEYS = new Set(["name", "description", "world", "recipe", "up", "setup", "during", "watch", "until", "expect"]);
 const CORE_UP_KEYS = ["market", "timeout"];
 const WATCH_KEYS = new Set(["every", "offgridEvery", "client", "divergeMeters", "log", "grep"]);
 const UNTIL_KEYS = new Set(["any", "timeout", "grace", "from"]);
@@ -142,11 +142,13 @@ function upDefaults(registry) {
 }
 
 // raw JSON -> a checked scenario, or a ScenarioError listing every problem.
-// `context.worldExists(name)` and `context.resolveSystemID(text)` come from
-// the CLI, which knows the tree; tests pass stubs. `context.registry` is the
-// plugins' (core/plugins.js), by default this tree's.
+// `context.worldExists(name)`, `context.recipeExists(name)` and
+// `context.resolveSystemID(text)` come from the CLI, which knows the tree;
+// tests pass stubs. `context.registry` is the plugins' (core/plugins.js), by
+// default this tree's. A scenario starts from a saved world or from a world
+// recipe (core/recipes.js), which the run builds when it has to.
 function validateScenario(raw, { source = "scenario", defaultName = null, worldExists = () => true,
-  resolveSystemID = (text) => text, registry = defaultRegistry() } = {}) {
+  recipeExists = () => true, resolveSystemID = (text) => text, registry = defaultRegistry() } = {}) {
   const extraSteps = pluginSteps(registry);
   const types = stepTypes(registry);
   const problems = [];
@@ -162,8 +164,13 @@ function validateScenario(raw, { source = "scenario", defaultName = null, worldE
   }
   if (raw.description !== undefined && typeof raw.description !== "string") problem("description", "a string");
 
-  if (typeof raw.world !== "string" || !raw.world) {
-    problem("world", `the saved world to start from (e2e world list), or "${FRESH_WORLD}"`);
+  const recipe = raw.recipe === undefined ? null : raw.recipe;
+  if (recipe !== null) {
+    if (raw.world !== undefined) problem("recipe", "a scenario starts from a world or a recipe, not both");
+    else if (typeof recipe !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(recipe)) problem("recipe", "a world recipe's name (e2e world recipes)");
+    else if (!recipeExists(recipe)) problem("recipe", `no world recipe "${recipe}" (e2e world recipes)`);
+  } else if (typeof raw.world !== "string" || !raw.world) {
+    problem("world", `the saved world to start from (e2e world list), "${FRESH_WORLD}", or a "recipe" instead`);
   } else if (raw.world !== FRESH_WORLD && !worldExists(raw.world)) {
     problem("world", `no saved world "${raw.world}" (e2e world list)`);
   }
@@ -491,7 +498,8 @@ function validateScenario(raw, { source = "scenario", defaultName = null, worldE
       `a run fits in ${BUDGET_SECONDS} s (one bridge watch)`);
   }
   if (problems.length) throw new ScenarioError(source, problems);
-  return { name, description: raw.description || "", world: raw.world, up, setup, during, watch, until, expect,
+  // A recipe's world is saved under the recipe's name.
+  return { name, description: raw.description || "", world: recipe || raw.world, recipe, up, setup, during, watch, until, expect,
     bindings: [...bindings] };
 }
 
@@ -540,7 +548,8 @@ function listScenarios(context = {}) {
       const file = path.join(dir, name);
       try {
         const raw = JSON.parse(fs.readFileSync(file, "utf8"));
-        rows.push({ name: scenarioName, file, plugin, description: String(raw.description || ""), world: raw.world });
+        rows.push({ name: scenarioName, file, plugin, description: String(raw.description || ""),
+          world: raw.recipe ? `recipe ${raw.recipe}` : raw.world });
       } catch (error) {
         rows.push({ name: scenarioName, file, plugin, description: `(unreadable: ${error.message})` });
       }

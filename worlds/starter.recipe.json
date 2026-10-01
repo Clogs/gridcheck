@@ -1,0 +1,26 @@
+{
+  "description": "A fresh character with every skill, in a Tristan with two blasters loaded with antimatter, an afterburner, a scrambler, a web, an armour repairer and five Hobgoblins, docked in Amamake. Stock EveJS's own commands and the loadout build it, so it builds in any tree.",
+  "steps": [
+    "fresh",
+    "login",
+    { "slash": "/allskills" },
+    { "loadout": {
+      "ship": "Tristan",
+      "modules": [
+        "Light Neutron Blaster II x2",
+        "1MN Afterburner II",
+        "Warp Scrambler II",
+        "Stasis Webifier II",
+        "Magnetic Field Stabilizer II",
+        "Small Armor Repairer II"
+      ],
+      "drones": ["Hobgoblin II x5"],
+      "cargo": ["Antimatter Charge S x400"],
+      "charges": ["Antimatter Charge S"]
+    } },
+    "undock",
+    { "teleport": "Amamake" },
+    { "wait": 5 },
+    "dock"
+  ]
+}

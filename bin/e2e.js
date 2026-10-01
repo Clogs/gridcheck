@@ -29,6 +29,7 @@ const scenarioTools = require("../core/scenario");
 const frameTools = require("../core/frames");
 const actionTools = require("../core/actions");
 const loadoutTools = require("../core/loadout");
+const recipeTools = require("../core/recipes");
 const vendor = require("../core/vendor");
 const patchEngine = require("../core/patches");
 
@@ -875,7 +876,7 @@ function savedWorldExists(name) {
 function loadScenarioOrFail(name, { anyWorld = false } = {}) {
   try {
     return scenarioTools.loadScenario(name, { worldExists: anyWorld ? () => true : savedWorldExists, resolveSystemID,
-      registry: REGISTRY });
+      recipeExists: (recipe) => recipeTools.recipeExists(recipe), registry: REGISTRY });
   } catch (error) {
     throw new CliError(error.message);
   }
@@ -975,6 +976,7 @@ async function cmdRun(positionals, flags) {
   if (MANAGED && override !== null && override !== scenarioTools.FRESH_WORLD && !savedWorldExists(override)) {
     throw new CliError(`no saved world ${override} (e2e world list)`);
   }
+  if (MANAGED && override === null && loaded.recipe) await ensureRecipeWorld(loaded.recipe);
   const world = MANAGED ? override || loaded.world : null;
   const scenario = MANAGED ? { ...loaded, world } : { ...loaded, world: `attached to pid ${running.pid}`, up: {} };
   const runID = flags.run ? String(flags.run).replace(/[^A-Za-z0-9._-]/g, "_") : `${runStamp(Date.now())}-${scenario.name}`;
@@ -1459,13 +1461,102 @@ async function cmdDown(flags) {
   if (run.pid && !run.stoppedAtMs) writeRun({ ...run, stoppedAtMs: Date.now() });
 }
 
-const WORLD_USAGE = "usage: e2e world copy --from <tree> [--force] | world save <name> [--note text] [--force] | world list";
+const WORLD_USAGE = "usage: e2e world copy --from <tree> [--force] | world save <name> [--note text] [--force] | world list | " +
+  "world build <recipe> [--force] | world recipes";
 
-function cmdWorld(positionals, flags) {
+// ---------- world recipes ----------
+
+function loadRecipeOrFail(nameOrPath) {
+  try {
+    return recipeTools.loadRecipe(nameOrPath, { resolveSystemID, registry: REGISTRY });
+  } catch (error) {
+    throw error instanceof recipeTools.RecipeError ? new CliError(error.message) : error;
+  }
+}
+
+function currentFingerprint(recipe) {
+  return recipeTools.recipeFingerprint({
+    recipe, treeRoot: REPO_ROOT, tool: capabilities.copyInfo(),
+    patches: patchEngine.patchStates(CONFIG.serverDir, { patches: patchEngine.loadPatches() }),
+  });
+}
+
+// Boots a fresh world, runs the recipe's steps on it, stops the server and
+// saves the world under the recipe's name with the fingerprint of what built
+// it. A failed step leaves the saved world as it was.
+async function buildRecipeWorld(recipe, { force = false, why = null } = {}) {
+  requireManaged("world build");
+  requireWorldIdle();
+  const saved = worlds.savedWorldInfo(REPO_ROOT, recipe.name);
+  if (saved && !saved.recipe && !force) {
+    throw new CliError(`saved world ${recipe.name} was saved by hand, not built from the recipe; ` +
+      "pass --force to replace it, or save it under another name first");
+  }
+  const fingerprint = currentFingerprint(recipe);
+  const startedAtMs = Date.now();
+  console.log(`building world ${recipe.name} from ${relativePath(recipe.file)}${why ? ` (${why})` : ""}`);
+  await cmdUp({ fresh: true });
+  let failed = null;
+  try {
+    for (const [index, step] of recipe.steps.entries()) {
+      const label = scenarioTools.describeStep(step, REGISTRY);
+      console.log(`build: step ${index + 1}/${recipe.steps.length}: ${label}`);
+      const result = step.type === "wait" ? (await sleep(step.seconds * 1000), { ok: true }) : await runScenarioStep(step);
+      if (result && result.ok === false) {
+        failed = `${label}: ${String(result.text || "refused").split("\n").slice(-2).join(" ").trim()}`;
+        break;
+      }
+    }
+  } catch (error) {
+    failed = error.message;
+  } finally {
+    await cmdDown({});
+  }
+  if (failed) throw new CliError(`recipe ${recipe.name} failed at ${failed}; the world was not saved`);
+  const result = worlds.saveWorld(REPO_ROOT, recipe.name, { force: true, note: `built from recipe ${recipe.name}`,
+    hooks: REGISTRY.worldHooks, recipe: fingerprint });
+  console.log(`built ${result.name} in ${Math.round((Date.now() - startedAtMs) / 1000)} s ` +
+    `(${Math.round(result.bytes / 1e6)} MB) in ${relativePath(result.dir)}`);
+  return result;
+}
+
+// A run that names a recipe gets its world built first when it's missing or
+// stale: the recipe, the tree's commit, its patches or the tool changed.
+async function ensureRecipeWorld(name) {
+  const recipe = loadRecipeOrFail(name);
+  const why = recipeTools.recipeStale(worlds.savedWorldInfo(REPO_ROOT, recipe.name), currentFingerprint(recipe));
+  if (!why) {
+    console.log(`world ${recipe.name} is current with its recipe`);
+    return;
+  }
+  await buildRecipeWorld(recipe, { why });
+}
+
+function listRecipeWorlds() {
+  const rows = recipeTools.listRecipes();
+  for (const row of rows) {
+    let status;
+    try {
+      const recipe = recipeTools.loadRecipe(row.file, { resolveSystemID, registry: REGISTRY });
+      const why = recipeTools.recipeStale(worlds.savedWorldInfo(REPO_ROOT, recipe.name), currentFingerprint(recipe));
+      status = why ? `to build: ${why}` : "built, current";
+    } catch (error) {
+      status = `broken: ${error.message.split("\n").slice(1).join("; ").trim() || error.message}`;
+    }
+    console.log(`${row.name.padEnd(20)} ${status}\n${"".padEnd(20)} ${row.description}`);
+  }
+  if (!rows.length) console.log(`no recipes in ${relativePath(recipeTools.RECIPE_DIR)}`);
+}
+
+async function cmdWorld(positionals, flags) {
   const action = positionals[0];
   const megabytes = (bytes) => Math.round(bytes / 1e6);
   try {
-    if (action === "copy" && flags.from) {
+    if (action === "build" && positionals[1]) {
+      await buildRecipeWorld(loadRecipeOrFail(positionals[1]), { force: Boolean(flags.force) });
+    } else if (action === "recipes") {
+      listRecipeWorlds();
+    } else if (action === "copy" && flags.from) {
       requireManaged("world copy");
       requireWorldIdle();
       const result = worlds.copyWorld(REPO_ROOT, String(flags.from), { force: Boolean(flags.force) });
@@ -1488,7 +1579,7 @@ function cmdWorld(positionals, flags) {
       for (const row of rows) {
         console.log(
           `${row.name.padEnd(24)} ${row.savedAt || "?"}  ${megabytes(row.bytes)} MB` +
-          `${row.market ? "  +market" : ""}${row.note ? `  ${row.note}` : ""}`,
+          `${row.market ? "  +market" : ""}${row.recipe ? "  (recipe)" : ""}${row.note ? `  ${row.note}` : ""}`,
         );
       }
       if (!rows.length) console.log("no saved worlds (e2e world save <name>)");
@@ -1753,7 +1844,8 @@ const CORE_COMMANDS = {
     run: (_positionals, flags) => cmdDoctor(flags),
   },
   world: {
-    usage: ["world copy --from ../dev [--force]", "world save <name> [--note \"...\"] [--force] | world list"],
+    usage: ["world copy --from ../dev [--force]", "world save <name> [--note \"...\"] [--force] | world list",
+      "world build <recipe> [--force] | world recipes"],
     run: cmdWorld,
   },
   vendor: {
