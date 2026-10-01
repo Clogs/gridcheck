@@ -14,13 +14,13 @@ const path = require("node:path");
 const { formatClock, formatGrid } = require("../core/format");
 const { collectIDs, createReorderBuffer, formatTimelineEvent, mentionsAny, parseLogLine } = require("../core/timeline");
 const { busyPorts, marketConfig, portsForTree, serverEnvironment, usableListeners } = require("../core/ports");
-const { defaultRegistry } = require("../core/plugins");
+const { DEFAULT_TREE_ROOT, defaultRegistry } = require("../core/plugins");
 const worlds = require("../core/worlds");
 const scenarioTools = require("../core/scenario");
 const frameTools = require("../core/frames");
 const actionTools = require("../core/actions");
 
-const REPO_ROOT = path.resolve(__dirname, "..", "..", "..");
+const REPO_ROOT = DEFAULT_TREE_ROOT;
 const REGISTRY = defaultRegistry();
 const E2E_DIR = path.join(REPO_ROOT, "_local", "e2e");
 const RUNS_DIR = path.join(E2E_DIR, "runs");

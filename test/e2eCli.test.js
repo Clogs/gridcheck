@@ -6,10 +6,15 @@
 
 const test = require("node:test");
 const assert = require("node:assert");
+const { needsPlugin } = require("./tree");
 
 const { formatDistance, formatGrid, formatClock } = require("../core/format");
 const { CORE_COMMANDS, helpText, parseArgs, selectLogLines, upOptions } = require("../bin/e2e");
 const { selectScouts } = require("../plugins/lu/tool/commands");
+
+// These read the lu plugin through the default registry, so they need a tree
+// with the mod (npm run test:tree -- <tree>).
+const LU = needsPlugin("lu");
 
 test("scouts are single-hull pirate flights, holding ones first", () => {
   const fleets = [
@@ -103,7 +108,7 @@ test("--all lists celestials, --range narrows, docked shows where", () => {
 
 const { triggerRequest } = require("../plugins/lu/tool/triggers");
 
-test("a plugin's up flags become the server's variables and the world restore's options", () => {
+test("a plugin's up flags become the server's variables and the world restore's options", LU, () => {
   const set = upOptions({ "offgrid-travel": "10", "offgrid-activity": "4", "real-clock": true, world: "lowsec-docked" });
   assert.deepStrictEqual(set.env, {
     EVEJS_LIVING_UNIVERSE_OFFGRID_TRAVEL_TIME_MULTIPLIER: "10",
@@ -118,7 +123,7 @@ test("a plugin's up flags become the server's variables and the world restore's 
     "a plugin's bool flag takes no value");
 });
 
-test("help lists the core commands, then each plugin's, and names the active plugins", () => {
+test("help lists the core commands, then each plugin's, and names the active plugins", LU, () => {
   const help = helpText();
   assert.match(help, /e2e teleport <system name\|ID>/);
   assert.match(help, /e2e trigger fleet <family>/);
@@ -127,7 +132,7 @@ test("help lists the core commands, then each plugin's, and names the active plu
   assert.ok(CORE_COMMANDS.trigger === undefined, "trigger is the plugin's");
 });
 
-test("trigger arguments become bridge bodies; a fleet goes to your grid unless --to names a system", () => {
+test("trigger arguments become bridge bodies; a fleet goes to your grid unless --to names a system", LU, () => {
   const ctx = { characterID: 7, resolveSystemID: (text) => (text === "Amamake" ? 30002537 : Number(text)) };
   const { parseArgs } = require("../bin/e2e");
   const body = (line) => {

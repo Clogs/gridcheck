@@ -7,6 +7,7 @@
 
 const test = require("node:test");
 const assert = require("node:assert");
+const { needsPlugin } = require("./tree");
 const fs = require("fs");
 const path = require("path");
 
@@ -39,7 +40,11 @@ const ARRIVE = {
 
 const matches = (text, event, ctx) => parseCondition(text, ctx).test(event, ctx);
 
-test("the plan's stop conditions read as written", () => {
+// These read the lu plugin through the default registry, so they need a tree
+// with the mod (npm run test:tree -- <tree>).
+const LU = needsPlugin("lu");
+
+test("the plan's stop conditions read as written", LU, () => {
   assert.ok(matches("ARRIVE family=pirate count>=3", ARRIVE));
   assert.ok(!matches("ARRIVE family=pirate count>=5", ARRIVE));
   assert.ok(matches("DESTROYED self", { kind: "DESTROYED", self: true, label: "self" }));
@@ -47,7 +52,7 @@ test("the plan's stop conditions read as written", () => {
   assert.ok(!matches("DESTROYED self", ARRIVE), "another kind never matches");
 });
 
-test("fields resolve on the event, then one level down, then under ext.<plugin>, and lists match on any element", () => {
+test("fields resolve on the event, then one level down, then under ext.<plugin>, and lists match on any element", LU, () => {
   assert.ok(matches("ARRIVE typeName=Stiletto", ARRIVE), "members.typeName");
   assert.ok(matches("ARRIVE members.label~stiletto", ARRIVE));
   assert.ok(matches("ARRIVE lu.huntPhase=committed order.mode=committed", ARRIVE), "<plugin>.<field> and a plugin's nested field");
@@ -63,7 +68,7 @@ test("fields resolve on the event, then one level down, then under ext.<plugin>,
   assert.ok(matches('ARRIVE label="Guristas Worm"', ARRIVE), "quotes keep spaces");
 });
 
-test("distances and times take units, and every event has t", () => {
+test("distances and times take units, and every event has t", LU, () => {
   assert.ok(matches("ARRIVE distanceMeters<=30km", ARRIVE));
   assert.ok(!matches("ARRIVE distanceMeters<20km", ARRIVE));
   assert.ok(matches("ARRIVE t<=3min", ARRIVE));
@@ -71,7 +76,7 @@ test("distances and times take units, and every event has t", () => {
   assert.ok(matches("INCOMING etaMs<=95s", { kind: "INCOMING", etaMs: 95_000 }));
 });
 
-test("self means the player's ship, kind by kind", () => {
+test("self means the player's ship, kind by kind", LU, () => {
   assert.ok(matches("HUNT self", { kind: "HUNT", targetSelf: true }));
   assert.ok(matches("TARGET self locked", { kind: "TARGET", targetLabel: "self", locked: true }));
   assert.ok(matches("DAMAGE self layer=shield toPct<50", { kind: "DAMAGE", label: "self", layer: "shield", toPct: 40 }));
@@ -79,7 +84,7 @@ test("self means the player's ship, kind by kind", () => {
   assert.throws(() => parseCondition("ARRIVE self"), /"self" has no meaning for ARRIVE/);
 });
 
-test("a $name matches what a trigger bound, and nothing before it is bound", () => {
+test("a $name matches what a trigger bound, and nothing before it is bound", LU, () => {
   const bindings = new Set(["scout"]);
   const condition = parseCondition("INCOMING flightID=$scout", { bindings });
   const event = { kind: "INCOMING", flightID: "living_flight_0908" };
@@ -89,7 +94,7 @@ test("a $name matches what a trigger bound, and nothing before it is bound", () 
   assert.throws(() => parseCondition("ARRIVE count=$scout", { bindings }), /compares IDs or text/);
 });
 
-test("an unknown kind, field, operator or value fails when the condition is read", () => {
+test("an unknown kind, field, operator or value fails when the condition is read", LU, () => {
   assert.throws(() => parseCondition("ARIVE family=pirate"), /unknown event kind "ARIVE"/);
   assert.throws(() => parseCondition("ARRIVE famly=pirate"), /ARRIVE has no field "famly". Fields: .*lu\.family/);
   assert.throws(() => parseCondition("ARRIVE count~3"), /is a number/);
@@ -120,7 +125,7 @@ function leafPaths(event, prefix = "", out = []) {
   return out;
 }
 
-test("every field the grid differ and off-grid tracker emit can be named in a condition", () => {
+test("every field the grid differ and off-grid tracker emit can be named in a condition", LU, () => {
   const self = { kind: "ship", itemID: 1, isSelf: true, typeName: "Rifter", name: "Rifter", mode: "STOP", distanceMeters: 0,
     position: { x: 0, y: 0, z: 0 }, shieldRatio: 1, armorRatio: 1, hullRatio: 1 };
   const lu = { flightID: "f", actorID: "a", family: "pirate", faction: "Guristas Pirates", corporation: "Guristas",
@@ -207,7 +212,7 @@ const GOOD = {
   expect: ["SIGHTING", { match: "ARRIVE flightID=$scout", note: "the scout lands" }, "no DIVERGE"],
 };
 
-test("a scenario loads to its steps, conditions and defaults", () => {
+test("a scenario loads to its steps, conditions and defaults", LU, () => {
   const scenario = validateScenario(GOOD, { ...STUBS, defaultName: "pirates" });
   assert.strictEqual(scenario.name, "pirates");
   assert.deepStrictEqual(scenario.setup.map((step) => step.type),
@@ -224,7 +229,7 @@ test("a scenario loads to its steps, conditions and defaults", () => {
     [["SIGHTING", false], ["ARRIVE flightID=$scout", false], ["no DIVERGE", true]]);
 });
 
-test("every problem in a scenario is reported at load, each with where it is", () => {
+test("every problem in a scenario is reported at load, each with where it is", LU, () => {
   const bad = {
     world: "nowhere",
     colour: "red",
@@ -273,7 +278,7 @@ test("a scenario that can't fit in one bridge watch is refused", () => {
     /add up to 3060 s; a run fits in 3000 s/);
 });
 
-test("every shipped scenario loads", () => {
+test("every shipped scenario loads", LU, () => {
   const rows = listScenarios();
   for (const name of ["pirate-stalking", "gate-rats", "lu-traffic", "alliance-skirmish", "concord-highsec"]) {
     assert.ok(rows.some((row) => row.name === name), `the first scenarios include ${name}`);
@@ -393,7 +398,7 @@ function fakeOps(script, { failStep = null, triggerReply = null } = {}) {
 const scenarioOf = (raw) => validateScenario({ world: "lowsec-docked", setup: ["undock"], ...raw }, { ...STUBS, defaultName: "t" });
 
 // The phase's done-when: one expectation that can't be met.
-test("a run stops at its stop condition, flags the unmet expectation and keeps the whole timeline", async () => {
+test("a run stops at its stop condition, flags the unmet expectation and keeps the whole timeline", LU, async () => {
   const scenario = scenarioOf({
     until: { any: ["HERE"], timeout: 5, grace: 0.15 },
     expect: ["GRID systemName=Amamake", { match: "SYSTEM toSystemName=Jita", note: "can't happen" }],
@@ -479,7 +484,7 @@ test("a refused setup step ends the run there, and the server still goes down", 
   assert.match(renderReport(result, { runID: "r", scenario }), /DID NOT COMPLETE[\s\S]*\*\*setup failed\*\* at `slash \/tr me Jita`/);
 });
 
-test("a trigger with retry is tried again until the feature accepts it, and gives up after `for`", async () => {
+test("a trigger with retry is tried again until the feature accepts it, and gives up after `for`", LU, async () => {
   const scenario = scenarioOf({ setup: [{ trigger: "hunt", as: "hunt", retry: { every: 0.05, for: 1 } }],
     until: { timeout: 1 }, expect: ["GRID"] });
   assert.match(describeStep(scenario.setup[1]), /trigger hunt as \$hunt \(retry every 0.05s for 1s\)/);
@@ -503,7 +508,7 @@ test("a trigger with retry is tried again until the feature accepts it, and give
     /retry/);
 });
 
-test("waitFor holds setup until its condition, and a trigger's binding reaches later steps and conditions", async () => {
+test("waitFor holds setup until its condition, and a trigger's binding reaches later steps and conditions", LU, async () => {
   const scenario = scenarioOf({
     setup: [{ trigger: "scout", as: "scout" }, { waitFor: "ENTER flightID=$scout", timeout: 2 },
       { trigger: "materialize", flight: "$scout" }],
@@ -524,7 +529,7 @@ test("waitFor holds setup until its condition, and a trigger's binding reaches l
   assert.ok(kinds.indexOf("STEP") < kinds.indexOf("ENTER:f1"));
 });
 
-test("a waitFor that never sees its condition fails setup; a watch that ends early is a failed run", async () => {
+test("a waitFor that never sees its condition fails setup; a watch that ends early is a failed run", LU, async () => {
   const waiting = await runScenario(scenarioOf({ setup: [{ waitFor: "HUNT self", timeout: 0.1 }], until: { timeout: 1 }, expect: ["GRID"] }),
     fakeOps([]));
   assert.match(waiting.failure.error, /not seen in 0.1s/);
@@ -555,7 +560,7 @@ test("an interrupt stops the run and still takes the server down", async () => {
   assert.strictEqual(exitCodeFor(result), 2);
 });
 
-test("player action steps load in setup and during, with their targets, modules and bindings checked", () => {
+test("player action steps load in setup and during, with their targets, modules and bindings checked", LU, () => {
   const scenario = scenarioOf({
     setup: ["undock", { loadAmmo: "weapons", charge: "EMP S" }, { trigger: "fleet", family: "police", to: "self", as: "police" }],
     during: [{ lock: "flight=$police", as: "mark", retry: { every: 5, for: 60 } }, { activate: "weapons", target: "$mark", once: true },

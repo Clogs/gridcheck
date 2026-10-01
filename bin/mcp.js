@@ -15,11 +15,11 @@ const fs = require("node:fs");
 const path = require("node:path");
 
 const { formatOffset, formatTimelineEvent } = require("../core/timeline");
-const { defaultRegistry } = require("../core/plugins");
+const { DEFAULT_TREE_ROOT, defaultRegistry } = require("../core/plugins");
 const { kindsOf } = require("../core/conditions");
 const { scenarioDirs } = require("../core/scenario");
 
-const REPO_ROOT = path.resolve(__dirname, "..", "..", "..");
+const REPO_ROOT = DEFAULT_TREE_ROOT;
 const REGISTRY = defaultRegistry();
 const CLI_PATH = path.join(__dirname, "e2e.js");
 const E2E_DIR = path.join(REPO_ROOT, "_local", "e2e");

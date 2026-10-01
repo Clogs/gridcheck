@@ -6,6 +6,7 @@
 
 const test = require("node:test");
 const assert = require("node:assert");
+const { needsPlugin } = require("./tree");
 
 const {
   actionFromArgs,
@@ -30,7 +31,11 @@ const ROWS = [
   { itemID: 5, kind: "ship", name: "Other Pilot", typeName: "Merlin", distanceMeters: 50_000, characterID: 7 },
 ];
 
-test("a target is the nearest ball that passes every term, never self", () => {
+// These read the lu plugin through the default registry, so they need a tree
+// with the mod (npm run test:tree -- <tree>).
+const LU = needsPlugin("lu");
+
+test("a target is the nearest ball that passes every term, never self", LU, () => {
   assert.strictEqual(pickTarget(ROWS, "nearest npc").itemID, 90);
   assert.strictEqual(pickTarget(ROWS, "npc family=police").itemID, 77);
   assert.strictEqual(pickTarget(ROWS, "type~slasher").itemID, 78);
@@ -43,7 +48,7 @@ test("a target is the nearest ball that passes every term, never self", () => {
   assert.throws(() => pickTarget(ROWS, "1"), /no ball on grid matches/, "self is never a target");
 });
 
-test("a $name target matches a bound ball or a bound group; a plugin's terms match its own data", () => {
+test("a $name target matches a bound ball or a bound group; a plugin's terms match its own data", LU, () => {
   assert.strictEqual(pickTarget(ROWS, "$police", { police: ["living_flight_0630", "owner-1"] }).itemID, 77);
   assert.strictEqual(pickTarget(ROWS, "$mark", { mark: ["78"] }).itemID, 78);
   assert.strictEqual(pickTarget(ROWS, "flight=$police", { police: ["living_flight_0630"] }).itemID, 77);
@@ -116,7 +121,7 @@ function fakeIO({ grid = { characterID: 9, self: { itemID: 1 }, entities: ROWS }
   return io;
 }
 
-test("movement actions are the beyonce calls a client makes, with their ranges", async () => {
+test("movement actions are the beyonce calls a client makes, with their ranges", LU, async () => {
   const io = fakeIO();
   await runAction({ type: "approach", target: "flight=living_flight_0630" }, io);
   await runAction({ type: "orbit", target: "77" }, io);
@@ -135,7 +140,7 @@ test("movement actions are the beyonce calls a client makes, with their ranges",
   assert.deepStrictEqual(stop, { ok: true, text: "stopping the ship", ids: [] });
 });
 
-test("a lock waits until the server lists the target, and binds it", async () => {
+test("a lock waits until the server lists the target, and binds it", LU, async () => {
   const io = fakeIO({ lockAfter: 3 });
   const locked = await runAction({ type: "lock", target: "npc family=police" }, io);
   assert.strictEqual(locked.ok, true);

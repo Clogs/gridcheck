@@ -1,6 +1,6 @@
 "use strict";
 
-// The agent bridge (server/src/_secondary/agentBridge): the grid reader, the
+// The agent bridge (bridge/): the grid reader, the
 // routes and the loopback HTTP layer, each built from injected seams so none of
 // it needs a booted server. The live path is checked by docs/E2E-GRID-TESTING.md.
 
@@ -16,7 +16,9 @@ const { createAgentBridgeRoutes } = require("../bridge/routes");
 const { createLuRoutes } = require("../plugins/lu/server/routes");
 const { createAgentBridgeHttp, removeHandshake } =
   require("../bridge/http");
-const agentBridgeService = require("../../../server/src/_secondary/agentBridge/server");
+const { needsPlugin, serverModule } = require("./tree");
+// What a tree's shim exports. Nothing reads the server root until exec().
+const agentBridgeService = require("../bridge/entry").createService({ serverRoot: path.join(os.tmpdir(), "no-tree", "server") });
 
 function projectEntity(entity, egoItemID) {
   return {
@@ -225,7 +227,9 @@ test("the service is off unless EVEJS_AGENT_BRIDGE turns it on", () => {
 // ---------- triggers (agentBridgeTriggers.js) ----------
 
 const { createAgentBridgeTriggers } = require("../plugins/lu/server/triggers");
-const scouts = require("../../../server/src/_secondary/pirateScouts");
+// The real scout module, so these need a tree with the mod.
+const LU = needsPlugin("lu");
+const scouts = () => serverModule("_secondary/pirateScouts");
 
 // One system (1) with the character's ship, a scout and a gang; the hunt tick is
 // run inline. Every LU call is recorded so a test reads what the trigger asked for.
@@ -285,12 +289,12 @@ function triggerWorld({ docked = false } = {}) {
     simNow: () => 1000,
     staticAnchors: () => [{ itemID: 40, kind: "stargate" }],
     executeChatCommand: (_s, line) => { calls.push(["chat", line]); return { success: true, message: "jumped" }; },
-    scouts,
+    scouts: scouts(),
   });
   return { triggers, calls, flights, ship, session };
 }
 
-test("trigger hunt: a scout on your system scans you and the coordinator's start runs on that report", async () => {
+test("trigger hunt: a scout on your system scans you and the coordinator's start runs on that report", LU, async () => {
   const w = triggerWorld();
   const reply = await w.triggers.run("hunt", { characterID: 7, phase: "committed" });
   assert.strictEqual(reply.statusCode, 200, JSON.stringify(reply.body));
@@ -313,7 +317,7 @@ test("trigger hunt: a scout on your system scans you and the coordinator's start
   assert.strictEqual((await w.triggers.run("hunt", { characterID: 7, phase: "returning" })).statusCode, 400);
 });
 
-test("trigger scout: the nearest ready scout takes a patrol leg, diverting an existing patrol", async () => {
+test("trigger scout: the nearest ready scout takes a patrol leg, diverting an existing patrol", LU, async () => {
   const w = triggerWorld();
   w.flights.scout.busy = true;
   const reply = await w.triggers.run("scout", { characterID: 7, systemID: 4 });
@@ -344,7 +348,7 @@ test("trigger scout: the nearest ready scout takes a patrol leg, diverting an ex
   assert.strictEqual(unviable.body.canHunt, false, "still sent, and says it can't lead a hunt");
 });
 
-test("trigger fleet: ready flights of the family and doctrine are claimed to hold on your grid", async () => {
+test("trigger fleet: ready flights of the family and doctrine are claimed to hold on your grid", LU, async () => {
   const w = triggerWorld();
   const reply = await w.triggers.run("fleet", { characterID: 7, family: "pirate", doctrine: "gurist", to: "self", count: 3 });
   assert.strictEqual(reply.statusCode, 200, JSON.stringify(reply.body));
@@ -361,7 +365,7 @@ test("trigger fleet: ready flights of the family and doctrine are claimed to hol
   assert.strictEqual((await bySystem.triggers.run("fleet", { characterID: 7, family: "salvage" })).statusCode, 409);
 });
 
-test("trigger materialize pins the flight and --go jumps only when you are elsewhere", async () => {
+test("trigger materialize pins the flight and --go jumps only when you are elsewhere", LU, async () => {
   const w = triggerWorld();
   const here = await w.triggers.run("materialize", { characterID: 7, flightID: "police", go: true });
   assert.strictEqual(here.body.madeDue, true);
@@ -374,11 +378,11 @@ test("trigger materialize pins the flight and --go jumps only when you are elsew
   assert.strictEqual((await w.triggers.run("spawn", {})).statusCode, 404);
 });
 
-test("a trigger whose tick comes too late answers 503 and then does nothing", async () => {
+test("a trigger whose tick comes too late answers 503 and then does nothing", LU, async () => {
   let lateTick = null;
   const triggers = createAgentBridgeTriggers({
     findSession: () => ({ characterID: 7, solarsystemid2: 1 }), space: {}, lu: {}, simNow: () => 0,
-    staticAnchors: () => [], tickTimeoutMs: 5, scouts,
+    staticAnchors: () => [], tickTimeoutMs: 5, scouts: scouts(),
     // The tick never comes until the test runs it, after the caller has given up.
     hunts: { requestInTick: run => { lateTick = () => run({ flights: [] }); return new Promise(() => {}); } },
   });

@@ -5,6 +5,7 @@
 
 const test = require("node:test");
 const assert = require("node:assert");
+const { needsPlugin } = require("./tree");
 
 const {
   collectIDs,
@@ -15,12 +16,16 @@ const {
   parseLogLine,
 } = require("../core/timeline");
 
+// These read the lu plugin through the default registry, so they need a tree
+// with the mod (npm run test:tree -- <tree>).
+const LU = needsPlugin("lu");
+
 test("offsets read t+HH:MM:SS, and t- for a step from before the watch", () => {
   assert.strictEqual(formatOffset(138_000), "t+00:02:18");
   assert.strictEqual(formatOffset(-65_000), "t-00:01:05");
 });
 
-test("the pirate-stalking lines read as the plan's example", () => {
+test("the pirate-stalking lines read as the plan's example", LU, () => {
   const hunt = formatTimelineEvent({
     t: 10_000, kind: "HUNT", phase: "stalking", reason: "scout-discovery", targetSelf: true, distanceMeters: 182_000,
     leader: { flightID: "living_flight_4411", corporation: "Guristas", pirateRole: "scout", count: 1 },
@@ -93,7 +98,7 @@ test("client lines read what the client was sent, and DIVERGE says which side is
   ]);
 });
 
-test("a plugin formats its own kinds and tags core lines; without it they read raw", () => {
+test("a plugin formats its own kinds and tags core lines; without it they read raw", LU, () => {
   const { emptyRegistry } = require("../core/plugins");
   const hunt = { t: 0, kind: "HUNT", phase: "stalking", reason: "x", leader: { flightID: "f1" } };
   assert.match(formatTimelineEvent(hunt), /^t\+00:00:00 {2}HUNT {6}f1 {2}x/);
@@ -116,7 +121,7 @@ test("log lines parse to server time, pid, level and text", () => {
   assert.strictEqual(parseLogLine("not a log line"), null);
 });
 
-test("log lines are kept when they name something the watch has seen", () => {
+test("log lines are kept when they name something the watch has seen", LU, () => {
   const ids = collectIDs({ kind: "ARRIVE", ext: { lu: { flightID: "living_flight_4420" } }, members: [{ itemID: 990001 }] }, new Set());
   assert.strictEqual(mentionsAny("[LivingHostility] flight=living_flight_4420 armed", ids), true);
   assert.strictEqual(mentionsAny("[NpcController] npc=990001 state=active", ids), true);

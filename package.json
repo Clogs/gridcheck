@@ -1,0 +1,18 @@
+{
+  "name": "evejs-e2e",
+  "version": "0.1.0-dev",
+  "description": "Boot an EveJS server, fly a headless character and read the grid as a timeline.",
+  "private": true,
+  "license": "AGPL-3.0-only",
+  "engines": {
+    "node": ">=24"
+  },
+  "bin": {
+    "e2e": "bin/e2e.js",
+    "e2e-mcp": "bin/mcp.js"
+  },
+  "scripts": {
+    "test": "node test/run.js",
+    "test:tree": "node test/run.js --tree"
+  }
+}

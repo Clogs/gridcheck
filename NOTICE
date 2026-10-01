@@ -1,0 +1,18 @@
+evejs-e2e
+Copyright (C) 2026 the evejs-e2e contributors
+
+This program is free software: you can redistribute it and/or modify it under the terms of the
+GNU Affero General Public License as published by the Free Software Foundation, version 3 of the
+License. See LICENSE.
+
+evejs-e2e is a test harness for EVE.js, an EVE Online server emulator, and runs inside an EVE.js
+server process. EVE.js is licensed AGPL-3.0, and the harness is licensed the same way. The
+destiny decoder in bridge/destiny.js mirrors EVE.js's ball encoding, and the bridge calls EVE.js
+modules from the tree it is installed in. That server code is EVE.js's work.
+
+plugins/lu is the half of the harness for the X-Eve Living Universe mod, a fork of EVE.js.
+
+This project is independent, and is not affiliated with, endorsed by or sponsored by CCP Games or
+the EVE.js project. EVE Online and all related names, logos, marks and assets belong to their
+respective owners; EVE-related trademarks belong to CCP Games. No CCP client, assets or static
+data are distributed here.

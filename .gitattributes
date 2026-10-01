@@ -1,0 +1,4 @@
+# Line endings are byte-exact. Some files are CRLF and some LF, and `e2e vendor update` copies
+# them into each tree as they are committed here. core.autocrlf defaults to true on Windows, so
+# without this rule a Windows checkout of this repo would rewrite them.
+* -text

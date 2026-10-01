@@ -7,6 +7,7 @@
 
 const test = require("node:test");
 const assert = require("node:assert");
+const { needsPlugin } = require("./tree");
 const { spawn } = require("node:child_process");
 const path = require("node:path");
 
@@ -15,7 +16,11 @@ const { renderReport } = require("../core/scenario");
 
 const MCP_PATH = path.resolve(__dirname, "..", "bin", "mcp.js");
 
-test("the spec's tools are listed, plugin tools named for their plugin, each with an object schema", () => {
+// These read the lu plugin through the default registry, so they need a tree
+// with the mod (npm run test:tree -- <tree>).
+const LU = needsPlugin("lu");
+
+test("the spec's tools are listed, plugin tools named for their plugin, each with an object schema", LU, () => {
   const names = mcp.TOOLS.map((tool) => tool.name);
   for (const name of ["e2e_up", "e2e_down", "e2e_grid", "e2e_slash", "e2e_watch", "e2e_lu_trigger", "e2e_run_scenario", "e2e_report"]) {
     assert.ok(names.includes(name), `${name} is listed`);
@@ -26,7 +31,7 @@ test("the spec's tools are listed, plugin tools named for their plugin, each wit
   }
 });
 
-test("tools map onto CLI arguments; free text goes after --", () => {
+test("tools map onto CLI arguments; free text goes after --", LU, () => {
   assert.deepStrictEqual(mcp.cliArgs("e2e_up", { world: "lowsec-docked", realClock: true, market: false, offgridTravel: 5 }),
     ["up", "--world=lowsec-docked", "--no-market", "--real-clock", "--offgrid-travel=5"], "the lu plugin's up flags too");
   assert.deepStrictEqual(mcp.cliArgs("e2e_up", {}), ["up"]);
@@ -41,7 +46,7 @@ test("tools map onto CLI arguments; free text goes after --", () => {
   assert.deepStrictEqual(mcp.cliArgs("e2e_down", { force: true }), ["down", "--force"]);
 });
 
-test("the lu plugin's trigger tool uses the scenario step's names", () => {
+test("the lu plugin's trigger tool uses the scenario step's names", LU, () => {
   assert.deepStrictEqual(mcp.cliArgs("e2e_lu_trigger", { name: "scout", system: "Amamake", flight: "f1" }),
     ["trigger", "--flight=f1", "--", "scout", "Amamake"]);
   assert.deepStrictEqual(mcp.cliArgs("e2e_lu_trigger", { name: "hunt", phase: "committed" }),
@@ -55,7 +60,7 @@ test("the lu plugin's trigger tool uses the scenario step's names", () => {
   assert.throws(() => mcp.cliArgs("e2e_trigger", {}), /no CLI command for e2e_trigger/, "no core trigger tool");
 });
 
-test("the instructions are the core's, then each plugin's primer", () => {
+test("the instructions are the core's, then each plugin's primer", LU, () => {
   const { emptyRegistry } = require("../core/plugins");
   const core = mcp.instructions(emptyRegistry());
   assert.match(core, /e2e_run_scenario/);
@@ -87,7 +92,7 @@ test("player actions use the scenario step's names, and the CLI reads them back 
     ["watch", "--for=60", "--client=fx", "--positions"]);
 });
 
-test("arguments are checked against each tool's schema before the CLI runs", () => {
+test("arguments are checked against each tool's schema before the CLI runs", LU, () => {
   const tool = (name) => mcp.TOOLS.find((row) => row.name === name);
   assert.deepStrictEqual(mcp.checkParams(tool("e2e_slash"), {}), ["command is required"]);
   assert.match(mcp.checkParams(tool("e2e_grid"), { range: "far" })[0], /range must be a number/);
@@ -107,12 +112,14 @@ test("a bad scenario name is refused before anything is written", async () => {
   assert.match(missing.content[0].text, /pass name \(a scenario file\), or name and scenario/);
 });
 
-test("a bare scenario name is the tree's file, the core's or a plugin's; a path is a path", () => {
+test("a bare scenario name is the tree's file, the core's or a plugin's; a path is a path", LU, () => {
   const tree = path.resolve(__dirname, "..", "scenarios");
   assert.strictEqual(mcp.resolveScenario("smoke-undock"), path.join(tree, "smoke-undock.json"));
   assert.strictEqual(mcp.resolveScenario("fleet-to-grid"),
     path.resolve(__dirname, "..", "plugins", "lu", "scenarios", "fleet-to-grid.json"));
-  assert.strictEqual(mcp.resolveScenario("tools/evejs-e2e/scenarios/x.json"), path.join(tree, "x.json"));
+  const { DEFAULT_TREE_ROOT } = require("../core/plugins");
+  assert.strictEqual(mcp.resolveScenario("tools/evejs-e2e/scenarios/x.json"),
+    path.join(DEFAULT_TREE_ROOT, "tools", "evejs-e2e", "scenarios", "x.json"), "a path is from the tree's root");
   assert.ok(mcp.committedScenario("tools/evejs-e2e/plugins/lu/scenarios/fleet-to-grid.json"));
   assert.ok(!mcp.committedScenario("_local/e2e/scenarios/fleet-to-grid.json"));
 });
