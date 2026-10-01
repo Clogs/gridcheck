@@ -2,8 +2,13 @@
 
 // The server halves of the plugins (loader and tool halves: core/plugins.js).
 // server(ctx) answers the hooks the bridge calls:
-//   annotate(entity, { row, nowMs, characterID }) -> { groupKey, ext } | null
-//       per grid row; ext lands on row.ext[<plugin>]
+//   annotate(entity, { row, nowMs, characterID }) -> { groupKey, ext, hidden, pos } | null
+//       per grid row: ext lands on row.ext[<plugin>] and rides on every event
+//       about the ball; groupKey groups balls arriving and leaving together;
+//       hidden is for the plugin's own onGrid hook; pos is the few fields a
+//       tactical frame keeps for the plugin's colours
+//   onGrid.watch({ characterID, startedAtMs }) -> { step(entries, ctx) -> events }
+//       one per watch, run on every sample in space (watch.js createGridDiffer)
 //   offGrid.watch({ characterID, startedAtMs }) -> { scan(systemID, context) -> { events, stats } }
 //       one scanner per watch, run every offGridEveryMs while in space
 //   routes: { "POST /trigger/*": ({ query, body, route, rest }) -> reply }
@@ -31,6 +36,7 @@ function startPlugins(loaded, ctx, { log = null } = {}) {
       hooks.push({
         name,
         annotate: typeof answer.annotate === "function" ? answer.annotate : null,
+        onGrid: answer.onGrid && typeof answer.onGrid.watch === "function" ? answer.onGrid : null,
         offGrid: answer.offGrid && typeof answer.offGrid.watch === "function" ? answer.offGrid : null,
         routes: answer.routes && typeof answer.routes === "object" ? answer.routes : {},
         stop: typeof answer.stop === "function" ? answer.stop : null,

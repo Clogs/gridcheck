@@ -2,7 +2,7 @@
 
 // Loopback HTTP for the agent bridge. The token lives in memory and in the
 // handshake file only, written at listen and removed at close, so the file's
-// absence means "no bridge". Same handshake shape as the LU Monitor bridge.
+// absence means "no bridge".
 
 const crypto = require("crypto");
 const fs = require("fs");

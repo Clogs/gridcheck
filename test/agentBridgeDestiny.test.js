@@ -375,7 +375,7 @@ test("client mode fx keeps the client's special effects and DIVERGE, without CLI
   assert.deepStrictEqual([fx.guid, fx.label, fx.targetID, fx.offensive], ["effects.ProjectileFired", "self", "2", true]);
 });
 
-test("/grid?lu=1 adds each LU ship's flight and family; without it the grid is as before", () => {
+test("/grid?ext=1 adds the plugins' annotations to each row; without it the grid is as before", () => {
   const session = gatewaySession();
   const seen = [];
   const routes = createAgentBridgeRoutes({
@@ -387,12 +387,14 @@ test("/grid?lu=1 adds each LU ship's flight and family; without it the grid is a
     },
     gridAnnotate: (row, entity, forSession) => {
       seen.push(forSession === session);
-      Object.assign(row, { flightID: "living_flight_0630", family: "police" });
+      Object.assign(row, { groupKey: "gang:a", ext: { demo: { side: "raiders" } } });
     },
   });
-  assert.deepStrictEqual(routes.handle("GET", "/grid", { characterID: "7", lu: "1" }).body.grid.entities,
-    [{ itemID: 2, isNpc: true, flightID: "living_flight_0630", family: "police" }]);
+  assert.deepStrictEqual(routes.handle("GET", "/grid", { characterID: "7", ext: "1" }).body.grid.entities,
+    [{ itemID: 2, isNpc: true, groupKey: "gang:a", ext: { demo: { side: "raiders" } } }]);
   assert.deepStrictEqual(routes.handle("GET", "/grid", { characterID: "7" }).body.grid.entities, [{ itemID: 2, isNpc: true }]);
+  assert.deepStrictEqual(routes.handle("GET", "/grid", { characterID: "7", lu: "1" }).body.grid.entities, [{ itemID: 2, isNpc: true }],
+    "the old ?lu=1 is gone");
   assert.deepStrictEqual(seen, [true]);
 });
 

@@ -77,8 +77,8 @@
 
   function summary(e) {
     switch (e.kind) {
-      case "ARRIVE": return `${group(e)} ${e.warpIn ? "warp-in " : ""}${distance(e.distanceMeters)} from self${e.flightID ? `  ${e.flightID}` : ""}`;
-      case "LEAVE": return `${group(e)} ${e.warped ? "warped off" : "left grid"}${e.flightID ? `  ${e.flightID}` : ""}`;
+      case "ARRIVE": return `${group(e)} ${e.warpIn ? "warp-in " : ""}${distance(e.distanceMeters)} from self${e.groupKey ? `  ${e.groupKey}` : ""}`;
+      case "LEAVE": return `${group(e)} ${e.warped ? "warped off" : "left grid"}${e.groupKey ? `  ${e.groupKey}` : ""}`;
       case "PRESENT": return `${group(e)} at ${distance(e.distanceMeters)}`;
       case "MODE": return `${e.label} ${e.from || "-"} -> ${e.to || "-"}${e.targetLabel ? ` ${e.targetLabel}` : ""}`;
       case "TARGET": return `${e.sourceLabel} -> ${e.targetLabel} ${e.locked ? "locked" : "unlocked"}`;
@@ -327,10 +327,9 @@
     return node;
   }
 
-  // A plugin's data on a POS ball, at ball.ext.<plugin>; balls written before
-  // the watch wrote ext carry it flat.
+  // A plugin's data on a POS ball, at ball.ext.<plugin>.
   function ballData(ball, plugin) {
-    return (ball.ext && ball.ext[plugin]) || ball;
+    return (ball.ext && ball.ext[plugin]) || {};
   }
 
   function colourFor(ball) {
@@ -342,7 +341,7 @@
       .every(([field, value]) => String(ballData(ball, entry.plugin)[field]) === String(value)));
     if (rule) return rule.colour;
     if (!ball.who) return COLOURS.neutral;
-    const key = ball.flightID || ball.family || (ball.corp ? `corp:${ball.corp}` : `name:${String(ball.label || "").split(" ")[0]}`);
+    const key = ball.group || (ball.corp ? `corp:${ball.corp}` : `name:${String(ball.label || "").split(" ")[0]}`);
     if (!state.palette.has(key)) state.palette.set(key, COLOURS.others[state.palette.size % COLOURS.others.length]);
     return state.palette.get(key);
   }
@@ -492,7 +491,7 @@
       const c = colour.get(ball.id);
       const shape = shapeFor(ball, p.x, p.y, TRACKED.has(ball.kind) ? 6 : 5, c);
       shape.append(title(`${ball.label}${ball.type ? ` (${ball.type})` : ""}  ${distance(fromSelf(ball))}` +
-        `${ball.mode ? `  ${ball.mode}` : ""}${ball.flightID ? `  ${ball.flightID}` : ""}  #${ball.id}`));
+        `${ball.mode ? `  ${ball.mode}` : ""}${ball.group ? `  ${ball.group}` : ""}  #${ball.id}`));
       svg.append(shape);
       if (hit.has(ball.id)) svg.append(el("circle", { cx: p.x, cy: p.y, r: 11, fill: "none", stroke: "#bc4c00", "stroke-width": 2 }));
       if (diverged.has(ball.id)) {
@@ -530,7 +529,7 @@
       swatch.style.background = colour.get(ball.id);
       item.append(swatch, `${(ball.who === "self" ? "self" : distance(fromSelf(ball))).padEnd(9)} ${(ball.mode || "-").padEnd(8)} ` +
         `${ball.label}${ball.type ? ` (${ball.type})` : ""}`);
-      item.title = `#${ball.id}${ball.flightID ? ` ${ball.flightID}` : ""}`;
+      item.title = `#${ball.id}${ball.group ? ` ${ball.group}` : ""}`;
       ballList.append(item);
     }
     $("ball-count").textContent = `(${tracked.length})`;

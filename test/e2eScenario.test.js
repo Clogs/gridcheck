@@ -26,12 +26,15 @@ const { createToolRegistry, emptyRegistry } = require("../core/plugins");
 const { triggerIDs } = require("../plugins/lu/tool/triggers");
 const { createGridDiffer } = require("../bridge/watch");
 const { createOffGridTracker } = require("../plugins/lu/server/offGrid");
+const { createLuAnnotate } = require("../plugins/lu/server/join");
+const { createLuOnGrid } = require("../plugins/lu/server/onGrid");
 
 const ARRIVE = {
-  seq: 9, t: 138_000, kind: "ARRIVE", flightID: "living_flight_4420", count: 4, who: "npc", warpIn: true,
+  seq: 9, t: 138_000, kind: "ARRIVE", groupKey: "flight:living_flight_4420", count: 4, who: "npc", warpIn: true,
   distanceMeters: 24_000,
   members: [{ itemID: 2, label: "Guristas Worm", typeName: "Worm" }, { itemID: 3, label: "Guristas Stiletto", typeName: "Stiletto" }],
-  lu: { flightID: "living_flight_4420", family: "pirate", corporation: "Guristas", huntPhase: "committed", order: { mode: "committed" } },
+  ext: { lu: { flightID: "living_flight_4420", family: "pirate", corporation: "Guristas", huntPhase: "committed",
+    order: { mode: "committed" } } },
 };
 
 const matches = (text, event, ctx) => parseCondition(text, ctx).test(event, ctx);
@@ -44,10 +47,12 @@ test("the plan's stop conditions read as written", () => {
   assert.ok(!matches("DESTROYED self", ARRIVE), "another kind never matches");
 });
 
-test("fields resolve on the event, then one level down, and lists match on any element", () => {
+test("fields resolve on the event, then one level down, then under ext.<plugin>, and lists match on any element", () => {
   assert.ok(matches("ARRIVE typeName=Stiletto", ARRIVE), "members.typeName");
   assert.ok(matches("ARRIVE members.label~stiletto", ARRIVE));
-  assert.ok(matches("ARRIVE lu.huntPhase=committed order.mode=committed", ARRIVE));
+  assert.ok(matches("ARRIVE lu.huntPhase=committed order.mode=committed", ARRIVE), "<plugin>.<field> and a plugin's nested field");
+  assert.ok(matches("ARRIVE ext.lu.family=pirate flightID=living_flight_4420", ARRIVE), "the full path, and a plain name");
+  assert.ok(matches("ARRIVE groupKey=flight:living_flight_4420", ARRIVE));
   assert.ok(matches("ARRIVE corporation=guristas", ARRIVE), "text compares without case");
   assert.ok(matches("ARRIVE warpIn", ARRIVE), "a bare field is true when set");
   assert.ok(matches("ARRIVE !stillWarping", ARRIVE));
@@ -122,13 +127,16 @@ test("every field the grid differ and off-grid tracker emit can be named in a co
     pirateRole: "tackle", phase: "mission_holding", journeyKind: "pirate_hunt_support", journeyStage: "outbound",
     huntID: "h", huntRole: "support", huntPhase: "committed", huntReason: "r", order: { mode: "committed", role: "tackle" },
     decision: "engage", sightings: [{ observerID: 2, source: "sighting", certainty: "confirmed", observedAtMs: 5, observerFlightID: "f" }] };
+  // The rows the watch's annotate makes with the lu plugin's join (join.js).
+  const annotation = createLuAnnotate({ annotate: () => lu })({}, { row: { isNpc: true } });
   const npc = (itemID, extra = {}) => ({ kind: "ship", itemID, name: `N${itemID}`, typeName: "Worm", typeID: 17930, isNpc: true,
     npcEntityType: "npc", corporationID: 9, mode: "ORBIT", targetEntityID: 1, distanceMeters: 24_000,
-    position: { x: 24_000, y: 0, z: 0 }, shieldRatio: 1, armorRatio: 1, hullRatio: 1, lockedTargetIDs: [], lu, ...extra });
+    position: { x: 24_000, y: 0, z: 0 }, shieldRatio: 1, armorRatio: 1, hullRatio: 1, lockedTargetIDs: [],
+    groupKey: annotation.groupKey, ext: { lu: annotation.ext }, hidden: { lu: annotation.hidden }, ...extra });
   const grid = (entities, extra = {}) => ({ inSpace: true, solarSystemID: 30002537, systemName: "Amamake", security: 0.4,
     self: { itemID: 1, typeName: "Rifter", mode: "STOP", protection: { active: false, untilMs: null, remainingMs: 0, cloaked: false } },
     entities: [self, ...entities], ...extra });
-  const differ = createGridDiffer();
+  const differ = createGridDiffer({ gridHooks: [{ name: "lu", step: createLuOnGrid().watch({}).step }] });
   const events = [
     ...differ.step(grid([npc(2, { lockedTargetIDs: [1] })]), 1000),
     ...differ.step(grid([npc(3, { mode: "WARP" })]), 3000),
@@ -505,7 +513,7 @@ test("waitFor holds setup until its condition, and a trigger's binding reaches l
   const ops = fakeOps([
     { afterMs: 30, event: { kind: "ENTER", flightID: "other" } },
     { afterMs: 30, event: { kind: "ENTER", flightID: "f1" } },
-    { afterMs: 30, event: { kind: "ARRIVE", flightID: "f1", members: [] } },
+    { afterMs: 30, event: { kind: "ARRIVE", groupKey: "flight:f1", ext: { lu: { flightID: "f1" } }, members: [] } },
   ]);
   const result = await runScenario(scenario, ops);
   assert.deepStrictEqual(ops.calls, ["up", "step:login", "watch", "step:trigger", "step:trigger:f1", "down"]);

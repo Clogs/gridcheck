@@ -2,21 +2,19 @@
 
 // The agent bridge's routes, free of HTTP: each takes the parsed request and
 // answers { statusCode, body }. Every rule a slash command has stays in the
-// command handler; this only finds the session and passes the line through,
-// the way the LU Monitor bridge does.
+// command handler; this only finds the session and passes the line through.
 //
 //   GET  /health                     liveness, no token
 //   POST /slash    { characterID, command }  -> { handled, success, message }
 //   GET  /grid     ?characterID=      what that character's session can see
 //   POST /watch    { characterID, forSeconds, everySeconds, offGridEverySeconds, client, divergeMeters, positions }
-//                                     NDJSON stream of grid and LU changes; one call per watch.
+//                                     NDJSON stream of grid changes and plugin events; one call per watch.
 //                                     client: "all" (default), "diverge" or "off"
 //   POST /tee      { characterID }    start keeping the client's view of that gateway session
 //   POST /shutdown                    graceful stop, as if the process got SIGTERM
 //
-// Plugins add their own routes through the route table (plugins.js); the
-// Living Universe plugin's are /clock, /economy, /warp, /warp/stop and
-// /trigger/<name>. A plugin can't replace a core route.
+// Plugins add their own routes through the route table (plugins.js). A
+// plugin can't replace a core route.
 
 const { LIMITS } = require("./watch");
 
@@ -122,12 +120,12 @@ function createAgentBridgeRoutes({
     return result && typeof result.then === "function" ? result.then(settle) : settle(result);
   }
 
-  // ?ext=1 (or the older ?lu=1) runs the plugins' annotate hooks on each row,
-  // so a player action can pick its target by flight (`e2e act lock flight=$fleet`).
+  // ?ext=1 runs the plugins' annotate hooks on each row, so a player action
+  // can pick its target by a plugin's data or a group a step bound.
   function grid(query) {
     const found = sessionFor(query && query.characterID);
     if (found.error) return found.error;
-    const wantsExt = query && (query.ext === "1" || query.lu === "1");
+    const wantsExt = query && query.ext === "1";
     const options = wantsExt && typeof gridAnnotate === "function"
       ? { annotate: (row, entity) => gridAnnotate(row, entity, found.session) } : {};
     return { statusCode: 200, body: { ok: true, grid: readGrid(found.session, options) } };
@@ -143,7 +141,7 @@ function createAgentBridgeRoutes({
     }
     const forSeconds = secondsIn(body.forSeconds, 600, 1, LIMITS.maxForSeconds);
     const everySeconds = secondsIn(body.everySeconds, 2, LIMITS.minEverySeconds, LIMITS.maxEverySeconds);
-    // The off-grid scan walks every flight, so it runs less often than the grid sample.
+    // An off-grid scan may walk the whole world, so it runs less often than the grid sample.
     const offGridEverySeconds = secondsIn(body.offGridEverySeconds, Math.max(5, everySeconds || 2),
       LIMITS.minEverySeconds, LIMITS.maxEverySeconds);
     if (forSeconds === null || everySeconds === null || offGridEverySeconds === null) {

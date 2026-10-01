@@ -10,8 +10,8 @@
   "until": { "any": ["DESTROYED self"], "timeout": 240, "grace": 20 },
   "expect": [
     { "match": "GRID systemName=Siseide", "note": "the jump landed" },
-    { "match": "ARRIVE who=npc !flightID", "note": "rats, NPCs with no Living Universe flight, appear on the gate grid" },
-    { "match": "TARGET self locked !flightID", "note": "a rat locks the ship" },
+    { "match": "ARRIVE who=npc !groupKey", "note": "rats, NPCs no plugin puts in a group, appear on the gate grid" },
+    { "match": "TARGET self locked !groupKey", "note": "a rat locks the ship" },
     { "match": "DAMAGE self", "note": "and shoots it" },
     { "match": "no DIVERGE reason=server-only", "note": "every rat reached the client" }
   ]

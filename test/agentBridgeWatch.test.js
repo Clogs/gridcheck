@@ -17,8 +17,9 @@ const {
   createKillmailFinder,
   healthBand,
 } = require("../bridge/watch");
-const { createLuJoin, describeDecision } = require("../plugins/lu/server/join");
+const { createLuAnnotate, createLuJoin, describeDecision } = require("../plugins/lu/server/join");
 const { createOffGridTracker } = require("../plugins/lu/server/offGrid");
+const { createLuOnGrid } = require("../plugins/lu/server/onGrid");
 const { createAgentBridgeRoutes } = require("../bridge/routes");
 const { createAgentBridgeHttp } = require("../bridge/http");
 
@@ -37,15 +38,30 @@ function grid(entities, extra = {}) {
   };
 }
 
+// A row as the watch's annotate leaves it: the lu plugin's join at ext.lu,
+// its group key, and the hunter reports its onGrid hook reads at hidden.lu.
+function luRow(lu, sightings = []) {
+  return {
+    groupKey: lu.flightID ? `flight:${lu.flightID}` : null,
+    ext: { lu },
+    hidden: sightings.length ? { lu: { sightings } } : undefined,
+  };
+}
+
 function npc(itemID, overrides = {}) {
   return {
     kind: "ship", itemID, name: `Guristas ${itemID}`, typeName: "Worm", isNpc: true, npcEntityType: "npc",
     mode: "ORBIT", distanceMeters: 24_000, position: { x: 24_000, y: 0, z: 0 },
     shieldRatio: 1, armorRatio: 1, hullRatio: 1, lockedTargetIDs: [],
-    lu: { flightID: "living_flight_4420", corporation: "Guristas", family: "pirate", huntPhase: "committed",
-      decision: "hunt:committed/tackle", sightings: [] },
+    ...luRow({ flightID: "living_flight_4420", corporation: "Guristas", family: "pirate", huntPhase: "committed",
+      decision: "hunt:committed/tackle" }),
     ...overrides,
   };
+}
+
+// The differ with the lu plugin's onGrid hook, as a watch builds it.
+function luDiffer() {
+  return createGridDiffer({ gridHooks: [{ name: "lu", step: createLuOnGrid().watch({}).step }] });
 }
 
 const kinds = (events) => events.map((event) => event.kind);
@@ -58,13 +74,18 @@ test("health bands are quarters, and 100% is its own band", () => {
   assert.strictEqual(healthBand(null), null);
 });
 
-test("the first sample is a baseline: one GRID line, then what is present, grouped by flight", () => {
+test("the first sample is a baseline: one GRID line, then what is present, grouped by groupKey", () => {
   const differ = createGridDiffer();
   const events = differ.step(grid([npc(2), npc(3), { kind: "stargate", itemID: 9, name: "Stargate" }]), 1000);
   assert.deepStrictEqual(kinds(events), ["GRID", "PRESENT"]);
   assert.strictEqual(events[1].count, 2);
-  assert.strictEqual(events[1].flightID, "living_flight_4420");
+  assert.strictEqual(events[1].groupKey, "flight:living_flight_4420");
+  assert.strictEqual(events[1].ext.lu.family, "pirate", "the plugins' data rides on the event");
+  assert.strictEqual(events[1].hidden, undefined, "a plugin's working data never does");
   assert.strictEqual(events[0].tracked, 3, "celestials are not tracked");
+  const alone = createGridDiffer().step(grid([npc(2, { groupKey: null }), npc(3, { groupKey: null })]), 1000);
+  assert.deepStrictEqual(alone.map((event) => `${event.kind}:${event.count || ""}`), ["GRID:", "PRESENT:1", "PRESENT:1"],
+    "balls in no group are one event each");
 });
 
 test("a gang that warps in is one ARRIVE, with the distance it landed at", () => {
@@ -108,26 +129,53 @@ test("mode, lock and damage changes are reported once each", () => {
 
 test("a ship replaced by a wreck is DESTROYED; one that warps away is a LEAVE", () => {
   const differ = createGridDiffer();
-  differ.step(grid([npc(2), npc(3, { mode: "WARP", lu: null })]), 1000);
+  differ.step(grid([npc(2), npc(3, { mode: "WARP", groupKey: null, ext: null })]), 1000);
   const events = differ.step(grid([
     { kind: "wreck", itemID: 50, name: "Worm Wreck", position: { x: 24_100, y: 0, z: 0 }, distanceMeters: 24_100 },
   ]), 3000);
   assert.deepStrictEqual(kinds(events), ["DESTROYED", "LEAVE"]);
   assert.strictEqual(events[0].wreckID, 50);
-  assert.strictEqual(events[0].flightID, "living_flight_4420");
+  assert.strictEqual(events[0].groupKey, "flight:living_flight_4420");
+  assert.strictEqual(events[0].ext.lu.corporation, "Guristas");
   assert.strictEqual(events[1].warped, true);
 });
 
-test("a hunter report on self is one SIGHTING until it goes stale", () => {
-  const differ = createGridDiffer();
+test("the lu onGrid hook: a hunter report on self is one SIGHTING until it goes stale", () => {
+  const differ = luDiffer();
   const report = { observerID: 2, source: "sighting", certainty: "confirmed", observedAtMs: 10_000 };
   const scout = (observedAtMs) => npc(2, { distanceMeters: 182_000,
-    lu: { flightID: "living_flight_4411", sightings: [{ ...report, observedAtMs }] } });
+    ...luRow({ flightID: "living_flight_4411" }, [{ ...report, observedAtMs }]) });
   const first = differ.step(grid([scout(10_000)]), 10_000);
   assert.deepStrictEqual(kinds(first), ["GRID", "PRESENT", "SIGHTING"]);
   assert.strictEqual(first[2].distanceMeters, 182_000);
+  assert.strictEqual(first[2].lu.flightID, "living_flight_4411");
+  assert.strictEqual(first[1].hidden, undefined, "the reports stay off the PRESENT");
   assert.deepStrictEqual(kinds(differ.step(grid([scout(15_000)]), 15_000)), []);
   assert.deepStrictEqual(kinds(differ.step(grid([scout(80_000)]), 80_000)), ["SIGHTING"]);
+  assert.deepStrictEqual(kinds(createGridDiffer().step(grid([scout(10_000)]), 10_000)), ["GRID", "PRESENT"],
+    "without the plugin's hook there is no SIGHTING");
+});
+
+test("the lu onGrid hook names the ball a decision is about, before the events are built", () => {
+  const differ = luDiffer();
+  const decided = (decision) => npc(2, luRow({ flightID: "f1", decision }));
+  const [, present] = differ.step(grid([decided("hunt:committed+engaging:1")]), 1000);
+  assert.strictEqual(present.ext.lu.decision, "hunt:committed+engaging:self");
+  const mode = differ.step(grid([{ ...decided("fleeing:3"), mode: "WARP" }, npc(3, { name: "Guristas Mule" })]), 3000)
+    .find((event) => event.kind === "MODE");
+  assert.strictEqual(mode.ext.lu.decision, "fleeing:Guristas Mule");
+});
+
+test("the lu annotate hook splits its join: data on events, reports for onGrid, family for frames", () => {
+  const annotate = createLuAnnotate({ annotate: () => ({ flightID: "f1", family: "police", decision: "idle",
+    sightings: [{ observerID: 2 }] }) });
+  assert.deepStrictEqual(annotate({ itemID: 2, livingUniverseFlightID: "f1" }, { row: { isNpc: true } }), {
+    groupKey: "flight:f1",
+    ext: { flightID: "f1", family: "police", decision: "idle" },
+    hidden: { sightings: [{ observerID: 2 }] },
+    pos: { family: "police" },
+  });
+  assert.strictEqual(annotate({ itemID: 1 }, { row: { isSelf: true } }), null, "a player costs one check");
 });
 
 test("changing system resets the baseline and says so", () => {

@@ -110,12 +110,21 @@ function createLuJoin({ inspect = null, controllerFor = null, huntOrderFor = nul
 }
 
 // The plugin's annotate hook: only NPCs and Living Universe ships are joined,
-// so a player or a wreck costs one property check.
+// so a player or a wreck costs one property check. The hunter reports go to
+// the onGrid hook (onGrid.js), not onto every event about the ball, and a
+// frame keeps only the family it colours by.
 function createLuAnnotate(join) {
   return function annotate(entity, { row, nowMs, characterID }) {
     if (!(row && row.isNpc) && !(entity && entity.livingUniverseFlightID)) return null;
-    const lu = join.annotate(entity, nowMs, characterID);
-    return lu ? { groupKey: lu.flightID ? `flight:${lu.flightID}` : null, ext: lu } : null;
+    const joined = join.annotate(entity, nowMs, characterID);
+    if (!joined) return null;
+    const { sightings, ...lu } = joined;
+    return {
+      groupKey: lu.flightID ? `flight:${lu.flightID}` : null,
+      ext: lu,
+      hidden: sightings.length ? { sightings } : null,
+      pos: lu.family ? { family: lu.family } : null,
+    };
   };
 }
 

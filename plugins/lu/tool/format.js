@@ -70,10 +70,12 @@ const FORMAT = {
   event.cause ? `cause=${event.cause}` : ""],
 };
 
-// IDs a server log line may name, so a watch keeps the line.
+// IDs a server log line may name, so a watch keeps the line. `lu` is the
+// plugin's data on a core event (ext.lu); SIGHTING carries its own.
 function ids(event, lu) {
   const out = [event.flightID, event.observerID, event.observerFlightID, event.huntID];
   if (lu) out.push(lu.flightID);
+  if (event.lu) out.push(event.lu.flightID);
   if (event.leader) out.push(event.leader.flightID);
   for (const flight of event.flights || []) out.push(flight.flightID);
   out.push(...(event.supportFlightIDs || []));

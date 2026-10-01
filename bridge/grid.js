@@ -24,9 +24,10 @@ function surfaceDistanceMeters(from, to) {
   return Math.max(0, centre - (Number(from.radius) || 0) - (Number(to.radius) || 0));
 }
 
-// The same fields and the same rule hunterIntel.observable reads, so "why has
-// the scout not seen me" has an answer on the grid itself. Timestamps are scene
-// sim time (transitions.js stamps them from getCurrentSimTimeMs).
+// Whether the ship can be seen and shot yet: its undock and timed
+// invulnerability and its cloak, so "why has nothing noticed me" has an answer
+// on the grid itself. Timestamps are scene sim time (transitions.js stamps
+// them from getCurrentSimTimeMs).
 function describeProtection(entity, simNowMs) {
   if (!entity) return null;
   const untilMs = Math.max(

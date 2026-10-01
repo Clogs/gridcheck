@@ -180,10 +180,11 @@ test("the report names the commit the run ran on", () => {
 });
 
 test("the PR citation carries the verdict, commit, expectations and frames to attach", () => {
-  const { state, report } = citationRun({ scenarioFile: "tools/evejs-e2e/scenarios/fleet-to-grid.json", commit: { sha: "abc123", dirty: false } });
+  const { state, report } = citationRun({ scenarioFile: "tools/evejs-e2e/plugins/lu/scenarios/fleet-to-grid.json",
+    commit: { sha: "abc123", dirty: false } });
   const text = mcp.prCitation(state, report);
   assert.match(text, /^### End-to-end check `fleet-to-grid`: PASSED/);
-  assert.match(text, /Run `r1` of `tools\/evejs-e2e\/scenarios\/fleet-to-grid\.json` on commit `abc123`, from world `lowsec-docked`, 61 s/);
+  assert.match(text, /Run `r1` of `tools\/evejs-e2e\/plugins\/lu\/scenarios\/fleet-to-grid\.json` on commit `abc123`, from world `lowsec-docked`, 61 s/);
   assert.match(text, /1 of 1 expectations met\./);
   assert.match(text, /#### Expected against observed\n\n\| Result \| Expected \| Observed \|/);
   assert.match(text, /\| t\+00:00:30 \| stop \| 01-stop-arrive\.svg \(attached\) \|/);

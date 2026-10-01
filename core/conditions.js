@@ -21,7 +21,8 @@ const { defaultRegistry } = require("./plugins");
 const SCALAR_TYPES = new Set(["str", "id", "num", "m", "ms", "bool"]);
 
 const MEMBER = { itemID: "id", label: "str", typeName: "str", kind: "str", who: "str", mode: "str", distanceMeters: "m" };
-const GROUP = { flightID: "id", count: "num", who: "str", distanceMeters: "m", members: { list: MEMBER } };
+// groupKey: the group a plugin put the ball in (a flight, a gang), or none.
+const GROUP = { groupKey: "str", count: "num", who: "str", distanceMeters: "m", members: { list: MEMBER } };
 const COMMON = { t: "ms", atMs: "ms", seq: "num", source: "str" };
 
 const EVENT_FIELDS = Object.freeze({
@@ -35,17 +36,17 @@ const EVENT_FIELDS = Object.freeze({
   LEAVE: { ...GROUP, warped: "bool" },
   MODE: {
     itemID: "id", label: "str", from: "str", to: "str", targetID: "id", targetLabel: "str", distanceMeters: "m",
-    flightID: "id",
+    groupKey: "str",
   },
   TARGET: {
-    sourceID: "id", sourceLabel: "str", targetID: "id", targetLabel: "str", locked: "bool", flightID: "id",
+    sourceID: "id", sourceLabel: "str", targetID: "id", targetLabel: "str", locked: "bool", groupKey: "str",
   },
-  DAMAGE: { itemID: "id", label: "str", layer: "str", fromPct: "num", toPct: "num", flightID: "id" },
+  DAMAGE: { itemID: "id", label: "str", layer: "str", fromPct: "num", toPct: "num", groupKey: "str" },
   DESTROYED: {
     itemID: "id", label: "str", typeName: "str", typeID: "id", corporationID: "id", characterID: "id", self: "bool",
-    who: "str", wreckID: "id", wreckLabel: "str", distanceMeters: "m", flightID: "id",
+    who: "str", wreckID: "id", wreckLabel: "str", distanceMeters: "m", groupKey: "str",
   },
-  KILLMAIL: { killID: "id", itemID: "id", label: "str", typeName: "str", flightID: "id" },
+  KILLMAIL: { killID: "id", itemID: "id", label: "str", typeName: "str", groupKey: "str" },
   SELF: { fromItemID: "id", fromTypeName: "str", toItemID: "id", toTypeName: "str" },
   DOCKED: { systemID: "id", systemName: "str", stationID: "id" },
   SYSTEM: { fromSystemID: "id", toSystemID: "id", toSystemName: "str", security: "num" },
@@ -71,8 +72,8 @@ const EVENT_FIELDS = Object.freeze({
 
 const KINDS = Object.freeze(Object.keys(EVENT_FIELDS));
 
-// The core kinds the grid differ joins plugin data to (a row's annotations).
-const EXT_KINDS = Object.freeze(["PRESENT", "ARRIVE", "LEAVE", "MODE", "TARGET", "DAMAGE", "DESTROYED"]);
+// The core kinds that carry the plugins' data about a ball, at ext.<plugin>.
+const EXT_KINDS = Object.freeze(["PRESENT", "ARRIVE", "LEAVE", "MODE", "TARGET", "DAMAGE", "DESTROYED", "KILLMAIL"]);
 
 // Per registry: every kind's fields, plugin kinds and plugin data included.
 const TABLES = new WeakMap();
@@ -82,10 +83,10 @@ function tablesFor(registry) {
   if (cached) return cached;
   const fields = {};
   for (const [kind, spec] of Object.entries(EVENT_FIELDS)) fields[kind] = { ...spec };
-  for (const kind of EXT_KINDS) {
-    for (const [plugin, extFields] of Object.entries(registry.extFields)) {
-      if (fields[kind][plugin] === undefined) fields[kind][plugin] = { obj: extFields };
-    }
+  const ext = {};
+  for (const [plugin, extFields] of Object.entries(registry.extFields)) ext[plugin] = { obj: extFields };
+  if (Object.keys(ext).length) {
+    for (const kind of EXT_KINDS) fields[kind].ext = { obj: ext };
   }
   const owners = {};
   for (const [kind, entry] of Object.entries(registry.kinds)) {
@@ -166,18 +167,30 @@ function nestedFields(spec) {
   return null;
 }
 
+// The plugins' data on an event of this kind: [[plugin, fields]].
+function extFieldsOf(root) {
+  const ext = root.ext && root.ext.obj;
+  return ext ? Object.entries(ext).map(([plugin, spec]) => [plugin, spec.obj]) : [];
+}
+
 // A field name resolves to a path in the event: the kind's own field first,
-// then a field one level down (lu.family, leader.flightID, members.typeName).
+// then a field one level down (members.typeName, self.mode), then a field of
+// a plugin's data under ext.<plugin> (family on an ARRIVE is ext.lu.family).
+// <plugin>.<field> names a plugin's field outright.
 function resolveField(kind, name, registry = defaultRegistry()) {
   const root = tablesFor(registry).fields[kind];
   if (!root) return null;
   const parts = name.split(".");
+  const plugins = extFieldsOf(root);
   if (parts.length === 1) {
     if (root[name] !== undefined) return { path: [name], spec: root[name] };
     if (COMMON[name] !== undefined) return { path: [name], spec: COMMON[name] };
     for (const [key, spec] of Object.entries(root)) {
       const inner = nestedFields(spec);
       if (inner && inner[name] !== undefined) return { path: [key, name], spec: inner[name] };
+    }
+    for (const [plugin, fields] of plugins) {
+      if (fields[name] !== undefined) return { path: ["ext", plugin, name], spec: fields[name] };
     }
     return null;
   }
@@ -197,11 +210,15 @@ function resolveField(kind, name, registry = defaultRegistry()) {
   };
   const direct = walk({ ...COMMON, ...root }, parts);
   if (direct) return { path: parts, spec: direct };
-  // order.mode on an ARRIVE is lu.order.mode.
   for (const [key, spec] of Object.entries(root)) {
     const inner = nestedFields(spec);
     const found = inner ? walk(inner, parts) : null;
     if (found) return { path: [key, ...parts], spec: found };
+  }
+  // order.mode on an ARRIVE is ext.lu.order.mode.
+  for (const [plugin, fields] of plugins) {
+    const found = walk(fields, parts);
+    if (found) return { path: ["ext", plugin, ...parts], spec: found };
   }
   return null;
 }

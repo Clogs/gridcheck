@@ -3,7 +3,7 @@
 // Top-down tactical frames for `e2e run`, drawn from the run's own
 // timeline.jsonl: the watch's POS events say where every ball near the ship
 // was, the other events say when to draw. One SVG per key event:
-//   - the first ARRIVE of each flight (or of each ball with no flight);
+//   - the first ARRIVE of each group (or of each ball with no group);
 //   - the first TARGET lock on self;
 //   - each DESTROYED;
 //   - the stop condition (the runner's STOP, at the event that met it).
@@ -38,7 +38,7 @@ const COLOURS = Object.freeze({
 });
 
 const REASON_TEXT = {
-  arrive: "first arrival of the flight",
+  arrive: "first arrival of the group",
   target: "first lock on self",
   destroyed: "destroyed",
   stop: "stop condition",
@@ -84,8 +84,14 @@ function focusIDs(event, more = []) {
   return [...new Set(ids.map(Number).filter((id) => id > 0))];
 }
 
+// "flight:abc" -> "abc": what a frame's file is named after.
+function groupID(groupKey) {
+  const key = String(groupKey || "");
+  return key ? key.slice(key.indexOf(":") + 1) : "";
+}
+
 function arrivalKey(event) {
-  if (event.flightID) return `flight:${event.flightID}`;
+  if (event.groupKey) return String(event.groupKey);
   const first = Array.isArray(event.members) && event.members[0];
   return `item:${first ? first.itemID : event.seq}`;
 }
@@ -104,15 +110,16 @@ function selectKeyEvents(events, { maxFrames = MAX_FRAMES } = {}) {
       const key = arrivalKey(event);
       if (arrivals.has(key)) continue;
       arrivals.add(key);
-      // Balls with no flight (a /npc spawn, a skirmish wing, CONCORD) landing in
+      // Balls in no group (a /npc spawn, a skirmish wing, CONCORD) landing in
       // one sample share a frame.
-      const sameSample = !event.flightID && keys.find((other) => other.reason === "arrive" && !other.event.flightID &&
+      const sameSample = !event.groupKey && keys.find((other) => other.reason === "arrive" && !other.event.groupKey &&
         other.event.atMs === event.atMs);
       if (sameSample) {
         sameSample.also.push(event);
         continue;
       }
-      keys.push({ reason: "arrive", event, also: [], what: event.flightID || (event.members && event.members[0] && event.members[0].label) });
+      keys.push({ reason: "arrive", event, also: [],
+        what: groupID(event.groupKey) || (event.members && event.members[0] && event.members[0].label) });
     } else if (event.kind === "TARGET" && !targetDone && event.locked && event.targetLabel === "self") {
       targetDone = true;
       keys.push({ reason: "target", event, what: "self" });
@@ -145,16 +152,10 @@ function positionsFor(positions, atMs) {
   return null;
 }
 
-// A plugin's data on a POS ball, at ball.ext.<plugin>; balls written before
-// the watch wrote ext carry it flat.
-function ballData(ball, plugin) {
-  return extOf(ball, plugin) || ball;
-}
-
 // A colour rule matches when every field it names has that value in the
-// plugin's data on the ball.
+// plugin's data on the ball (ball.ext.<plugin>, from annotate's `pos`).
 function ruleMatches(rule, ball) {
-  const data = ballData(ball, rule.plugin);
+  const data = extOf(ball, rule.plugin);
   return Object.entries(rule.match).every(([field, value]) => data && String(data[field]) === String(value));
 }
 
@@ -169,7 +170,7 @@ function colourFor(ball, palette, registry) {
   // Any other NPC: one colour per group, so two sides of a fight differ.
   // With no group or corporation (a skirmish wing spawned with the war off),
   // the name's first word is the side: "OTSC Raider", "UEMD Defender".
-  const key = ball.flightID || ball.family || (ball.corp ? `corp:${ball.corp}` : `name:${String(ball.label || "").split(" ")[0]}`);
+  const key = ball.group || (ball.corp ? `corp:${ball.corp}` : `name:${String(ball.label || "").split(" ")[0]}`);
   if (!palette.has(key)) palette.set(key, COLOURS.others[palette.size % COLOURS.others.length]);
   return palette.get(key);
 }
@@ -480,10 +481,10 @@ function renderFramesSection(summary) {
   }
   if (!summary.frames.length) {
     lines.push(summary.positions
-      ? "No key event (first arrival per flight, first lock on self, a destruction, the stop) to draw."
+      ? "No key event (first arrival per group, first lock on self, a destruction, the stop) to draw."
       : "No frames: the watch recorded no positions (the ship never undocked, or the run ended first).", "");
   } else {
-    lines.push("Top-down SVGs drawn from the `POS` samples in `timeline.jsonl`: the first arrival of each flight, " +
+    lines.push("Top-down SVGs drawn from the `POS` samples in `timeline.jsonl`: the first arrival of each group, " +
       "the first lock on self, each destruction and the stop condition.", "");
     lines.push("| # | t | Why | Event | Frame |", "| --- | --- | --- | --- | --- |");
     for (const frame of summary.frames) {

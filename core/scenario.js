@@ -299,7 +299,7 @@ function validateScenario(raw, { source = "scenario", defaultName = null, worldE
         if (isObject(fields)) {
           for (const [key, field] of Object.entries(fields)) if (!STEP_OWN_KEYS.has(key)) step[key] = field;
         }
-        // A step the feature refuses for now (a flight still warping, no gang
+        // A step the feature refuses for now (a group still warping, nothing
         // in the system yet) can be tried again until it is accepted.
         if (plugin.retries) retryOf(rawStep, step, where);
         if (plugin.binds) bindAs(step);
@@ -365,7 +365,7 @@ function validateScenario(raw, { source = "scenario", defaultName = null, worldE
             break;
           }
           if (spec.target === "required") {
-            if (named === null) problem(where, `${type} needs a target, e.g. "nearest npc", "flight=$fleet" or an itemID`);
+            if (named === null) problem(where, `${type} needs a target, e.g. "nearest npc", "$mark" or an itemID`);
             else action.target = String(named);
           } else if (spec.modules !== undefined) {
             action.modules = named === null ? spec.modules : String(named);

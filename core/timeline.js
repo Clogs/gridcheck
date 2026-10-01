@@ -179,7 +179,7 @@ function eventBody(event, registry) {
       return [`${event.label}${event.typeName && event.label !== event.typeName ? ` (${event.typeName})` : ""} ` +
         `wreck #${event.wreckID}`, tags()];
     case "KILLMAIL":
-      return [`${event.label} killmail ${event.killID}`, event.flightID || ""];
+      return [`${event.label} killmail ${event.killID}`, tags()];
     case "MOVED":
       return [`self moved ${distanceText(event.distanceMeters)} to a new grid`, ""];
     case "SYSTEM":
@@ -255,7 +255,6 @@ function parseLogLine(line) {
 // name the IDs their own data carries.
 function collectIDs(event, into, registry = defaultRegistry()) {
   const add = (value) => { if (value) into.add(String(value)); };
-  add(event.flightID);
   add(event.itemID);
   add(event.sourceID);
   add(event.targetID);

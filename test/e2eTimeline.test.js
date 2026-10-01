@@ -37,8 +37,8 @@ test("the pirate-stalking lines read as the plan's example", () => {
     t: 138_000, kind: "ARRIVE", warpIn: true, distanceMeters: 24_000, count: 4,
     members: [{ label: "a", typeName: "Worm" }, { label: "b", typeName: "Worm" }, { label: "c", typeName: "Stiletto" },
       { label: "d", typeName: "Worm" }],
-    lu: { flightID: "living_flight_4420", corporation: "Guristas", huntPhase: "committed", decision: "hunt:committed/tackle",
-      huntReason: "confirmed-nearby-support-and-fitted-tackle" },
+    ext: { lu: { flightID: "living_flight_4420", corporation: "Guristas", huntPhase: "committed", decision: "hunt:committed/tackle",
+      huntReason: "confirmed-nearby-support-and-fitted-tackle" } },
   });
   assert.match(arrive, /^t\+00:02:18  ARRIVE    Guristas x4 \(Worm\/Stiletto\)  warp-in 24 km from self +living_flight_4420 phase=committed why=hunt:committed\/tackle hunt=confirmed-nearby-support-and-fitted-tackle$/);
   assert.strictEqual(
@@ -98,7 +98,7 @@ test("a plugin formats its own kinds and tags core lines; without it they read r
   const hunt = { t: 0, kind: "HUNT", phase: "stalking", reason: "x", leader: { flightID: "f1" } };
   assert.match(formatTimelineEvent(hunt), /^t\+00:00:00 {2}HUNT {6}f1 {2}x/);
   assert.match(formatTimelineEvent(hunt, emptyRegistry()), /^t\+00:00:00 {2}HUNT {6}\{"t":0,"kind":"HUNT"/);
-  const target = { t: 0, kind: "TARGET", sourceLabel: "a", targetLabel: "self", locked: true, lu: { flightID: "f9" } };
+  const target = { t: 0, kind: "TARGET", sourceLabel: "a", targetLabel: "self", locked: true, ext: { lu: { flightID: "f9" } } };
   assert.match(formatTimelineEvent(target), /self \(locked\) +f9$/);
   assert.strictEqual(formatTimelineEvent(target, emptyRegistry()), "t+00:00:00  TARGET    a -> self (locked)");
   const end = { t: 0, kind: "END", reason: "time", samples: 2, events: 9, costs: { sampleMsAvg: 1, sampleMsMax: 2,
@@ -117,10 +117,14 @@ test("log lines parse to server time, pid, level and text", () => {
 });
 
 test("log lines are kept when they name something the watch has seen", () => {
-  const ids = collectIDs({ kind: "ARRIVE", flightID: "living_flight_4420", members: [{ itemID: 990001 }] }, new Set());
+  const ids = collectIDs({ kind: "ARRIVE", ext: { lu: { flightID: "living_flight_4420" } }, members: [{ itemID: 990001 }] }, new Set());
   assert.strictEqual(mentionsAny("[LivingHostility] flight=living_flight_4420 armed", ids), true);
   assert.strictEqual(mentionsAny("[NpcController] npc=990001 state=active", ids), true);
   assert.strictEqual(mentionsAny("[LivingHostility] flight=living_flight_0001 armed", ids), false);
+  const { emptyRegistry } = require("../core/plugins");
+  const coreOnly = collectIDs({ kind: "ARRIVE", ext: { lu: { flightID: "living_flight_4420" } }, members: [{ itemID: 990001 }] },
+    new Set(), emptyRegistry());
+  assert.deepStrictEqual([...coreOnly], ["990001"], "the plugin names its own IDs");
 });
 
 test("the reorder buffer releases held events in server-time order", () => {

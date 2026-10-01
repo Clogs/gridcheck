@@ -26,7 +26,7 @@ const SELF_ROW = { kind: "ship", itemID: 1, isSelf: true, typeName: "Rifter", mo
 function row(itemID, x, z, extra = {}) {
   return { kind: "ship", itemID, name: `Guristas ${itemID}`, typeName: "Worm", isNpc: true, npcEntityType: "npc",
     mode: "ORBIT", targetEntityID: 1, position: { x, y: 0, z }, distanceMeters: Math.hypot(x, z),
-    lu: { flightID: "living_flight_4420", family: "pirate" }, ...extra };
+    groupKey: "flight:living_flight_4420", posExt: { lu: { family: "pirate" } }, ...extra };
 }
 
 function grid(entities) {
@@ -44,8 +44,8 @@ test("POS keeps self and balls in range, nearest first, and counts the rest", ()
   assert.deepStrictEqual(frame.balls.map((ball) => ball.id), [1, 2, 9]);
   assert.strictEqual(frame.omitted, 1);
   const npc = frame.balls[1];
-  assert.deepStrictEqual([npc.x, npc.label, npc.who, npc.type, npc.mode, npc.target, npc.flightID, npc.family],
-    [12_000, "Guristas 2", "npc", "Worm", "ORBIT", 1, "living_flight_4420", "pirate"]);
+  assert.deepStrictEqual([npc.x, npc.label, npc.who, npc.type, npc.mode, npc.target, npc.group, npc.ext],
+    [12_000, "Guristas 2", "npc", "Worm", "ORBIT", 1, "flight:living_flight_4420", { lu: { family: "pirate" } }]);
   assert.deepStrictEqual(npc.locks, [1]);
   assert.strictEqual(frame.balls[2].who, undefined, "a celestial has no who");
   assert.strictEqual(positionFrame(grid([row(2, 10, 0), row(3, 20, 0)]), { maxBalls: 2 }).omitted, 1, "the cap counts too");
@@ -86,22 +86,22 @@ function pos(t, balls, extra = {}) {
 }
 const SELF = { id: 1, kind: "ship", label: "self", who: "self", type: "Rifter", mode: "STOP", x: 0, y: 0, z: 0 };
 const ball = (id, x, z, extra = {}) => ({ id, kind: "ship", label: `Dominations Roamer ${id}`, who: "npc", type: "Dramiel",
-  mode: "ORBIT", target: 1, flightID: "living_flight_1125", family: "pirate", x, y: 0, z, ...extra });
+  mode: "ORBIT", target: 1, group: "flight:living_flight_1125", ext: { lu: { family: "pirate" } }, x, y: 0, z, ...extra });
 
 function stalkingTimeline() {
   return [
     { seq: 1, t: 0, atMs: at(0), kind: "START" },
     pos(0, [SELF]),
-    { seq: 2, t: 2_000, atMs: at(2_000), kind: "ARRIVE", flightID: "living_flight_1125", count: 2, warpIn: true,
+    { seq: 2, t: 2_000, atMs: at(2_000), kind: "ARRIVE", groupKey: "flight:living_flight_1125", count: 2, warpIn: true,
       distanceMeters: 7_536, members: [{ itemID: 2, label: "Dominations Roamer 2" }, { itemID: 3, label: "Dominations Roamer 3" }],
-      lu: { flightID: "living_flight_1125", family: "pirate" } },
+      ext: { lu: { flightID: "living_flight_1125", family: "pirate" } } },
     pos(2_000, [SELF, ball(2, 7_536, 0), ball(3, 8_000, 2_000)]),
-    { seq: 3, t: 4_000, atMs: at(4_000), kind: "ARRIVE", flightID: "living_flight_1125", count: 1, members: [{ itemID: 4 }] },
+    { seq: 3, t: 4_000, atMs: at(4_000), kind: "ARRIVE", groupKey: "flight:living_flight_1125", count: 1, members: [{ itemID: 4 }] },
     { seq: 4, t: 6_000, atMs: at(6_000), kind: "TARGET", sourceID: 2, sourceLabel: "Dominations Roamer 2", targetID: 1,
       targetLabel: "self", locked: true },
     pos(6_000, [SELF, ball(2, 5_000, 0, { locks: [1] }), ball(3, 8_000, 2_000)]),
     { seq: 5, t: 7_000, atMs: at(7_000), kind: "TARGET", sourceID: 3, targetID: 1, targetLabel: "self", locked: true },
-    { seq: 6, t: 9_000, atMs: at(9_000), kind: "ARRIVE", flightID: null, count: 1, members: [{ itemID: 7, label: "CONCORD Police" }] },
+    { seq: 6, t: 9_000, atMs: at(9_000), kind: "ARRIVE", groupKey: null, count: 1, members: [{ itemID: 7, label: "CONCORD Police" }] },
     { seq: 7, t: 12_000, atMs: at(12_000), kind: "DESTROYED", itemID: 1, label: "self", self: true, typeName: "Rifter",
       wreckID: 8, wreckLabel: "Minmatar Frigate Wreck" },
     pos(12_000, [{ ...SELF, id: 5, type: "Capsule" }, ball(2, 5_000, 0),
@@ -110,7 +110,7 @@ function stalkingTimeline() {
   ];
 }
 
-test("key events: first ARRIVE per flight, first lock on self, each DESTROYED, the stop merged with its event", () => {
+test("key events: first ARRIVE per group, first lock on self, each DESTROYED, the stop merged with its event", () => {
   const { keys, skipped } = selectKeyEvents(stalkingTimeline());
   assert.deepStrictEqual(keys.map((key) => `${key.reason}:${key.event.seq}`), ["arrive:2", "target:4", "arrive:6", "destroyed:7"]);
   assert.ok(keys[3].alsoStop, "the stop matched the DESTROYED, so its frame is that one");
@@ -122,7 +122,7 @@ test("key events: first ARRIVE per flight, first lock on self, each DESTROYED, t
   assert.deepStrictEqual([last.reason, last.event.kind], ["stop", "STOP"]);
 
   const many = [];
-  for (let i = 0; i < 50; i += 1) many.push({ seq: i, t: i, atMs: i, kind: "ARRIVE", flightID: `f${i}` });
+  for (let i = 0; i < 50; i += 1) many.push({ seq: i, t: i, atMs: i, kind: "ARRIVE", groupKey: `gang:f${i}` });
   many.push({ seq: 99, t: 99, atMs: 99, kind: "DESTROYED", itemID: 1, self: true });
   const capped = selectKeyEvents(many, { maxFrames: 10 });
   assert.strictEqual(capped.keys.length, 10);
@@ -160,8 +160,8 @@ test("frames: an SVG per key event with a scale bar, labels and the event line",
 
 test("frames: balls beyond the frame point from its edge; a frame with no sample is listed, not drawn", () => {
   const far = [
-    pos(0, [SELF, ball(2, 1_000, 0), ball(9, 0, 900_000, { family: null, who: "npc", flightID: "living_flight_9" })]),
-    { seq: 2, t: 0, atMs: at(0), kind: "ARRIVE", flightID: "living_flight_1125", members: [{ itemID: 2 }] },
+    pos(0, [SELF, ball(2, 1_000, 0), ball(9, 0, 900_000, { ext: null, who: "npc", group: "flight:living_flight_9" })]),
+    { seq: 2, t: 0, atMs: at(0), kind: "ARRIVE", groupKey: "flight:living_flight_1125", members: [{ itemID: 2 }] },
     { seq: 3, t: 90_000, atMs: at(90_000), kind: "DESTROYED", itemID: 2, label: "x", wreckID: 3 },
   ];
   const { frames, unplaced } = buildFrames(far);

@@ -613,7 +613,7 @@ const TOOLS = [
     name: "e2e_log",
     description: "The tail of the server log (_local/logs/server.log), only the running server's lines unless anyPid.",
     inputSchema: schema({
-      grep: str("Case-insensitive regex, e.g. PirateHunt."),
+      grep: str("Case-insensitive regex, e.g. NpcController."),
       lines: int("How many lines (default 40).", { minimum: 1, maximum: 2000 }),
       anyPid: bool("Keep every process's lines."),
     }),

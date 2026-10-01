@@ -121,12 +121,9 @@ function loadPlugins({ pluginsDir = DEFAULT_PLUGINS_DIR, tree, log = null, load 
   return { active, skipped };
 }
 
-// Where a core event keeps a plugin's data. Until the watch writes ext, the
-// data sits at the plugin's own name.
+// Where a core event, a grid row or a frame's ball keeps a plugin's data.
 function extOf(event, plugin) {
-  if (!event) return undefined;
-  if (event.ext && typeof event.ext === "object" && event.ext[plugin] !== undefined) return event.ext[plugin];
-  return event[plugin];
+  return event && event.ext && typeof event.ext === "object" ? event.ext[plugin] : undefined;
 }
 
 const isObject = (value) => value !== null && typeof value === "object" && !Array.isArray(value);

@@ -1,10 +1,15 @@
 "use strict";
 
 // `e2e watch`, server side. Samples one character's grid every few seconds and
-// reports only what changed. Plugins add to it through two hooks (plugins.js):
-// annotate joins each row to the plugin's own state, and offGrid adds context
-// from outside the grid, scanned less often and only while a watch runs. The
-// watch times both per sample and reports them in END.
+// reports only what changed. Plugins add to it through three hooks
+// (plugins.js): annotate joins each row to the plugin's own state, onGrid
+// reads each sample's rows and adds events of its own, and offGrid adds
+// context from outside the grid, scanned less often and only while a watch
+// runs. The watch times every hook and reports them in END.
+//
+// A row's annotations ride on the events about it: its plugins' data at
+// ext.<plugin>, and the groupKey that groups balls arriving or leaving
+// together.
 //
 //   createGridDiffer    grid sample -> ARRIVE, LEAVE, MODE, TARGET, DAMAGE, ...
 //   createGridWatch     runs the differ and the hooks on a timer and streams the events.
@@ -14,16 +19,12 @@ const { createDivergenceChecker } = require("./destiny");
 const TRACKED_KINDS = new Set(["ship", "drone", "fighter", "wreck", "container", "structure"]);
 // Differ events after which the grid is a new one; open divergences are dropped.
 const NEW_GRID_KINDS = new Set(["SYSTEM", "MOVED", "DOCKED"]);
-// A decision naming a ball by ID; the differ swaps the ID for a label.
-const TARGETED_DECISION = /(engaging|fleeing|flee-warp):(\d+)$/;
 const LAYERS = ["shield", "armor", "hull"];
 // A ship first seen in warp has not landed yet. Its ARRIVE waits for it to
 // drop out of warp, so the distance printed is where it landed.
 const WARP_IN_SETTLE_MS = 30_000;
 // A killmail is written after the wreck appears, by a worker.
 const KILLMAIL_WAIT_MS = 20_000;
-// The same sighting is re-reported every few seconds; say it again only after this.
-const SIGHTING_REPEAT_MS = 60_000;
 const WRECK_MATCH_METERS = 20_000;
 // A ship covers well under this in one sample outside warp.
 const SELF_MOVED_METERS = 1_000_000;
@@ -92,7 +93,6 @@ function whoOf(row) {
 }
 
 function snapshot(row) {
-  const lu = row.lu || null;
   return {
     itemID: row.itemID,
     kind: row.kind,
@@ -119,9 +119,10 @@ function snapshot(row) {
       hull: healthBand(row.hullRatio),
     },
     locks: new Set(Array.isArray(row.lockedTargetIDs) ? row.lockedTargetIDs : []),
-    flightID: lu && lu.flightID ? lu.flightID : null,
-    lu: lu ? { ...lu, sightings: undefined } : null,
-    sightings: lu && Array.isArray(lu.sightings) ? lu.sightings : [],
+    groupKey: row.groupKey || null,
+    ext: row.ext ? { ...row.ext } : null,
+    // A plugin's working data for its own onGrid hook; never on an event.
+    hidden: row.hidden || null,
   };
 }
 
@@ -137,11 +138,16 @@ function memberOf(entry) {
   };
 }
 
-// Flight members arriving or leaving in the same sample are one event.
-function groupByFlight(entries) {
+// A ball's group: its groupKey, or the ball alone.
+function groupOf(entry) {
+  return entry.groupKey || `item:${entry.itemID}`;
+}
+
+// Members of a group arriving or leaving in the same sample are one event.
+function groupByKey(entries) {
   const groups = new Map();
   for (const entry of entries) {
-    const key = entry.flightID ? `flight:${entry.flightID}` : `item:${entry.itemID}`;
+    const key = groupOf(entry);
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(entry);
   }
@@ -153,12 +159,12 @@ function groupEvent(kind, entries, extra = {}) {
   const first = entries[0];
   return {
     kind,
-    flightID: first.flightID,
+    groupKey: first.groupKey,
     count: entries.length,
     who: first.who,
     distanceMeters: distances.length ? Math.min(...distances) : null,
     members: entries.map(memberOf),
-    lu: first.lu,
+    ext: first.ext,
     ...extra,
   };
 }
@@ -191,8 +197,9 @@ function positionFrame(grid, { rangeMeters = POSITIONS.rangeMeters, maxBalls = P
     if (row.mode) ball.mode = row.mode;
     if (row.targetEntityID) ball.target = row.targetEntityID;
     if (Array.isArray(row.lockedTargetIDs) && row.lockedTargetIDs.length) ball.locks = row.lockedTargetIDs;
-    if (row.lu && row.lu.flightID) ball.flightID = row.lu.flightID;
-    if (row.lu && row.lu.family) ball.family = row.lu.family;
+    if (row.groupKey) ball.group = row.groupKey;
+    // The few fields each plugin wants on a frame (annotate's `pos`), for its colours.
+    if (row.posExt) ball.ext = row.posExt;
     if (row.corporationID) ball.corp = row.corporationID;
     if (Number(row.radius) > 0) ball.radius = Math.round(Number(row.radius));
     balls.push(ball);
@@ -208,14 +215,19 @@ function positionFrame(grid, { rangeMeters = POSITIONS.rangeMeters, maxBalls = P
   };
 }
 
-function createGridDiffer() {
+// gridHooks: one per plugin with an onGrid hook, for this watch:
+//   { name, step(entries, ctx) -> [event] }
+// entries is the sample's Map itemID -> entry (label, distanceMeters, ext,
+// hidden, ...). A hook may replace an entry's ext with a copy, before the
+// differ's own events are built from it; its events follow the differ's.
+// ctx: { atMs, selfID, labelFor(itemID) }. `timed(name, fn)` times each call.
+function createGridDiffer({ gridHooks = [], timed = (_name, fn) => fn() } = {}) {
   let previous = null;
   let selfID = 0;
   let systemID = 0;
   let docked = false;
   // group key -> { firstSeenAtMs, itemIDs }
   const pendingArrivals = new Map();
-  const sightingsSeen = new Map();
 
   function labelFor(itemID, current) {
     const id = toPositiveInt(itemID);
@@ -233,32 +245,22 @@ function createGridDiffer() {
       targetID,
       targetLabel: labelFor(targetID, current),
       locked,
-      flightID: entry.flightID,
-      lu: entry.lu,
+      groupKey: entry.groupKey,
+      ext: entry.ext,
     }));
   }
 
-  function sightingEvents(entry, atMs, current) {
+  function hookEvents(current, atMs, selfNow) {
+    if (!gridHooks.length) return [];
+    const ctx = {
+      atMs,
+      selfID: selfNow,
+      labelFor: (itemID) => (toPositiveInt(itemID) === selfNow && selfNow ? "self" : labelFor(itemID, current)),
+    };
     const events = [];
-    for (const report of entry.sightings) {
-      const key = `${report.observerID}:${report.source}`;
-      const last = sightingsSeen.get(key);
-      if (last && (last.observedAtMs === report.observedAtMs || report.observedAtMs - last.observedAtMs < SIGHTING_REPEAT_MS)) {
-        continue;
-      }
-      sightingsSeen.set(key, { observedAtMs: report.observedAtMs, atMs });
-      const observer = current.get(report.observerID);
-      events.push({
-        kind: "SIGHTING",
-        observerID: report.observerID,
-        observerLabel: labelFor(report.observerID, current),
-        observerFlightID: report.observerFlightID,
-        source: report.source,
-        certainty: report.certainty,
-        observedAtMs: report.observedAtMs,
-        distanceMeters: observer ? observer.distanceMeters : null,
-        lu: observer ? observer.lu : entry.lu,
-      });
+    for (const hook of gridHooks) {
+      const answer = timed(hook.name, () => safe(() => hook.step(current, ctx), []));
+      if (Array.isArray(answer)) events.push(...answer.filter((event) => event && event.kind));
     }
     return events;
   }
@@ -274,7 +276,7 @@ function createGridDiffer() {
       tracked: current.size,
     }];
     const others = [...current.values()].filter((entry) => !entry.isSelf);
-    for (const group of groupByFlight(others)) events.push(groupEvent("PRESENT", group));
+    for (const group of groupByKey(others)) events.push(groupEvent("PRESENT", group));
     for (const entry of current.values()) {
       const involvingSelf = entry.isSelf
         ? entry.locks
@@ -308,17 +310,7 @@ function createGridDiffer() {
     const rows = (Array.isArray(grid.entities) ? grid.entities : []).filter((row) => TRACKED_KINDS.has(row.kind));
     const current = new Map(rows.map((row) => [row.itemID, snapshot(row)]));
     const selfNow = toPositiveInt(grid.self && grid.self.itemID);
-    for (const entry of current.values()) {
-      const decision = entry.lu && entry.lu.decision;
-      if (decision && TARGETED_DECISION.test(decision)) {
-        const named = decision.replace(TARGETED_DECISION, (_match, verb, id) => {
-          const targetID = toPositiveInt(id);
-          const target = targetID === selfNow ? "self" : current.has(targetID) ? current.get(targetID).label : `#${targetID}`;
-          return `${verb}:${target}`;
-        });
-        entry.lu = { ...entry.lu, decision: named };
-      }
-    }
+    const pluginEvents = hookEvents(current, atMs, selfNow);
 
     // Self jumped (warp, /tr to a celestial): this is a new grid, not a grid
     // everybody else left.
@@ -336,8 +328,7 @@ function createGridDiffer() {
     if (!previous) {
       selfID = selfNow;
       previous = current;
-      events.push(...baseline(grid, current));
-      for (const entry of current.values()) events.push(...sightingEvents(entry, atMs, current));
+      events.push(...baseline(grid, current), ...pluginEvents);
       return events;
     }
 
@@ -383,14 +374,14 @@ function createGridDiffer() {
           wreckID: wreck.itemID,
           wreckLabel: wreck.label,
           distanceMeters: gone.distanceMeters,
-          flightID: gone.flightID,
-          lu: gone.lu,
+          groupKey: gone.groupKey,
+          ext: gone.ext,
         });
       } else if (gone.itemID !== oldSelfID) {
         leaving.push(gone);
       }
     }
-    for (const group of groupByFlight(leaving)) {
+    for (const group of groupByKey(leaving)) {
       const warped = group.every((entry) => entry.mode === "WARP");
       events.push(groupEvent("LEAVE", group, { warped }));
     }
@@ -400,7 +391,7 @@ function createGridDiffer() {
     for (const entry of arrived) {
       if (usedWrecks.has(entry.itemID)) continue;
       if (entry.mode === "WARP") {
-        const key = entry.flightID ? `flight:${entry.flightID}` : `item:${entry.itemID}`;
+        const key = groupOf(entry);
         const pending = pendingArrivals.get(key) || { firstSeenAtMs: atMs, itemIDs: new Set() };
         pending.itemIDs.add(entry.itemID);
         pendingArrivals.set(key, pending);
@@ -408,7 +399,7 @@ function createGridDiffer() {
         landedNow.push(entry);
       }
     }
-    for (const group of groupByFlight(landedNow)) {
+    for (const group of groupByKey(landedNow)) {
       events.push(groupEvent("ARRIVE", group, { firstSeenAtMs: atMs }));
       for (const entry of group) events.push(...lockEvents(entry, entry.locks, true, current));
     }
@@ -442,8 +433,8 @@ function createGridDiffer() {
           targetID: entry.targetEntityID,
           targetLabel: labelFor(entry.targetEntityID, current),
           distanceMeters: entry.distanceMeters,
-          flightID: entry.flightID,
-          lu: entry.lu,
+          groupKey: entry.groupKey,
+          ext: entry.ext,
         });
       }
       if (entry.kind === "ship" || entry.kind === "structure") {
@@ -461,8 +452,8 @@ function createGridDiffer() {
               layer,
               fromPct: before.pcts[layer],
               toPct: entry.pcts[layer],
-              flightID: entry.flightID,
-              lu: entry.lu,
+              groupKey: entry.groupKey,
+              ext: entry.ext,
             });
           }
         }
@@ -476,7 +467,7 @@ function createGridDiffer() {
         events.push(...lockEvents(entry, lost, false, current));
       }
     }
-    for (const entry of current.values()) events.push(...sightingEvents(entry, atMs, current));
+    events.push(...pluginEvents);
 
     previous = current;
     return events;
@@ -608,25 +599,17 @@ function round2(value) {
   return Math.round(value * 100) / 100;
 }
 
-// A plugin's annotate answer: its data at row.ext[<plugin>], and the first
-// groupKey any plugin gives.
-function applyAnnotation(row, name, result) {
+// A plugin's annotate answer { groupKey, ext, hidden, pos }: its data at
+// row.ext[<plugin>], the first groupKey any plugin gives, data only its own
+// onGrid hook reads at row.hidden[<plugin>], and the fields a tactical frame
+// carries for it at row.posExt[<plugin>]. A /grid read keeps ext and groupKey.
+function applyAnnotation(row, name, result, { watch = true } = {}) {
   if (!row.ext) row.ext = {};
   row.ext[name] = result.ext === undefined ? null : result.ext;
   if (result.groupKey && !row.groupKey) row.groupKey = String(result.groupKey);
-}
-
-// The differ, the CLI and the scenarios still read the Living Universe join at
-// row.lu, and a /grid row's flight and family flat on the row.
-function legacyLuField(row) {
-  if (row.ext && row.ext.lu !== undefined) row.lu = row.ext.lu;
-}
-
-function legacyGridFields(row) {
-  const lu = row.ext && row.ext.lu;
-  if (!lu) return;
-  row.flightID = lu.flightID;
-  row.family = lu.family;
+  if (!watch) return;
+  if (result.hidden !== undefined) (row.hidden = row.hidden || {})[name] = result.hidden;
+  if (result.pos && typeof result.pos === "object") (row.posExt = row.posExt || {})[name] = result.pos;
 }
 
 // Runs the plugins' annotate hooks on one /grid row, outside a watch.
@@ -634,13 +617,12 @@ function annotateRow(hooks, row, entity, { nowMs, characterID }) {
   for (const hook of hooks) {
     if (!hook || typeof hook.annotate !== "function") continue;
     const result = safe(() => hook.annotate(entity, { row, nowMs, characterID }));
-    if (result) applyAnnotation(row, hook.name, result);
+    if (result) applyAnnotation(row, hook.name, result, { watch: false });
   }
-  legacyGridFields(row);
 }
 
-// Each plugin hook's cost: one entry per sample for annotate (all rows), one
-// per scan for offGrid, so a plugin can't add whole-world cost unseen.
+// Each plugin hook's cost: one entry per sample for annotate (all rows) and
+// onGrid, one per scan for offGrid, so a plugin can't add whole-world cost unseen.
 function createHookTimer() {
   const timings = new Map();
   function record(key, ms) {
@@ -675,6 +657,7 @@ function createGridWatch({
   let active = 0;
   const annotators = hooks.filter((hook) => hook && typeof hook.annotate === "function");
   const offGridHooks = hooks.filter((hook) => hook && hook.offGrid && typeof hook.offGrid.watch === "function");
+  const onGridHooks = hooks.filter((hook) => hook && hook.onGrid && typeof hook.onGrid.watch === "function");
 
   function busy() {
     return active >= maxConcurrent;
@@ -698,7 +681,23 @@ function createGridWatch({
       const { kind, ...rest } = event;
       sink.write({ seq: ++seq, t: atMs - startedAtMs, atMs, kind, ...rest });
     };
-    const differ = createGridDiffer();
+    const timer = createHookTimer();
+    const gridHooks = [];
+    for (const hook of onGridHooks) {
+      const watcher = safe(() => hook.onGrid.watch({ characterID, startedAtMs }));
+      if (watcher && typeof watcher.step === "function") gridHooks.push({ name: hook.name, step: watcher.step });
+    }
+    const differ = createGridDiffer({
+      gridHooks,
+      timed: (name, fn) => {
+        const start = perfNow();
+        try {
+          return fn();
+        } finally {
+          timer.record(`${name}.onGrid`, perfNow() - start);
+        }
+      },
+    });
     const scanners = [];
     for (const hook of offGridHooks) {
       const scanner = safe(() => hook.offGrid.watch({ characterID, startedAtMs }));
@@ -708,7 +707,6 @@ function createGridWatch({
     const pendingKillmails = [];
     const costs = { samples: 0, sampleMsTotal: 0, sampleMsMax: 0, offGridScans: 0, offGridMsTotal: 0,
       offGridMsMax: 0, offGridStats: {} };
-    const timer = createHookTimer();
     const annotateMs = annotators.map(() => 0);
     let sampleNowMs = 0;
     const annotate = (row, entity) => {
@@ -722,7 +720,6 @@ function createGridWatch({
         annotateMs[index] += perfNow() - start;
         if (result) applyAnnotation(row, hook.name, result);
       }
-      legacyLuField(row);
     };
     let lastOffGridAtMs = -Infinity;
     let lastPositionsAtMs = -Infinity;
@@ -767,7 +764,7 @@ function createGridWatch({
         });
         if (killID) {
           emit({ kind: "KILLMAIL", killID, itemID: pending.event.itemID, label: pending.event.label,
-            typeName: pending.event.typeName, flightID: pending.event.flightID });
+            typeName: pending.event.typeName, groupKey: pending.event.groupKey, ext: pending.event.ext });
           pendingKillmails.splice(index, 1);
         } else if (atMs - pending.sinceAtMs > KILLMAIL_WAIT_MS) {
           pendingKillmails.splice(index, 1);
@@ -806,7 +803,7 @@ function createGridWatch({
       samples: costs.samples,
       events: seq,
       costs: {
-        // A plugin's scan stats, e.g. how many flights it walked. Core numbers win a name clash.
+        // A plugin's scan stats, e.g. how many records it walked. Core numbers win a name clash.
         ...costs.offGridStats,
         sampleMsAvg: costs.samples ? round2(costs.sampleMsTotal / costs.samples) : 0,
         sampleMsMax: round2(costs.sampleMsMax),

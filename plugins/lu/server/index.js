@@ -1,12 +1,14 @@
 "use strict";
 
 // The Living Universe plugin's server half: the flight join on grid rows, the
-// off-grid tracker, and the /clock, /economy, /warp and /trigger routes. Each
+// sightings and decision labels on each sample, the off-grid tracker, and the
+// /clock, /economy, /warp and /trigger routes. Each
 // piece is optional, so a world with part of the mod switched off still gets
 // the rest.
 
 const { createLuAnnotate, createLuJoin } = require("./join");
 const { createLuOffGrid } = require("./offGrid");
+const { createLuOnGrid } = require("./onGrid");
 const { createLuRoutes } = require("./routes");
 const { createAgentBridgeTriggers } = require("./triggers");
 const { createAgentBridgeWarp } = require("./warp");
@@ -72,6 +74,7 @@ function createLuServer({ stock, require: serverRequire, log, seams }) {
   const { warp, warpBridge } = buildWarp(engine, stock, log);
   return {
     annotate: createLuAnnotate(join),
+    onGrid: createLuOnGrid(),
     offGrid: createLuOffGrid({ inspect, describeSystem: seams.describeSystem, luNowMs }),
     routes: createLuRoutes({ warp, warpBridge, triggers: buildTriggers(engine, stock, seams, scouts), log }),
   };
