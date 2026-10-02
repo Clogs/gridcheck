@@ -90,7 +90,53 @@ button.badge:hover, button.badge:focus-visible { background: color-mix(in srgb, 
 .logo polygon { fill: none; stroke: var(--accent); stroke-width: 1.6; }
 .logo circle { fill: var(--accent); }
 .tree { display: flex; align-items: center; gap: 6px; }
-.tree select { max-width: 72ch; }
+.tree select { max-width: 52ch; }
+
+/* The tree picker: a button showing the chosen tree, over a listbox whose rows
+   share columns through subgrid. */
+.pill {
+  --c: var(--muted); display: inline-flex; align-items: center; padding: 0 8px; border-radius: 999px;
+  font-size: 11px; line-height: 18px; font-weight: 600; white-space: nowrap; color: var(--c);
+  background: color-mix(in srgb, var(--c) 15%, transparent); border: 1px solid color-mix(in srgb, var(--c) 40%, transparent);
+}
+.pill.mono { font-family: var(--mono); font-weight: 500; }
+.pill.ok { --c: var(--ok); } .pill.bad { --c: var(--bad); } .pill.warn { --c: var(--warn); } .pill.mute { --c: var(--dim); }
+.pill.v0 { --c: var(--info); } .pill.v1 { --c: var(--k-div); } .pill.v2 { --c: var(--k-mode); }
+.pill.v3 { --c: var(--hp-hu); } .pill.v4 { --c: var(--k-destroyed); }
+.pill.zero { opacity: 0.4; }
+.runs-cell { display: inline-flex; align-items: center; gap: 6px; }
+.runs-cell .num { min-width: 2.5ch; text-align: right; font-weight: 600; }
+.passbar { display: inline-block; width: 56px; height: 6px; border-radius: 3px; overflow: hidden; background: var(--bad); }
+.passbar i { display: block; height: 100%; background: var(--ok); }
+
+.tpick { position: relative; }
+.tpick-btn {
+  display: flex; align-items: center; gap: 10px; min-width: 40ch; padding: 4px 10px; cursor: pointer;
+  background: var(--field); border: 1px solid var(--field-line); border-radius: 6px;
+}
+.tpick-btn:hover, .tpick-btn[aria-expanded="true"] { background: var(--panel2); border-color: #3a4a5a; }
+.tpick-btn .nm { font-weight: 600; }
+.tpick-btn .caret { margin-left: auto; padding-left: 6px; color: var(--muted); }
+.tpick-list {
+  position: absolute; top: calc(100% + 6px); left: 0; z-index: 50; width: max-content; min-width: 100%;
+  max-width: calc(100vw - 40px); max-height: 70vh; overflow: auto;
+  display: grid; grid-template-columns: minmax(18ch, max-content) max-content max-content max-content; column-gap: 20px;
+  padding: 6px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.6);
+}
+.tpick-head, .topt { grid-column: 1 / -1; display: grid; grid-template-columns: subgrid; align-items: center; padding: 6px 10px; }
+.tpick-head {
+  padding-top: 4px; margin-bottom: 4px; border-bottom: 1px solid var(--line);
+  font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--dim); font-weight: 600;
+}
+.topt { border-radius: 6px; cursor: pointer; }
+.topt:hover, .topt:focus { background: var(--hover); outline: none; }
+.topt:focus-visible { box-shadow: inset 0 0 0 1px var(--accent); }
+.topt[aria-selected="true"] { background: var(--sel); box-shadow: inset 3px 0 0 var(--accent); }
+.topt .nm { display: grid; grid-template-columns: auto 1fr; align-items: center; column-gap: 6px; justify-items: start; }
+.topt .nm b { font-weight: 600; white-space: nowrap; }
+.topt .nm .path { white-space: nowrap; }
+.topt .nm .path { grid-column: 1 / -1; font-family: var(--mono); font-size: 11px; color: var(--dim); }
 #message { font-size: 12px; color: var(--bad); }
 #message.ok { color: var(--ok); }
 

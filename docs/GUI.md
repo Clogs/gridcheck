@@ -27,9 +27,11 @@ committed `HEAD`. Its tree list holds:
 - trees added on the Install tab by typing a path, remembered in the checkout's `_local/gui.json`;
 - the checkout's sibling folders that are EveJS trees (they have `server/src`).
 
-The **Tree** picker in the header names each tree's EveJS version (from `server/package.json`),
-its e2e copy and its scenario runs, passed and failed, and lists the trees with the most runs
-first. Hover an entry for its path. The badge beside the picker opens the Install tab.
+The **Tree** picker in the header lists, in columns, each tree with its path, its EveJS version (from
+`server/package.json`; each version gets its own colour), whether e2e is installed, and its scenario
+runs with a pass bar and passed and failed counts. Trees with the most runs come first. Arrow keys,
+Enter and Escape work in the list. The tag beside the picker (installed or not installed) opens the
+Install tab.
 
 Run from a tree's vendored copy, it manages that tree only. It can still update the copy, from a
 checkout path you type.

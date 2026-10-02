@@ -255,24 +255,136 @@
     if (!state.trees.some((tree) => tree.id === state.treeID)) {
       state.treeID = (state.trees.find((tree) => tree.copy) || state.trees[0] || {}).id || null;
     }
-    const select = $("tree");
-    select.textContent = "";
-    for (const tree of state.trees) select.append(h("option", { value: tree.id, text: treeLabel(tree), title: tree.root }));
-    if (state.treeID) select.value = state.treeID;
+    renderPicker();
     renderTreeBadges();
     renderTreeCards();
     renderContext();
   }
 
-  // "dev · EveJS 0.12.9 · e2e 0.1.0 · 12 runs: 10 pass, 2 fail"
-  function treeLabel(tree) {
-    const runs = tree.runs || { total: 0 };
-    return [
-      tree.name,
-      `EveJS ${tree.evejs || "?"}`,
-      tree.copy ? `e2e ${tree.copy.version || "?"}` : tree.isTree ? "e2e not installed" : "not a tree",
-      runs.total ? `${runs.total} run${runs.total === 1 ? "" : "s"}: ${runs.passed} pass, ${runs.failed} fail` : "no runs",
-    ].join("  ·  ");
+  // ---------- the tree picker ----------
+  //
+  // A listbox, not a <select>, so each row can carry coloured pills in columns:
+  // the tree, its EveJS version (server/package.json), whether e2e is
+  // installed, and its scenario runs.
+
+  const pill = (cls, text, title) => h("span", { className: `pill ${cls}`, text, title });
+
+  // The commonest EveJS version gets the first colour, the next the second...
+  function versionClasses() {
+    const counts = new Map();
+    for (const tree of state.trees) if (tree.evejs) counts.set(tree.evejs, (counts.get(tree.evejs) || 0) + 1);
+    const order = [...counts].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([version]) => version);
+    return (version) => (version ? `mono v${Math.min(order.indexOf(version), 4)}` : "mute");
+  }
+
+  function evejsPill(tree, vclass) {
+    return pill(vclass(tree.evejs), tree.evejs ? `EveJS ${tree.evejs}` : "EveJS ?",
+      tree.evejs ? "From the tree's server/package.json" : "No version in the tree's package.json");
+  }
+
+  function e2ePill(tree) {
+    if (tree.copy) return pill("ok", "installed", `e2e ${tree.copy.version || "?"} at ${short(tree.copy.commit)}`);
+    return tree.isTree ? pill("warn", "not installed") : pill("mute", "not a tree");
+  }
+
+  function runsCell(tree) {
+    const runs = tree.runs || { total: 0, passed: 0, failed: 0 };
+    if (!runs.total) return h("span", { className: "runs-cell" }, pill("mute", "no runs"));
+    const bar = h("span", { className: "passbar", title: `${Math.round((runs.passed / runs.total) * 100)}% passed` }, h("i"));
+    bar.firstChild.style.width = `${(runs.passed / runs.total) * 100}%`;
+    return h("span", { className: "runs-cell" },
+      h("b", { className: "num", text: String(runs.total), title: `${runs.total} scenario run${runs.total === 1 ? "" : "s"}` }),
+      bar,
+      pill(`ok${runs.passed ? "" : " zero"}`, `${runs.passed} pass`),
+      pill(`bad${runs.failed ? "" : " zero"}`, `${runs.failed} fail`));
+  }
+
+  function renderPicker() {
+    const button = $("tree");
+    const list = $("tree-list");
+    const vclass = versionClasses();
+    const tree = currentTree();
+    button.textContent = "";
+    if (tree) {
+      button.append(h("b", { className: "nm", text: tree.name }), evejsPill(tree, vclass), runsCell(tree));
+    } else {
+      button.append(h("span", { className: "muted", text: "no tree" }));
+    }
+    button.append(h("span", { className: "caret", text: "▾" }));
+    button.title = tree ? tree.root : "";
+    button.disabled = !state.trees.length;
+
+    list.textContent = "";
+    list.append(h("div", { className: "tpick-head", "aria-hidden": "true" },
+      h("span", { text: "Tree" }), h("span", { text: "EveJS" }), h("span", { text: "e2e" }), h("span", { text: "Scenario runs" })));
+    for (const row of state.trees) {
+      list.append(h("div", {
+        className: "topt", role: "option", tabindex: "-1", id: `topt-${row.id}`, "data-id": row.id,
+        "aria-selected": String(row.id === state.treeID), title: row.root,
+        onclick: () => pickTree(row.id),
+      },
+      h("span", { className: "nm" }, h("b", { text: row.name }), row.up ? pill("warn", "up", "The tree's server is up") : null,
+        h("span", { className: "path", text: row.root })),
+      h("span", {}, evejsPill(row, vclass)),
+      h("span", {}, e2ePill(row)),
+      runsCell(row)));
+    }
+  }
+
+  const options = () => [...$("tree-list").querySelectorAll(".topt")];
+
+  function openPicker() {
+    if (!state.trees.length) return;
+    $("tree-list").hidden = false;
+    $("tree").setAttribute("aria-expanded", "true");
+    const all = options();
+    (all.find((node) => node.dataset.id === state.treeID) || all[0]).focus();
+  }
+
+  function closePicker(focusButton = true) {
+    if ($("tree-list").hidden) return;
+    $("tree-list").hidden = true;
+    $("tree").setAttribute("aria-expanded", "false");
+    if (focusButton) $("tree").focus();
+  }
+
+  function pickTree(id) {
+    closePicker();
+    selectTree(id);
+  }
+
+  function pickerKeys(event) {
+    const all = options();
+    const at = all.indexOf(document.activeElement);
+    const go = (index) => {
+      event.preventDefault();
+      all[Math.max(0, Math.min(all.length - 1, index))].focus();
+    };
+    if (event.key === "ArrowDown") go(at + 1);
+    else if (event.key === "ArrowUp") go(at - 1);
+    else if (event.key === "Home") go(0);
+    else if (event.key === "End") go(all.length - 1);
+    else if (event.key === "Escape") {
+      event.preventDefault();
+      closePicker();
+    } else if ((event.key === "Enter" || event.key === " ") && at >= 0) {
+      event.preventDefault();
+      pickTree(all[at].dataset.id);
+    } else if (event.key === "Tab") closePicker(false);
+  }
+
+  function wirePicker() {
+    $("tree").addEventListener("click", () => ($("tree-list").hidden ? openPicker() : closePicker()));
+    $("tree").addEventListener("keydown", (event) => {
+      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+        event.preventDefault();
+        openPicker();
+      }
+    });
+    $("tree-list").addEventListener("keydown", pickerKeys);
+    document.addEventListener("mousedown", (event) => {
+      if (!$("tpick").contains(event.target)) closePicker(false);
+    });
   }
 
   function currentTree() {
@@ -287,7 +399,7 @@
     box.append(h("button", { type: "button", className: `badge ${tree.copy ? "ok" : "warn"}`, title: "Open the Install tab for this tree",
       onclick: () => showTab("install") },
       tree.copy ? h("i", { className: "dot" }) : null,
-      tree.copy ? `e2e ${tree.copy.version || "?"} · ${short(tree.copy.commit)}` : tree.isTree ? "not installed" : "not a tree"));
+      tree.copy ? "e2e installed" : tree.isTree ? "not installed" : "not a tree"));
     if (tree.mode) box.append(badge("mute", tree.mode));
     if (tree.up) box.append(badge("warn", "server up", true));
   }
@@ -329,7 +441,7 @@
   function selectTree(id) {
     if (id === state.treeID) return;
     state.treeID = id;
-    $("tree").value = id;
+    renderPicker();
     if (runs) runs.treeChanged();
     setCount("patches", null);
     renderTreeBadges();
@@ -906,7 +1018,7 @@
 
   function wire() {
     for (const button of document.querySelectorAll("#tabs [data-tab]")) button.addEventListener("click", () => showTab(button.dataset.tab));
-    $("tree").addEventListener("change", () => selectTree($("tree").value));
+    wirePicker();
     $("install-refresh").addEventListener("click", () => loadInstall().catch((error) => message(error.message)));
     $("patches-refresh").addEventListener("click", () => loadPatches().catch((error) => message(error.message)));
     $("add-tree").addEventListener("submit", addTree);
@@ -941,7 +1053,7 @@
     loadSummary().catch(() => {});
     countPatches();
     setInterval(() => {
-      if (!document.hidden && !$("preview").open) loadTrees().catch(() => {});
+      if (!document.hidden && !$("preview").open && $("tree-list").hidden) loadTrees().catch(() => {});
     }, 30_000);
   }
 
