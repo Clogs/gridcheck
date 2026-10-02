@@ -1,6 +1,6 @@
 "use strict";
 
-// e2e vendor update and check (core/vendor.js), against a throwaway source
+// gridcheck vendor update and check (core/vendor.js), against a throwaway source
 // repo and a throwaway tree, so they need neither this checkout's state nor a
 // real EveJS tree.
 
@@ -40,10 +40,10 @@ function scratch(t) {
 // tree with only server/src.
 function setup(t) {
   const dir = scratch(t);
-  const source = path.join(dir, "evejs-e2e");
+  const source = path.join(dir, "gridcheck");
   fs.mkdirSync(source);
   git(source, "init", "-q", "-b", "main");
-  write(source, "package.json", JSON.stringify({ name: "evejs-e2e", version: "1.2.3" }));
+  write(source, "package.json", JSON.stringify({ name: "gridcheck", version: "1.2.3" }));
   write(source, "bridge/shim.js", SHIM);
   write(source, "bridge/entry.js", "module.exports = {};\n");
   write(source, "core/crlf.js", CRLF);
@@ -56,7 +56,7 @@ function setup(t) {
   git(source, "tag", "v1");
   const tree = path.join(dir, "tree");
   fs.mkdirSync(path.join(tree, "server", "src"), { recursive: true });
-  const target = path.join(tree, "tools", "evejs-e2e");
+  const target = path.join(tree, "tools", "gridcheck");
   return { dir, source, tree, target, shim: path.join(tree, ...vendor.SHIM_PATH.split(path.sep)) };
 }
 
@@ -121,7 +121,7 @@ test("update takes a commit, not the working files, and a removed file leaves th
   assert.deepStrictEqual(result.counts, { added: 0, changed: 0, removed: 1, same: 4 });
   assert.strictEqual(fs.readFileSync(path.join(s.target, "core", "crlf.js"), "latin1"), CRLF, "uncommitted work isn't vendored");
   assert.ok(!fs.existsSync(path.join(s.target, "core", "mixed.js")));
-  assert.deepStrictEqual(fs.readdirSync(path.dirname(s.target)), ["evejs-e2e"], "no staging folders are left");
+  assert.deepStrictEqual(fs.readdirSync(path.dirname(s.target)), ["gridcheck"], "no staging folders are left");
 });
 
 test("a dry run makes the same checks, lists what would change and writes nothing", (t) => {
@@ -138,7 +138,7 @@ test("a dry run makes the same checks, lists what would change and writes nothin
   assert.deepStrictEqual(forced.changes.changed, ["bridge/entry.js"]);
   assert.strictEqual(fs.readFileSync(path.join(s.target, "bridge", "entry.js"), "utf8"), "// edited\n");
   const lines = vendor.runVendor("update", { tree: s.tree, from: s.source, force: true, dryRun: true });
-  assert.match(lines[0], /^would vendor evejs-e2e 1\.2\.3/);
+  assert.match(lines[0], /^would vendor gridcheck 1\.2\.3/);
   assert.ok(lines.includes("    ~ bridge/entry.js"), lines.join("\n"));
   assert.strictEqual(lines.at(-1), "  nothing was written (--dry-run)");
   assert.deepStrictEqual(vendor.parseVendorArgs(["update", "--dry-run"]), { action: "update", dryRun: true });
@@ -146,7 +146,7 @@ test("a dry run makes the same checks, lists what would change and writes nothin
 
 test("a tag is read from the checkout the tool runs from; anything else that isn't a checkout is refused", (t) => {
   const s = setup(t);
-  assert.throws(() => vendor.updateVendored({ tree: s.tree, from: path.join(s.source, "core") }), /not the root of an evejs-e2e checkout/);
+  assert.throws(() => vendor.updateVendored({ tree: s.tree, from: path.join(s.source, "core") }), /not the root of a Gridcheck checkout/);
   assert.throws(() => vendor.updateVendored({ tree: s.tree, from: s.dir }), /not a git checkout/);
   assert.throws(() => vendor.updateVendored({ tree: path.join(s.dir, "nowhere"), from: s.source }), /not an EveJS tree/);
   assert.throws(() => vendor.updateVendored({ tree: s.tree, from: "no-such-ref-here" }), /no commit "no-such-ref-here"/);
@@ -173,14 +173,14 @@ test("vendor check runs from a copy whose other files no longer load, and names 
   const dir = scratch(t);
   const tree = path.join(dir, "tree");
   fs.mkdirSync(path.join(tree, "server", "src"), { recursive: true });
-  // This repo's own HEAD, so the real bin/e2e.js runs: commit a change to
-  // bin/e2e.js or core/vendor.js before this tests it.
+  // This repo's own HEAD, so the real bin/gridcheck.js runs: commit a change to
+  // bin/gridcheck.js or core/vendor.js before this tests it.
   vendor.updateVendored({ tree });
-  const bin = path.join(tree, "tools", "evejs-e2e", "bin", "e2e.js");
+  const bin = path.join(tree, "tools", "gridcheck", "bin", "gridcheck.js");
   const run = (...args) => spawnSync(process.execPath, [bin, "vendor", ...args], { encoding: "utf8", windowsHide: true,
-    env: { ...process.env, EVEJS_E2E_TREE: "" } });
+    env: { ...process.env, GRIDCHECK_TREE: "" } });
   assert.strictEqual(run("check").status, 0);
-  fs.appendFileSync(path.join(tree, "tools", "evejs-e2e", "core", "plugins.js"), "this is not javascript (\n");
+  fs.appendFileSync(path.join(tree, "tools", "gridcheck", "core", "plugins.js"), "this is not javascript (\n");
   const broken = run("check");
   assert.strictEqual(broken.status, 1);
   assert.match(broken.stderr, /edited +core\/plugins\.js/);
@@ -193,5 +193,22 @@ test("vendor arguments: an action, --tree and --from take values, --force doesn'
     { action: "update", from: "v1", tree: "x", force: true });
   assert.throws(() => vendor.parseVendorArgs(["check", "--tree"]), /--tree needs a value/);
   assert.throws(() => vendor.parseVendorArgs(["check", "extra"]), /unknown argument extra/);
-  assert.throws(() => vendor.runVendor("nope"), /usage: e2e vendor/);
+  assert.throws(() => vendor.runVendor("nope"), /usage: gridcheck vendor/);
+});
+
+test("an update moves a copy and config from before the rename to tools/gridcheck and gridcheck.config.json", (t) => {
+  const s = setup(t);
+  vendor.updateVendored({ tree: s.tree, from: s.source });
+  const oldCopy = path.join(s.tree, "tools", "evejs-e2e");
+  fs.renameSync(s.target, oldCopy);
+  fs.writeFileSync(path.join(s.tree, "e2e.config.json"), "{\"configVersion\":1}\n");
+  const dry = vendor.updateVendored({ tree: s.tree, from: s.source, dryRun: true });
+  assert.deepStrictEqual(dry.migrated, { copy: "tools/evejs-e2e", config: "e2e.config.json" });
+  assert.strictEqual(dry.counts.added, 0, "the old copy's files count as the ones being replaced");
+  assert.ok(fs.existsSync(oldCopy), "a dry run moves nothing");
+  vendor.updateVendored({ tree: s.tree, from: s.source });
+  assert.ok(!fs.existsSync(oldCopy));
+  assert.ok(vendor.checkVendored({ tree: s.tree }).ok);
+  assert.ok(fs.existsSync(path.join(s.tree, "gridcheck.config.json")));
+  assert.ok(!fs.existsSync(path.join(s.tree, "e2e.config.json")));
 });

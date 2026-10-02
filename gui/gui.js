@@ -1,6 +1,6 @@
 "use strict";
 
-// The page `e2e gui` serves (core/gui.js): the header, the tabs, Install,
+// The page `gridcheck gui` serves (core/gui.js): the header, the tabs, Install,
 // Patches and the preview dialog. The Runs tab is gui/runs.js, over the replay
 // model in gui/replay.js. It builds every element with textContent, never
 // HTML, so nothing a run or a tree contains can run here. Every change goes
@@ -305,7 +305,7 @@
   // ---------- the tree picker ----------
   //
   // A listbox, not a <select>, so each row can carry coloured pills in columns:
-  // the tree, its EveJS version (server/package.json), whether e2e is
+  // the tree, its EveJS version (server/package.json), whether gridcheck is
   // installed, and its scenario runs.
 
   const pill = (cls, text, title) => h("span", { className: `tpill ${cls}`, text, title });
@@ -324,7 +324,7 @@
   }
 
   function e2ePill(tree) {
-    if (tree.copy) return pill("ok", "installed", `e2e ${tree.copy.version || "?"} at ${short(tree.copy.commit)}`);
+    if (tree.copy) return pill("ok", "installed", `gridcheck ${tree.copy.version || "?"} at ${short(tree.copy.commit)}`);
     return tree.isTree ? pill("warn", "not installed") : pill("mute", "not a tree");
   }
 
@@ -357,7 +357,7 @@
 
     list.textContent = "";
     list.append(h("div", { className: "tpick-head", "aria-hidden": "true" },
-      h("span", { text: "Tree" }), h("span", { text: "EveJS" }), h("span", { text: "e2e" }), h("span", { text: "Scenario runs" })));
+      h("span", { text: "Tree" }), h("span", { text: "EveJS" }), h("span", { text: "Gridcheck" }), h("span", { text: "Scenario runs" })));
     for (const row of state.trees) {
       list.append(h("div", {
         className: "topt", role: "option", tabindex: "-1", id: `topt-${row.id}`, "data-id": row.id,
@@ -440,7 +440,7 @@
     box.append(h("button", { type: "button", className: `badge ${tree.copy ? "ok" : "warn"}`, title: "Open the Install tab for this tree",
       onclick: () => showTab("install") },
       tree.copy ? h("i", { className: "dot" }) : null,
-      tree.copy ? "e2e installed" : tree.isTree ? "not installed" : "not a tree"));
+      tree.copy ? "gridcheck installed" : tree.isTree ? "not installed" : "not a tree"));
     if (tree.mode) box.append(badge("mute", tree.mode));
     if (tree.up) box.append(badge("warn", "server up", true));
   }
@@ -477,7 +477,7 @@
     const v = (text, mono = false) => h("span", { className: `v${mono ? " mono" : ""}`, text });
     if (state.tab === "runs") fact("world", "globe", "World", v(run.world || "-"));
     fact("mode", "cycle", "Mode", v(mode ? (MODES[mode] || { name: mode }).name : "no config"),
-      mode && MODES[mode] ? h("p", { text: MODES[mode].text }) : h("p", { text: "No e2e.config.json yet. Choose a mode on the Install tab." }));
+      mode && MODES[mode] ? h("p", { text: MODES[mode].text }) : h("p", { text: "No gridcheck.config.json yet. Choose a mode on the Install tab." }));
     if (tree.evejs) fact("evejs", "logo", "EveJS", v(tree.evejs, true));
     fact(...copyFact(tree, summary));
     if (summary && summary.plugins) {
@@ -502,10 +502,10 @@
     if (tree.up) {
       cls = "up";
       title = "Server is up";
-      text = [pid, mode === "managed" ? "a run needs it stopped first (e2e down)" : mode ? "runs use it as it is" : null].filter(Boolean).join(" · ") || "running";
+      text = [pid, mode === "managed" ? "a run needs it stopped first (gridcheck down)" : mode ? "runs use it as it is" : null].filter(Boolean).join(" · ") || "running";
     } else if (!tree.copy) {
       cls = "none";
-      text = "Install e2e to run tests on this tree.";
+      text = "Install gridcheck to run tests on this tree.";
     } else if (mode === "attach") {
       text = "Attach mode: start it yourself, with EVEJS_AGENT_BRIDGE=1 set.";
     } else if (mode === "managed") {
@@ -523,7 +523,7 @@
     const v = (text) => h("span", { className: "v mono", text });
     if (!tree.copy) {
       return ["copy bad", "pkg", "Copy", h("span", { className: "v", text: "not installed" }),
-        h("div", {}, h("p", { text: "e2e isn't installed in this tree." }), h("button", { type: "button", className: "btn sm", text: "Open Install",
+        h("div", {}, h("p", { text: "gridcheck isn't installed in this tree." }), h("button", { type: "button", className: "btn sm", text: "Open Install",
           onclick: () => showTab("install") }))];
     }
     const copy = summary && summary.copy;
@@ -588,17 +588,17 @@
     auto: { name: "Auto", icon: "auto", text: "Uses the tree's server when it's up, and starts its own when it isn't.",
       flow: [["server up?"], "→", ["use it"], "else", ["boot · run · stop"]],
       facts: [["Starts a server", "Only when none is up"], ["Your world", "As it is when it attaches; the scenario's when it boots"]] },
-    managed: { name: "Managed", icon: "cycle", text: "e2e starts and stops the server for each test run.",
+    managed: { name: "Managed", icon: "cycle", text: "gridcheck starts and stops the server for each test run.",
       flow: [["boot"], "→", ["run"], "→", ["stop"], "every run"],
       facts: [["Starts a server", "Every run"], ["Your world", "Replaced by the scenario's"]] },
-    attach: { name: "Attach", icon: "plug", text: "e2e only uses a server you start, with EVEJS_AGENT_BRIDGE=1 set.",
-      flow: [["you start it", "you"], "→", ["e2e attaches"]],
+    attach: { name: "Attach", icon: "plug", text: "gridcheck only uses a server you start, with EVEJS_AGENT_BRIDGE=1 set.",
+      flow: [["you start it", "you"], "→", ["gridcheck attaches"]],
       facts: [["Starts a server", "Never"], ["Needs", "EVEJS_AGENT_BRIDGE=1"]] },
   };
   const SOURCES = { nearby: "Found beside this checkout", given: "Given with --tree", added: "Added on this page" };
   // A row's state badge: done, needed, optional, a problem, information, waiting.
   const STATE_ICONS = { ok: "check", need: "bang", optional: "bang", bad: "x", info: "info", wait: "dash" };
-  const CLI = "node tools/evejs-e2e/bin/e2e.js";
+  const CLI = "node tools/gridcheck/bin/gridcheck.js";
 
   // "a", "a and b", "a, b and c"
   const listed = (items) => (items.length < 2 ? items.join("") : `${items.slice(0, -1).join(", ")} and ${items.at(-1)}`);
@@ -609,13 +609,13 @@
     const forget = tree.source === "added" ? h("button", { type: "button", className: "btn sm ghost forget", text: "Forget",
       title: "Take it off this list", onclick: (event) => { event.stopPropagation(); forgetTree(tree.id); } }) : null;
     // Two lines: name, mode and version; path and runs. The group and the dot
-    // already say whether e2e is installed.
+    // already say whether gridcheck is installed.
     return h("li", { className: `${tree.id === state.treeID ? "sel" : ""}${tree.copy ? "" : " off"}`,
       title: SOURCES[tree.source] || tree.source, onclick: () => { state.tab = "install"; selectTree(tree.id); } },
       h("div", { className: "top" },
-        h("i", { className: `tdot ${dot}`, title: !tree.isTree ? "not an EveJS tree" : !tree.copy ? "e2e isn't installed" : tree.up ? "server up" : "e2e installed" }),
+        h("i", { className: `tdot ${dot}`, title: !tree.isTree ? "not an EveJS tree" : !tree.copy ? "gridcheck isn't installed" : tree.up ? "server up" : "gridcheck installed" }),
         h("b", { text: tree.name }),
-        tree.mode ? h("span", { className: "mode", text: tree.mode, title: "e2e.config.json mode" }) : null,
+        tree.mode ? h("span", { className: "mode", text: tree.mode, title: "gridcheck.config.json mode" }) : null,
         tree.up ? pill("warn", "up", "The tree's server is up") : null,
         evejsPill(tree, vclass)),
       h("div", { className: "sub" },
@@ -704,7 +704,7 @@
     return [copyRow(tree), modeRow(tree), agentsRow(tree), prereqRow(tree), pluginsRow(tree), serverRow(tree)];
   }
 
-  const VENDOR_FILE = "tools/evejs-e2e/VENDOR.json";
+  const VENDOR_FILE = "tools/gridcheck/VENDOR.json";
   const SHIM_FILE = "server/src/_secondary/agentBridge/server.js";
 
   // Facts as a two-column table: [icon, key, value nodes].
@@ -716,7 +716,7 @@
   function copyRow(tree) {
     const copy = tree.copy || {};
     const vendoredGui = state.context.mode === "vendored";
-    const from = vendoredGui ? h("input", { type: "text", placeholder: "F:/evejs-e2e", autocomplete: "off", spellcheck: "false" }) : null;
+    const from = vendoredGui ? h("input", { type: "text", placeholder: "F:/gridcheck", autocomplete: "off", spellcheck: "false" }) : null;
     const vendorRun = (force) => () => preview({ action: "vendor", force, from: from ? from.value : "" });
     const update = copy.vendored && copy.ok && !vendoredGui && !copy.upToDate;
     const version = (v, commit) => [ref("ver", v || "?"), commit ? ref("commit", short(commit)) : null];
@@ -734,28 +734,28 @@
         !vendoredGui && !update && copy.vendored ? ["commit", "This checkout", version(state.context.version, state.context.commit)] : null,
         copy.vendored ? ["file", "Files", [copy.ok ? okText("match") : badText(`${copy.problemCount} differ from`), ref("path", VENDOR_FILE)]] : null,
         ["plug", "Bridge shim", [tree.shim === "matches" ? okText(shimText) : tree.shim === "present" ? shimText : badText(shimText), ref("path", SHIM_FILE)]],
-        copy.present ? ["folder", "Installed at", ref("path", `${tree.root}/tools/evejs-e2e/`)] : null,
+        copy.present ? ["folder", "Installed at", ref("path", `${tree.root}/tools/gridcheck/`)] : null,
       ]),
       copy.problems && copy.problems.length ? h("ul", { className: "problems" }, copy.problems.map((row) => h("li", {}, ref("path", row.file), ` ${row.problem}`))) : null,
-      from ? h("div", { className: "row" }, h("span", { className: "lbl", text: "Update from the evejs-e2e checkout" }), from,
+      from ? h("div", { className: "row" }, h("span", { className: "lbl", text: "Update from the Gridcheck checkout" }), from,
         h("button", { type: "button", className: "btn sm primary", text: "Update\u2026", onclick: vendorRun(!copy.ok) })) : null,
     ];
     if (!copy.present) {
-      return { key: "copy", icon: "pkg", state: "need", blocks: true, title: "e2e is not installed",
-        desc: ["Install copies this checkout's committed files into ", ref("path", "tools/evejs-e2e/"), " and adds a small shim to the server."],
+      return { key: "copy", icon: "pkg", state: "need", blocks: true, title: "gridcheck is not installed",
+        desc: ["Install copies this checkout's committed files into ", ref("path", "tools/gridcheck/"), " and adds a small shim to the server."],
         action: { text: "Install\u2026", primary: true, run: vendorRun(false) }, detail };
     }
     if (!copy.vendored) {
-      return { key: "copy", icon: "pkg", state: "bad", blocks: true, title: "tools/evejs-e2e wasn't installed by e2e", open: true,
-        desc: ["It has no ", ref("path", "VENDOR.json"), ", so e2e can't tell what's in it. Installing replaces it."],
+      return { key: "copy", icon: "pkg", state: "bad", blocks: true, title: "tools/gridcheck wasn't installed by gridcheck", open: true,
+        desc: ["It has no ", ref("path", "VENDOR.json"), ", so gridcheck can't tell what's in it. Installing replaces it."],
         action: { text: "Replace\u2026", primary: true, run: vendorRun(true) }, detail };
     }
     if (!copy.ok) {
-      return { key: "copy", icon: "pkg", state: "bad", title: "e2e is installed, but its files were edited", open: true,
+      return { key: "copy", icon: "pkg", state: "bad", title: "gridcheck is installed, but its files were edited", open: true,
         desc: `${copy.problemCount} ${copy.problemCount === 1 ? "file differs" : "files differ"} from what was installed.`,
         action: vendoredGui ? { text: "Update\u2026", open: true } : { text: "Replace edited files\u2026", run: vendorRun(true) }, detail };
     }
-    return { key: "copy", icon: "pkg", state: "ok", title: "e2e is installed", pill: update ? ["accent", "Update available"] : null, update,
+    return { key: "copy", icon: "pkg", state: "ok", title: "gridcheck is installed", pill: update ? ["accent", "Update available"] : null, update,
       desc: update ? ["Version ", ...version(copy.version, copy.commit), ". This checkout is at ", ref("commit", short(state.context.commit)), "."]
         : ["Version ", ...version(copy.version, copy.commit), ", unchanged since it was installed."],
       action: update ? { text: "Update\u2026", primary: true, run: vendorRun(false) } : vendoredGui ? { text: "Update\u2026", open: true } : null, detail };
@@ -777,7 +777,7 @@
     const sync = () => {
       Object.keys(MODES).forEach((id, index) => buttons[index].setAttribute("aria-pressed", String(id === chosen)));
       write.disabled = config.exists && !(config.problems || []).length && chosen === config.mode;
-      write.title = write.disabled ? "Already this mode" : `Writes ${config.file || "e2e.config.json"}`;
+      write.title = write.disabled ? "Already this mode" : `Writes ${config.file || "gridcheck.config.json"}`;
     };
     sync();
     return [h("div", { className: "modes" }, buttons), h("div", { className: "row" }, write)];
@@ -785,10 +785,10 @@
 
   function modeRow(tree) {
     const config = tree.config || {};
-    if (!tree.copy || !tree.copy.present) return { key: "mode", icon: "cycle", state: "wait", title: "Server mode", desc: "Install e2e first." };
+    if (!tree.copy || !tree.copy.present) return { key: "mode", icon: "cycle", state: "wait", title: "Server mode", desc: "Install gridcheck first." };
     if (!config.exists) {
       return { key: "mode", icon: "cycle", state: "need", blocks: true, title: "Choose a server mode", open: true,
-        desc: "e2e needs to know whether to start the tree's server itself.", detail: () => modePicker(tree, "Write config\u2026") };
+        desc: "gridcheck needs to know whether to start the tree's server itself.", detail: () => modePicker(tree, "Write config\u2026") };
     }
     if ((config.problems || []).length) {
       return { key: "mode", icon: "cycle", state: "bad", blocks: true, title: `${config.file} has problems`, open: true, desc: config.problems[0],
@@ -809,7 +809,7 @@
   }
 
   function agentsRow(tree) {
-    if (!tree.copy || !tree.copy.present) return { key: "agents", icon: "robot", state: "wait", title: "AI agents", desc: "Install e2e first." };
+    if (!tree.copy || !tree.copy.present) return { key: "agents", icon: "robot", state: "wait", title: "AI agents", desc: "Install gridcheck first." };
     const rows = tree.agents || [];
     const names = (list) => listed(list.map((row) => row.name));
     const connected = rows.filter((row) => row.registered);
@@ -872,7 +872,7 @@
     const plugins = doctor && doctor.plugins ? doctor.plugins : tree.plugins || { active: [], skipped: [] };
     const installed = Boolean(tree.copy && tree.copy.present);
     const action = { text: doctor && doctor.running ? "Checking\u2026" : "Run health check", icon: "shield", open: true, run: runDoctor,
-      disabled: !installed || Boolean(doctor && doctor.running), title: installed ? "Runs e2e doctor in the tree" : "Install e2e first" };
+      disabled: !installed || Boolean(doctor && doctor.running), title: installed ? "Runs gridcheck doctor in the tree" : "Install gridcheck first" };
     const detail = () => [
       h("ul", { className: "checks" },
         plugins.active.map((name) => checkItem(true, name, doctor && doctor.plugins ? "active (the tree's copy says)" : "active")),
@@ -880,7 +880,7 @@
         !plugins.active.length && !plugins.skipped.length ? checkItem(null, "No plugins apply to this tree.") : null),
       doctor && doctor.command ? h("div", {}, ref("cmd", doctor.command)) : null,
       doctor ? h("pre", { text: doctor.text })
-        : h("p", {}, "The health check (", ref("cmd", "e2e doctor"), ") asks the tree's own copy what works: the gateway calls it makes, the client view, patches and listeners."),
+        : h("p", {}, "The health check (", ref("cmd", "gridcheck doctor"), ") asks the tree's own copy what works: the gateway calls it makes, the client view, patches and listeners."),
     ];
     if (plugins.active.length) {
       return { key: "plugins", icon: "puzzle", state: "ok", title: "Plugins",
@@ -941,16 +941,16 @@
     let title;
     let text;
     let button = null;
-    // e2e setup does every step but the tree's own dependencies and reference data.
+    // gridcheck setup does every step but the tree's own dependencies and reference data.
     const setupButton = () => h("button", { type: "button", className: "btn primary", text: "Set up everything\u2026",
-      title: "Runs e2e setup: install, config, the agents found, patches, the starter world and a smoke test. You see every command first.",
+      title: "Runs gridcheck setup: install, config, the agents found, patches, the starter world and a smoke test. You see every command first.",
       onclick: () => preview({ action: "setup" }) });
     const setupHelps = blocking.some((row) => row.key !== "prereqs") && !tree.serverUp && state.context.mode !== "vendored";
     if (tree.problem) {
       [cls, mark, title, text] = ["bad", icon("x"), "This folder can't be tested", tree.problem];
     } else if (!tree.copy || !tree.copy.present) {
       [cls, mark, title, text] = ["new", "+", "Not set up yet",
-        "Set up everything installs e2e and gets the tree to a passing smoke test, one previewed command at a time. Or work through the checklist below."];
+        "Set up everything installs gridcheck and gets the tree to a passing smoke test, one previewed command at a time. Or work through the checklist below."];
       button = h("div", { className: "row" }, setupButton(),
         h("button", { type: "button", className: "btn", text: "Install only\u2026", onclick: () => preview({ action: "vendor", force: false, from: "" }) }));
     } else if (blocking.length) {
@@ -1026,7 +1026,7 @@
   // One line of what a recipe step does: [icon, text, small].
   function recipeStep(step) {
     if (step === "fresh") return ["globe", "A fresh world, seeded from the reference data", null];
-    if (step === "login") return ["user", "Logs in the e2e character", null];
+    if (step === "login") return ["user", "Logs in the gridcheck character", null];
     if (step === "undock" || step === "dock") return ["ship", step === "undock" ? "Undocks" : "Docks", null];
     if (!step || typeof step !== "object") return ["list", String(step), null];
     const note = step.note ? String(step.note) : null;
@@ -1065,9 +1065,9 @@
       h("div", { className: "scard-h" }, h("span", { className: "ic" }, icon(iconName)), h("div", {}, h("h4", { text: heading }), h("p", {}, sub)), stateNode), ...body);
     if (mode === "attach") {
       const command = `${CLI} login`;
-      return scard("user", "Log in to the server you started", "Logs the e2e character in, and starts the client view.",
+      return scard("user", "Log in to the server you started", "Logs the gridcheck character in, and starts the client view.",
         h("span", { className: `sstate ${tree.up ? "ok" : ""}` }, h("i"), tree.up ? "Server is up" : "Start the server first"),
-        annotatedTerm([[CLI, "the e2e command in this tree"], ["login", "log in", "t2"]], command),
+        annotatedTerm([[CLI, "the gridcheck command in this tree"], ["login", "log in", "t2"]], command),
         h("div", { className: "what" }, h("div", { className: "meta" }, h("div", { className: "m" }, icon("plug", "sm"),
           h("span", {}, "Attach mode runs on the live server as it is, so the scenario's world isn't applied. Start the server with ",
             ref("env", "EVEJS_AGENT_BRIDGE=1"), " set.")))));
@@ -1076,7 +1076,7 @@
       const fresh = scenario.world === "fresh";
       return scard("globe", fresh ? "No world to build" : `Uses the saved world ${scenario.world}`,
         fresh ? `${scenario.name} starts from a fresh world, seeded from the reference data at boot.`
-          : ["Saved with ", ref("cmd", "e2e world save"), "; ", ref("cmd", "e2e world list"), " shows what's saved."],
+          : ["Saved with ", ref("cmd", "gridcheck world save"), "; ", ref("cmd", "gridcheck world list"), " shows what's saved."],
         h("span", { className: "sstate mute" }, h("i"), "Nothing to do"));
     }
     const recipe = (data.recipes || []).find((row) => row.name === scenario.recipe);
@@ -1086,10 +1086,10 @@
         : recipe.state === "broken" ? h("span", { className: "sstate bad", title: recipe.why || "" }, h("i"), "Recipe is broken")
           : h("span", { className: "sstate", title: recipe.why || "" }, h("i"), recipe.why && /hasn't been built/.test(recipe.why) ? "Not built yet" : "Out of date");
     const steps = recipe ? (recipe.steps || []).map(recipeStep) : [];
-    const worldsDir = tree.config.worldsDir || "_local/e2e/worlds";
+    const worldsDir = tree.config.worldsDir || "_local/gridcheck/worlds";
     return scard("globe", `Build the ${scenario.recipe} world`, recipe ? recipe.description : `The scenario names a recipe, ${scenario.recipe}, that this tree doesn't have.`,
       stateNode,
-      annotatedTerm([[CLI, "the e2e command in this tree"], ["world build", "build a world", "t2"], [scenario.recipe, `from the ${scenario.recipe} recipe`, "t3"]], command),
+      annotatedTerm([[CLI, "the gridcheck command in this tree"], ["world build", "build a world", "t2"], [scenario.recipe, `from the ${scenario.recipe} recipe`, "t3"]], command),
       h("div", { className: "what" },
         h("div", {}, h("h5", { className: "lbl", text: "What it does" }),
           h("ul", { className: "gets" }, steps.map(([iconName, text, small]) => h("li", {}, h("span", { className: "g" }, icon(iconName)),
@@ -1098,7 +1098,7 @@
           h("div", { className: "m" }, icon("refresh", "sm"), h("span", {}, "Optional: a run that names the recipe builds it when it's missing or out of date.")),
           h("div", { className: "m" }, icon("folder", "sm"), h("span", {}, "Saved to ", ref("path", `${worldsDir}/${scenario.recipe}/`))),
           h("div", { className: "m" }, icon("power", "sm"), h("span", {}, "Needs the server down. ",
-            h("span", { className: tree.up ? "warnc" : "okc", text: tree.up ? "It's up: e2e down first." : "It is." }))),
+            h("span", { className: tree.up ? "warnc" : "okc", text: tree.up ? "It's up: gridcheck down first." : "It is." }))),
           mode === "managed" || mode === "auto" ? null : h("div", { className: "m" }, icon("alert", "sm"), h("span", { text: "Needs auto or managed mode." })))));
   }
 
@@ -1113,7 +1113,7 @@
     // Group the picker: the tree's own, the core's, then each plugin's.
     const groups = new Map();
     for (const row of list) {
-      const group = row.plugin ? `${row.plugin} plugin` : /^tools\/e2e-scenarios\//.test(row.file) ? "This tree" : "Core";
+      const group = row.plugin ? `${row.plugin} plugin` : /^tools\/(gridcheck|e2e)-scenarios\//.test(row.file) ? "This tree" : "Core";
       if (!groups.has(group)) groups.set(group, []);
       groups.get(group).push(row);
     }
@@ -1160,7 +1160,7 @@
           attach || !scenario.recipe))),
       sec("runs", "Result", h("div", { className: "result" },
         badge("ok", "passed", true), h("span", { className: "muted", text: "or" }), badge("bad", "failed", true),
-        h("span", { className: "muted", text: "printed with the path to" }), ref("path", `${tree.config.runsDir || "_local/e2e/runs"}/<run>/report.md`, { copy: false }),
+        h("span", { className: "muted", text: "printed with the path to" }), ref("path", `${tree.config.runsDir || "_local/gridcheck/runs"}/<run>/report.md`, { copy: false }),
         h("span", { className: "spacer" }),
         h("button", { type: "button", className: "btn sm", onclick: () => showTab("runs") }, icon("runs"), "Open the Runs tab"))));
   }
@@ -1194,8 +1194,8 @@
     const scenario = data && Array.isArray(data.scenarios) ? pickScenario(tree, data.scenarios) : null;
     const name = scenario ? scenario.name : "loadout-npc-fight";
     pane.append(h("div", { className: "agent-row" }, connected.map(agentLogo),
-      h("span", {}, h("b", { text: listed(connected.map((row) => row.name)) }), ` ${connected.length === 1 ? "is" : "are"} connected to this tree, with the e2e tools. It starts with `,
-        ref("tool", "e2e_status"), ".")));
+      h("span", {}, h("b", { text: listed(connected.map((row) => row.name)) }), ` ${connected.length === 1 ? "is" : "are"} connected to this tree, with the gridcheck tools. It starts with `,
+        ref("tool", "status"), ".")));
     const prompts = [
       [`Run ${name} and tell me which expectations failed.`, "Runs a scenario this tree already has."],
       ["Write a scenario that checks the feature I'm working on, then run it.", "Drafts a scenario, checks it and runs it."],
@@ -1284,7 +1284,7 @@
     const rerender = () => {
       if (state.tree && state.tree.id === id && state.tab === "install") renderInstall(state.tree);
     };
-    state.doctor = { treeID: id, running: true, command: "", text: "running e2e doctor...", plugins: null };
+    state.doctor = { treeID: id, running: true, command: "", text: "running gridcheck doctor...", plugins: null };
     rerender();
     try {
       const doctor = (await api(`/gui/api/doctor?tree=${q(id)}`)).doctor;
@@ -1296,13 +1296,13 @@
     rerender();
   }
 
-  // The same lines `e2e doctor` prints, from its --json report.
+  // The same lines `gridcheck doctor` prints, from its --json report.
   function formatDoctor(report) {
     const lines = [];
     const tool = report.tool || {};
-    lines.push(`evejs-e2e  ${tool.version || "?"}${tool.commit ? ` at ${short(tool.commit)}` : ""}${tool.vendored ? " (vendored)" : " (checkout)"}`);
+    lines.push(`Gridcheck  ${tool.version || "?"}${tool.commit ? ` at ${short(tool.commit)}` : ""}${tool.vendored ? " (vendored)" : " (checkout)"}`);
     const config = report.tree && report.tree.config;
-    lines.push(`tree       ${report.tree ? report.tree.root : "?"}; ${config && config.exists ? `e2e.config.json, mode ${config.mode}` : "no e2e.config.json"}`);
+    lines.push(`tree       ${report.tree ? report.tree.root : "?"}; ${config && config.exists ? `gridcheck.config.json, mode ${config.mode}` : "no gridcheck.config.json"}`);
     for (const problem of (config && config.problems) || []) lines.push(`           config problem: ${problem}`);
     lines.push(`checked    ${report.source || "?"}`);
     const gateway = report.gateway || {};
@@ -1319,7 +1319,7 @@
     const listeners = Object.entries(report.listeners || {});
     lines.push(listeners.length ? `listeners  move: ${listeners.filter(([, row]) => row.movable).map(([name]) => name).join(", ") || "none"}` +
       `${listeners.some(([, row]) => !row.movable) ? `; stay on stock ports: ${listeners.filter(([, row]) => !row.movable).map(([name]) => name).join(", ")}` : ""}`
-      : "listeners  not probed yet (e2e init)");
+      : "listeners  not probed yet (gridcheck init)");
     if (report.loadout) lines.push(report.loadout.ok ? "loadout    the stock ship helpers are there" : `loadout    OFF: ${report.loadout.missing.join("; ")}`);
     return lines.join("\n");
   }
@@ -1382,7 +1382,7 @@
 
   // ---------- preview and run ----------
 
-  const ACTION_TITLES = { setup: "Set up everything", vendor: "Install or update the copy", init: "Write e2e.config.json", agents: "Set up agents",
+  const ACTION_TITLES = { setup: "Set up everything", vendor: "Install or update the copy", init: "Write gridcheck.config.json", agents: "Set up agents",
     "patch-apply": "Apply a patch", "patch-revert": "Revert a patch" };
 
   async function preview(request) {
@@ -1478,7 +1478,7 @@
     runs = window.E2ERuns.create(shell);
     commands = window.E2ECommands.create(shell);
     if (!token) {
-      message("no token: open the URL e2e gui prints");
+      message("no token: open the URL gridcheck gui prints");
       return;
     }
     try {

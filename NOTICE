@@ -1,11 +1,11 @@
-evejs-e2e
-Copyright (C) 2026 the evejs-e2e contributors
+Gridcheck
+Copyright (C) 2026 the Gridcheck contributors
 
 This program is free software: you can redistribute it and/or modify it under the terms of the
 GNU Affero General Public License as published by the Free Software Foundation, version 3 of the
 License. See LICENSE.
 
-evejs-e2e is a test harness for EVE.js, an EVE Online server emulator, and runs inside an EVE.js
+Gridcheck is a test harness for EVE.js, an EVE Online server emulator, and runs inside an EVE.js
 server process. EVE.js is licensed AGPL-3.0, and the harness is licensed the same way. The
 destiny decoder in bridge/destiny.js mirrors EVE.js's ball encoding, and the bridge calls EVE.js
 modules from the tree it is installed in. That server code is EVE.js's work.

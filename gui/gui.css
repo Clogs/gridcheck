@@ -1,4 +1,4 @@
-/* `e2e gui`, in the LU Monitor's colours. The Runs tab is a workbench (runs,
+/* `gridcheck gui`, in the LU Monitor's colours. The Runs tab is a workbench (runs,
    replay, inspector) or a trace (one lane per ball); Install and Patches are
    panels. No inline styles: the page's CSP is style-src 'self', so positions
    are set through element.style by gui/runs.js. */
@@ -523,7 +523,7 @@ pre {
 .dhead { display: flex; align-items: flex-end; gap: 10px; margin-bottom: 14px; flex-wrap: wrap; }
 .dhead h1 { margin: 2px 0 0; font-size: 20px; font-weight: 600; display: flex; align-items: center; gap: 12px; }
 .lede { margin: 0 0 14px; color: var(--muted); max-width: 980px; }
-/* The tree list: grouped by whether e2e is installed, each with its path and EveJS version. */
+/* The tree list: grouped by whether gridcheck is installed, each with its path and EveJS version. */
 .tree-filter { padding: 0 10px 8px; }
 .tree-filter input { width: 100%; }
 .tree-groups .group-label { display: flex; align-items: center; gap: 8px; margin: 12px 16px 4px; font-size: 11.5px; text-transform: uppercase;

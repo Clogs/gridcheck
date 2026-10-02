@@ -1,9 +1,9 @@
 "use strict";
 
-// `e2e run <scenario>`: scenario files, their checks, the run itself and its
+// `gridcheck run <scenario>`: scenario files, their checks, the run itself and its
 // report. A scenario names a saved world, setup steps, stop conditions and
-// expectations (the tree's tools/e2e-scenarios/*.json, the core's
-// tools/evejs-e2e/scenarios/ and each plugin's plugins/<name>/scenarios/).
+// expectations (the tree's tools/gridcheck-scenarios/*.json, the core's
+// tools/gridcheck/scenarios/ and each plugin's plugins/<name>/scenarios/).
 // Plugins add steps and `up` options through the registry (core/plugins.js).
 // The server calls come in as `ops`, so the run can be tested without a
 // server. Guide: docs/GUIDE.md "Scenarios".
@@ -20,11 +20,11 @@ const loadoutTools = require("./loadout");
 const perfTools = require("./perf");
 
 const SCENARIO_DIR = path.join(__dirname, "..", "scenarios");
-// The tree's own scenarios, committed with its features (e2e.config.json
-// scenariosDir, tools/e2e-scenarios by default). tools/evejs-e2e/ is a
+// The tree's own scenarios, committed with its features (gridcheck.config.json
+// scenariosDir, tools/gridcheck-scenarios by default). tools/gridcheck/ is a
 // vendored copy (core/vendor.js), so a scenario saved there would be drift.
 const TREE_SCENARIO_DIR = defaultTreeConfig().scenariosDir;
-// Drafts an agent wrote while working on a feature, not committed (_local/e2e/scenarios).
+// Drafts an agent wrote while working on a feature, not committed (_local/gridcheck/scenarios).
 const DRAFT_SCENARIO_DIR = path.join(defaultTreeConfig().e2eDir, "scenarios");
 // "world": "fresh" boots a new game store seeded from the reference data.
 const FRESH_WORLD = "fresh";
@@ -177,12 +177,12 @@ function validateScenario(raw, { source = "scenario", defaultName = null, worldE
   const recipe = raw.recipe === undefined ? null : raw.recipe;
   if (recipe !== null) {
     if (raw.world !== undefined) problem("recipe", "a scenario starts from a world or a recipe, not both");
-    else if (typeof recipe !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(recipe)) problem("recipe", "a world recipe's name (e2e world recipes)");
-    else if (!recipeExists(recipe)) problem("recipe", `no world recipe "${recipe}" (e2e world recipes)`);
+    else if (typeof recipe !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(recipe)) problem("recipe", "a world recipe's name (gridcheck world recipes)");
+    else if (!recipeExists(recipe)) problem("recipe", `no world recipe "${recipe}" (gridcheck world recipes)`);
   } else if (typeof raw.world !== "string" || !raw.world) {
-    problem("world", `the saved world to start from (e2e world list), "${FRESH_WORLD}", or a "recipe" instead`);
+    problem("world", `the saved world to start from (gridcheck world list), "${FRESH_WORLD}", or a "recipe" instead`);
   } else if (raw.world !== FRESH_WORLD && !worldExists(raw.world)) {
-    problem("world", `no saved world "${raw.world}" (e2e world list)`);
+    problem("world", `no saved world "${raw.world}" (gridcheck world list)`);
   }
 
   const up = upDefaults(registry);
@@ -588,7 +588,7 @@ const SCENARIO_TEMPLATE = Object.freeze({
 function newScenario(name, { from = null, save = false, force = false, treeDir = TREE_SCENARIO_DIR,
   draftDir = DRAFT_SCENARIO_DIR, ...context } = {}) {
   if (!SCENARIO_NAME.test(String(name || ""))) {
-    throw new Error("scenario new needs a name: letters, digits, '.', '_' or '-', e.g. `e2e scenario new fleet-arrives`");
+    throw new Error("scenario new needs a name: letters, digits, '.', '_' or '-', e.g. `gridcheck scenario new fleet-arrives`");
   }
   let raw = SCENARIO_TEMPLATE;
   let source = null;
@@ -597,7 +597,7 @@ function newScenario(name, { from = null, save = false, force = false, treeDir =
     try {
       raw = JSON.parse(fs.readFileSync(source, "utf8"));
     } catch (error) {
-      throw new Error(error.code === "ENOENT" ? `no scenario ${from} to copy (\`e2e run\` lists them)` : `${source}: ${error.message}`);
+      throw new Error(error.code === "ENOENT" ? `no scenario ${from} to copy (\`gridcheck run\` lists them)` : `${source}: ${error.message}`);
     }
     raw = { ...raw };
     delete raw.name;

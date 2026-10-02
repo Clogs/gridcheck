@@ -158,7 +158,7 @@
       const box = $("rail-groups");
       box.textContent = "";
       if (!state.runs.length) {
-        box.append(h("div", { className: "empty" }, "No runs with a timeline yet. ", h("code", { text: "e2e run <scenario>" }), " makes one."));
+        box.append(h("div", { className: "empty" }, "No runs with a timeline yet. ", h("code", { text: "gridcheck run <scenario>" }), " makes one."));
         return;
       }
       if (!shown.length) box.append(h("div", { className: "empty", text: "No scenario matches." }));
@@ -412,7 +412,7 @@
       if (!frame) {
         const note = el("text", { className: "m-note", x: 24, y: 70 });
         note.textContent = !state.runID ? "" : state.model.positions.length ? "no position sample near this time"
-          : "no positions in this run: watch with --positions, or use e2e run";
+          : "no positions in this run: watch with --positions, or use gridcheck run";
         svg.append(note);
         setScale(0, "");
         return { tracked: 0 };
@@ -989,7 +989,7 @@
       sub.append(h("div", { className: "shead" }, h("h2", { text: "Subsystems" }),
         h("span", { className: "count", text: record.profile ? `${fmtMs(record.profile.totalMsPerTick)} a tick, ${record.profile.windows} profiler windows` : "tick profiler" })));
       if (!record.profile) {
-        sub.append(h("p", { className: "muted" }, "The server ran without the tick profiler. Boot it with ", h("code", { text: "e2e up --profile" }),
+        sub.append(h("p", { className: "muted" }, "The server ran without the tick profiler. Boot it with ", h("code", { text: "gridcheck up --profile" }),
           ", or give the scenario ", h("code", { text: "\"up\": { \"profile\": true }" }), ", to see where each tick goes."));
       } else {
         const rows = record.profile.sections.slice(0, 14);
@@ -1263,7 +1263,7 @@
         row.firstChild.addEventListener("click", () => { state.selBall = String(lane.ids[0]); renderTrace(); render(); });
         box.append(row);
       }
-      if (!lanes.length) box.append(h("div", { className: "tr-more", text: state.model.positions.length ? "No ships or drones in the position samples." : "No position samples, so no lanes: watch with --positions, or use e2e run." }));
+      if (!lanes.length) box.append(h("div", { className: "tr-more", text: state.model.positions.length ? "No ships or drones in the position samples." : "No position samples, so no lanes: watch with --positions, or use gridcheck run." }));
       if (hidden) box.append(h("div", { className: "tr-more", text: `${hidden} more ball(s) on grid not shown; the 40 above have the most to show.` }));
 
       // Divergences.

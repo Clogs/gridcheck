@@ -1,6 +1,6 @@
 "use strict";
 
-// e2e setup (core/setup.js): what it refuses before changing anything, the
+// gridcheck setup (core/setup.js): what it refuses before changing anything, the
 // commands it runs in order, what it skips, and where it stops.
 
 const test = require("node:test");
@@ -85,10 +85,10 @@ test("a server that is up refuses, and so does a vendored copy asked for another
 
 test("a new tree gets every step in order; a failed step stops setup and says to rerun", async (t) => {
   const root = scratchTree(t);
-  const copyCli = path.join(root, "tools", "evejs-e2e", "bin", "e2e.js");
+  const copyCli = path.join(root, "tools", "gridcheck", "bin", "gridcheck.js");
   // vendor update "installs" the copy, so later steps find it.
   const io = fakeIO({
-    onRun: (words) => { if (words[0] === "vendor") write(root, "tools/evejs-e2e/bin/e2e.js", ""); },
+    onRun: (words) => { if (words[0] === "vendor") write(root, "tools/gridcheck/bin/gridcheck.js", ""); },
     reads: { "patch status": { code: 0, stdout: JSON.stringify([{ id: "xmpp-port", state: "absent", applies: true },
       { id: "slash-success", state: "detected", applies: true }]) } },
   });
@@ -108,8 +108,8 @@ test("a new tree gets every step in order; a failed step stops setup and says to
 
 test("what is done is skipped: the config, agents, patches, a current world; attach mode skips world and smoke", async (t) => {
   const root = scratchTree(t);
-  write(root, "tools/evejs-e2e/bin/e2e.js", "");
-  write(root, "e2e.config.json", JSON.stringify({ configVersion: 1, mode: "attach" }));
+  write(root, "tools/gridcheck/bin/gridcheck.js", "");
+  write(root, "gridcheck.config.json", JSON.stringify({ configVersion: 1, mode: "attach" }));
   const io = fakeIO({
     reads: { "patch status": { code: 0, stdout: JSON.stringify([{ id: "xmpp-port", state: "applied", applies: true }]) } },
   });
@@ -117,11 +117,11 @@ test("what is done is skipped: the config, agents, patches, a current world; att
   assert.deepStrictEqual(io.ran, []);
   const text = io.lines.join("\n");
   assert.match(text, /\[1\/6\][^\n]*\n  skipped: this is the tree's own copy/);
-  assert.match(text, /skipped: e2e\.config\.json is there, in attach mode/);
+  assert.match(text, /skipped: gridcheck\.config\.json is there, in attach mode/);
   assert.match(text, /skipped: every patch is applied or detected already/);
   assert.match(text, /skipped: attach mode: the tool doesn't start the server/);
 
-  write(root, "e2e.config.json", JSON.stringify({ configVersion: 1, mode: "auto" }));
+  write(root, "gridcheck.config.json", JSON.stringify({ configVersion: 1, mode: "auto" }));
   const built = fakeIO({ reads: {
     "patch status": { code: 0, stdout: "[]" },
     "world recipes": { code: 0, stdout: JSON.stringify([{ name: "starter", state: "built" }]) },
@@ -133,9 +133,9 @@ test("what is done is skipped: the config, agents, patches, a current world; att
 
 test("a partly applied patch stops setup with the revert to run", async (t) => {
   const root = scratchTree(t);
-  write(root, "tools/evejs-e2e/bin/e2e.js", "");
-  write(root, "e2e.config.json", JSON.stringify({ configVersion: 1, mode: "auto" }));
+  write(root, "tools/gridcheck/bin/gridcheck.js", "");
+  write(root, "gridcheck.config.json", JSON.stringify({ configVersion: 1, mode: "auto" }));
   const io = fakeIO({ reads: { "patch status": { code: 0, stdout: JSON.stringify([{ id: "last-decision", state: "partial" }]) } } });
   assert.strictEqual(await runSetup(parseSetupArgs([root, "--agents", "none"]), io, { vendored: true, tree: root, head: null }), 1);
-  assert.match(io.lines.join("\n"), /`e2e patch revert last-decision` puts the file back/);
+  assert.match(io.lines.join("\n"), /`gridcheck patch revert last-decision` puts the file back/);
 });

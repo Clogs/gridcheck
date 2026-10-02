@@ -1,6 +1,6 @@
 "use strict";
 
-// Two facts about a tree that the GUI and `e2e setup` both check before they
+// Two facts about a tree that the GUI and `gridcheck setup` both check before they
 // change it: is its server up, and does it have what a server needs to boot
 // (its npm dependencies and its reference data).
 
@@ -48,7 +48,7 @@ function serverUpInfo(root, config = treeConfig.loadTreeConfig(root)) {
 function serverUpReason(root, config = treeConfig.loadTreeConfig(root)) {
   const up = serverUpInfo(root, config);
   if (!up) return null;
-  return `the tree's server is up (pid ${up.pid}${up.byE2e ? ", started by e2e up" : ""})`;
+  return `the tree's server is up (pid ${up.pid}${up.byE2e ? ", started by gridcheck up" : ""})`;
 }
 
 // -> [{ name, path, ok, fix }]: the tree's npm dependencies and its reference data.

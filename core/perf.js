@@ -10,7 +10,7 @@
 //   mergeProfiles(windows)   several profile windows -> one table, ms per tick
 //   perfPhases(events)       a run's PERF events cut at its STEP lines
 //   perfRecord(events)       what result.json keeps
-//   formatPerf(...)          the text `e2e perf` prints
+//   formatPerf(...)          the text `gridcheck perf` prints
 //
 // A PERF event is one window of ticks, written by a watch with perf on (or
 // answered by POST /perf). `series` holds every tick in it: `at` in ms before
@@ -310,7 +310,7 @@
         row.pct === null || row.pct === undefined ? "--" : `${Number(row.pct).toFixed(1)}%`, row.calls ? String(row.calls) : "-"]);
   }
 
-  // What `e2e perf` prints for a POST /perf or GET /perf reply.
+  // What `gridcheck perf` prints for a POST /perf or GET /perf reply.
   function formatPerf(reply) {
     const perf = reply.perf || {};
     const lines = [];
@@ -340,7 +340,7 @@
     }
     const profile = reply.profile;
     if (!profiler.enabled) {
-      lines.push("", "tick profiler off: no per-subsystem breakdown. Boot with `e2e up --profile` (EVEJS_TICK_PROFILE=1) for one.");
+      lines.push("", "tick profiler off: no per-subsystem breakdown. Boot with `gridcheck up --profile` (EVEJS_TICK_PROFILE=1) for one.");
     } else if (!profile) {
       lines.push("", `tick profiler on (a window every ${profiler.everyTicks} ticks), but no window ended in this sample; sample for longer.`);
     } else {

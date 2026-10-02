@@ -1,6 +1,6 @@
 "use strict";
 
-// Top-down tactical frames for `e2e run`, drawn from the run's own
+// Top-down tactical frames for `gridcheck run`, drawn from the run's own
 // timeline.jsonl: the watch's POS events say where every ball near the ship
 // was, the other events say when to draw. One SVG per key event:
 //   - the first ARRIVE of each group (or of each ball with no group);

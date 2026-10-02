@@ -1,17 +1,17 @@
 "use strict";
 
 // The human viewer: a small page that draws the tactical view from a run's
-// timeline.jsonl (`e2e watch` or `e2e run`), live while the run writes it or
+// timeline.jsonl (`gridcheck watch` or `gridcheck run`), live while the run writes it or
 // as a replay afterwards, with the client-fidelity DIVERGE events marked.
 //
 //   GET /viewer               the page             no token: it carries no data
 //   GET /viewer/viewer.js     its script
 //   GET /viewer/viewer.css    its styles
-//   GET /viewer/runs          the runs in _local/e2e/runs/, newest first   token
+//   GET /viewer/runs          the runs in _local/gridcheck/runs/, newest first   token
 //   GET /viewer/timeline?run=<id>&from=<byte>   the next part of a timeline token
 //   GET /viewer/config        the plugins' colours                          token
 //
-// The page reads the token from its URL fragment (`e2e view` prints the URL),
+// The page reads the token from its URL fragment (`gridcheck view` prints the URL),
 // so it never reaches a server log. Run IDs are checked against the runs
 // directory, so a request can't read any other file. The page knows the core's
 // event kinds; lines of a plugin's kinds come with the plugin's own text

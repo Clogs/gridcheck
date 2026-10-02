@@ -100,14 +100,14 @@ function frameWhy(frame) {
 // How each surface names its commands in the texts below.
 const SURFACES = {
   mcp: {
-    waitAgain: () => "Call e2e_report again with waitSeconds to wait for it.",
-    saveHint: "(e2e_run_scenario with save: true)",
-    detached: (runID, maxWait) => `Call e2e_report with run "${runID}" and waitSeconds (up to ${maxWait}) to wait for it and read the verdict.`,
+    waitAgain: () => "Call report again with waitSeconds to wait for it.",
+    saveHint: "(run_scenario with save: true)",
+    detached: (runID, maxWait) => `Call report with run "${runID}" and waitSeconds (up to ${maxWait}) to wait for it and read the verdict.`,
   },
   cli: {
-    waitAgain: (runID) => `\`e2e report ${runID} --wait 600\` waits for it.`,
-    saveHint: "(move its file into tools/e2e-scenarios/)",
-    detached: (runID) => `\`e2e report ${runID} --wait 600\` waits for it and prints the verdict.`,
+    waitAgain: (runID) => `\`gridcheck report ${runID} --wait 600\` waits for it.`,
+    saveHint: "(move its file into tools/gridcheck-scenarios/)",
+    detached: (runID) => `\`gridcheck report ${runID} --wait 600\` waits for it and prints the verdict.`,
   },
 };
 
@@ -176,8 +176,8 @@ function createRuns({ treeRoot, runsDir, e2eDir, surface = "mcp" }) {
   // A scenario committed with the tree or the tool, which a reviewer can rerun by name.
   function committedScenario(scenarioFile) {
     const file = String(scenarioFile || "");
-    return file.startsWith(`${relativePath(TREE_SCENARIO_DIR)}/`) || file.startsWith("tools/evejs-e2e/scenarios/") ||
-      /^tools\/evejs-e2e\/plugins\/[^/]+\/scenarios\//.test(file);
+    return file.startsWith(`${relativePath(TREE_SCENARIO_DIR)}/`) || file.startsWith("tools/gridcheck/scenarios/") ||
+      /^tools\/gridcheck\/plugins\/[^/]+\/scenarios\//.test(file);
   }
 
   // Markdown to paste into a PR description: what ran, on what, and what was
@@ -213,13 +213,13 @@ function createRuns({ treeRoot, runsDir, e2eDir, surface = "mcp" }) {
       }
       lines.push("");
     }
-    lines.push(`Reproduce: \`node tools/evejs-e2e/bin/e2e.js run ${reproduce}\`.`);
+    lines.push(`Reproduce: \`node tools/gridcheck/bin/gridcheck.js run ${reproduce}\`.`);
     const attach = frames.map((frame) => path.join(state.dir, frame.file));
     return [
       lines.join("\n"),
       "",
       "---",
-      ...(inTree ? [] : [`The scenario is not in tools/e2e-scenarios/, so a reviewer can't rerun it. Save it there ` +
+      ...(inTree ? [] : [`The scenario is not in tools/gridcheck-scenarios/, so a reviewer can't rerun it. Save it there ` +
         `${say.saveHint} and commit it with the feature.`]),
       `Paste the markdown above. Attach these, or PNGs rendered from them, so reviewers see the frames:`,
       ...(attach.length ? attach.map((file) => `- ${file}`) : ["- (no frames in this run)"]),

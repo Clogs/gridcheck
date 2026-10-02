@@ -1,6 +1,6 @@
 "use strict";
 
-// evejs-e2e phase 2: per-tree port blocks, the market daemon's generated
+// Gridcheck phase 2: per-tree port blocks, the market daemon's generated
 // config, and saved worlds. The live boot is checked by
 // docs/GUIDE.md.
 
@@ -22,8 +22,8 @@ test("a tree's port block is stable, below the ephemeral range and overridable",
   const top = ports.portsForSlot(ports.SLOT_COUNT - 1);
   assert.ok(Math.max(...Object.keys(ports.OFFSETS).map((name) => top[name])) < 49_152);
   assert.ok(Math.max(...Object.values(ports.OFFSETS)) < ports.BLOCK_SIZE);
-  assert.strictEqual(ports.portsForTree("F:/LU/e2e-grid", { EVEJS_E2E_PORT_SLOT: "3" }).game, 30_060);
-  assert.throws(() => ports.slotForTree("x", { EVEJS_E2E_PORT_SLOT: "800" }), /0 to 799/);
+  assert.strictEqual(ports.portsForTree("F:/LU/e2e-grid", { GRIDCHECK_PORT_SLOT: "3" }).game, 30_060);
+  assert.throws(() => ports.slotForTree("x", { GRIDCHECK_PORT_SLOT: "800" }), /0 to 799/);
 });
 
 test("the server environment moves every configurable listener onto the block, plugin listeners included", () => {

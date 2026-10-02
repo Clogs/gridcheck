@@ -2,7 +2,7 @@
 
 // The Living Universe plugin's CLI commands: scouts, trigger, clock, warp and
 // economy, and `teleport --flight`, which pins a flight where it lands. Each
-// takes the CLI's io (bin/e2e.js pluginIO). Guide: docs/E2E-GRID-TESTING.md.
+// takes the CLI's io (bin/gridcheck.js pluginIO). Guide: docs/E2E-GRID-TESTING.md.
 
 const fs = require("node:fs");
 const path = require("node:path");
@@ -56,7 +56,7 @@ async function cmdScouts(_positionals, flags, io) {
   io.print(`${scouts.length} scout(s)${flags.all ? "" : " holding (--all for every scout)"}`);
 }
 
-// `e2e teleport <system> --flight <id>`: the LU Monitor's /teleport, which pins
+// `gridcheck teleport <system> --flight <id>`: the LU Monitor's /teleport, which pins
 // the flight for materialization before the jump.
 async function teleportWithFlight(positionals, flags, io) {
   const state = io.requireLogin(io.readState());
@@ -118,7 +118,7 @@ async function cmdClock(_positionals, flags, io) {
   }
   const marker = clock.marker;
   io.print(`LU clock ${new Date(clock.simNowMs).toISOString()}  offset ${warpTools.formatOffset(clock.offsetMs)}` +
-    `  ${marker && marker.e2eWorld ? `e2e world (${marker.savedWorld || "?"})` : "no e2e marker: warp refused"}`);
+    `  ${marker && marker.e2eWorld ? `gridcheck world (${marker.savedWorld || "?"})` : "no gridcheck marker: warp refused"}`);
   if (clock.warp) {
     const w = clock.warp;
     io.print(`warping: ${warpTools.formatDuration(w.simulatedMs)} of ${warpTools.formatDuration(w.targetSimMs)} ` +
@@ -160,8 +160,8 @@ async function cmdWarp(_positionals, flags, io) {
   const run = io.readRun() || {};
   if (!real && !String(run.world || "").startsWith("saved ")) {
     throw new io.CliError(
-      `this server's world is "${run.world || "unknown"}", not one restored from _local/e2e/worlds/. ` +
-      "Warp only a copy: `e2e up --world <name>`. dev's own world must never get a clock offset.",
+      `this server's world is "${run.world || "unknown"}", not one restored from _local/gridcheck/worlds/. ` +
+      "Warp only a copy: `gridcheck up --world <name>`. dev's own world must never get a clock offset.",
     );
   }
   const handshake = io.requireHandshake();
@@ -256,7 +256,7 @@ function readEconomyRun(id, io) {
 
 function cmdEconomy(positionals, _flags, io) {
   if (positionals[0] !== "compare" || positionals.length < 3) {
-    throw new io.CliError("usage: e2e economy compare <reference run> <candidate run>");
+    throw new io.CliError("usage: gridcheck economy compare <reference run> <candidate run>");
   }
   const reference = readEconomyRun(positionals[1], io);
   const candidate = readEconomyRun(positionals[2], io);
@@ -270,7 +270,7 @@ function cmdEconomy(positionals, _flags, io) {
   if (!result.ok) io.setExitCode(1);
 }
 
-// summary and needs feed `e2e help --json` and the GUI's Commands tab.
+// summary and needs feed `gridcheck help --json` and the GUI's Commands tab.
 const COMMANDS = {
   scouts: { usage: ["scouts [--all]"], summary: "Lists the scout flights, with their phase and where each one is.", needs: "up", run: cmdScouts },
   trigger: {

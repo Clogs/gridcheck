@@ -1,6 +1,6 @@
 "use strict";
 
-// Every tree's e2e server gets its own block of ports, chosen from a hash of
+// Every tree's gridcheck server gets its own block of ports, chosen from a hash of
 // the tree's path, so two trees can run at once and neither takes the stock
 // ports StartServer.bat uses. Blocks sit below Windows' ephemeral range
 // (49152 and up), where outgoing connections would otherwise grab them.
@@ -58,11 +58,11 @@ function usableListeners(listeners = []) {
 }
 
 function slotForTree(treeRoot, env = process.env) {
-  const override = String(env.EVEJS_E2E_PORT_SLOT || "").trim();
+  const override = String(env.GRIDCHECK_PORT_SLOT || "").trim();
   if (override) {
     const slot = Number(override);
     if (!Number.isInteger(slot) || slot < 0 || slot >= SLOT_COUNT) {
-      throw new RangeError(`EVEJS_E2E_PORT_SLOT must be an integer from 0 to ${SLOT_COUNT - 1}`);
+      throw new RangeError(`GRIDCHECK_PORT_SLOT must be an integer from 0 to ${SLOT_COUNT - 1}`);
     }
     return slot;
   }

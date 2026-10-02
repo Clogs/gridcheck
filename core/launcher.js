@@ -3,7 +3,7 @@
 // Which copy of the tool runs a command. A tree runs its own vendored copy, so
 // the CLI and the bridge inside its server are always one version. Run from a
 // checkout, `--tree <path>`, or a working directory inside a tree, hands the
-// command to that tree's copy. EVEJS_E2E_TREE keeps its older meaning: run
+// command to that tree's copy. GRIDCHECK_TREE keeps its older meaning: run
 // this checkout's own code against that tree, which the tests and the tool's
 // own development rely on. Guide: docs/TREES.md "Running from a checkout".
 
@@ -51,7 +51,7 @@ function takeTreeFlag(argv) {
   return { rest, tree, error: null };
 }
 
-const copyCli = (tree) => path.join(tree, VENDOR_DIR, "bin", "e2e.js");
+const copyCli = (tree) => path.join(tree, VENDOR_DIR, "bin", "gridcheck.js");
 const looksLikeTree = (dir, exists) => exists(path.join(dir, "server", "package.json")) && exists(path.join(dir, "server", "src"));
 
 // The nearest folder at or above dir that is an EveJS tree, with whether it has a copy.
@@ -74,7 +74,7 @@ function planLaunch({ argv, ownRoot, env = process.env, cwd = process.cwd(), exi
   const { rest, tree, error } = takeTreeFlag(argv);
   const command = rest.find((token) => !token.startsWith("--")) || "help";
   if (OWN_TREE_FLAG.has(command)) {
-    // The command first, so bin/e2e.js finds it; its own --tree stays.
+    // The command first, so bin/gridcheck.js finds it; its own --tree stays.
     const at = argv.findIndex((token, index) => token === command && argv[index - 1] !== "--tree");
     return { kind: "local", argv: [command, ...argv.filter((_token, index) => index !== at)] };
   }
@@ -85,13 +85,13 @@ function planLaunch({ argv, ownRoot, env = process.env, cwd = process.cwd(), exi
     const own = path.resolve(ownRoot, "..", "..");
     if (tree !== null && !samePath(path.resolve(cwd, tree), own)) {
       return { kind: "error", message: `this copy belongs to ${slashed(own)}. For ${slashed(path.resolve(cwd, tree))}, ` +
-        `run that tree's own ${slashed(VENDOR_DIR)}/bin/e2e.js, or a checkout with --tree` };
+        `run that tree's own ${slashed(VENDOR_DIR)}/bin/gridcheck.js, or a checkout with --tree` };
     }
     return { kind: "local", argv: rest };
   }
 
-  // A checkout. EVEJS_E2E_TREE: this checkout's code against that tree.
-  if (tree === null && String(env.EVEJS_E2E_TREE || "").trim()) return { kind: "local", argv: rest };
+  // A checkout. GRIDCHECK_TREE: this checkout's code against that tree.
+  if (tree === null && String(env.GRIDCHECK_TREE || "").trim()) return { kind: "local", argv: rest };
   let target;
   if (tree !== null) {
     const root = path.resolve(cwd, tree);
@@ -102,16 +102,20 @@ function planLaunch({ argv, ownRoot, env = process.env, cwd = process.cwd(), exi
   }
   if (!target) {
     if (NO_TREE.has(command)) return { kind: "local", argv: rest };
-    return { kind: "error", message: `this is a checkout of the tool, not an EveJS tree, so \`e2e ${command}\` needs one: ` +
-      "pass --tree <path>, or run it from inside the tree. `e2e setup --tree <path>` installs the tool into a tree first." };
+    return { kind: "error", message: `this is a checkout of the tool, not an EveJS tree, so \`gridcheck ${command}\` needs one: ` +
+      "pass --tree <path>, or run it from inside the tree. `gridcheck setup --tree <path>` installs the tool into a tree first." };
   }
   if (!target.copy) {
     if (!target.named && NO_TREE.has(command)) return { kind: "local", argv: rest };
     if (!looksLikeTree(target.root, exists)) {
       return { kind: "error", message: `${slashed(target.root)} is not an EveJS tree (no server/package.json)` };
     }
+    if (exists(path.join(target.root, "tools", "evejs-e2e", "bin", "e2e.js"))) {
+      return { kind: "error", message: `${slashed(target.root)} has the tool under its old name, tools/evejs-e2e. ` +
+        `\`gridcheck vendor update --tree ${slashed(target.root)}\` moves it to tools/gridcheck and renames its config.` };
+    }
     return { kind: "error", message: `${slashed(target.root)} has no copy of the tool yet. ` +
-      `Install it with \`e2e setup --tree ${slashed(target.root)}\` (or just \`e2e vendor update --tree ${slashed(target.root)}\`).` };
+      `Install it with \`gridcheck setup --tree ${slashed(target.root)}\` (or just \`gridcheck vendor update --tree ${slashed(target.root)}\`).` };
   }
   return { kind: "handoff", tree: target.root, cli: copyCli(target.root), argv: rest, command };
 }
@@ -133,19 +137,19 @@ function skewNote(plan, ownRoot) {
   const head = gitHead(ownRoot);
   if (!head || !manifest.commit || manifest.commit === head) return null;
   return `note: ${slashed(plan.tree)} runs the tool at ${manifest.commit.slice(0, 7)}; this checkout is at ${head.slice(0, 7)}. ` +
-    `\`e2e vendor update --tree ${slashed(plan.tree)}\` updates it.`;
+    `\`gridcheck vendor update --tree ${slashed(plan.tree)}\` updates it.`;
 }
 
 // Runs the plan. Returns the exit code, or null to go on in this process with plan.argv.
 function launch(plan, { ownRoot, stderr = process.stderr } = {}) {
   if (plan.kind === "local") return null;
   if (plan.kind === "error") {
-    stderr.write(`e2e: ${plan.message}\n`);
+    stderr.write(`gridcheck: ${plan.message}\n`);
     return 2;
   }
   const result = spawnSync(process.execPath, [plan.cli, ...plan.argv], { stdio: "inherit", windowsHide: false });
   if (result.error) {
-    stderr.write(`e2e: couldn't run ${slashed(plan.cli)}: ${result.error.message}\n`);
+    stderr.write(`gridcheck: couldn't run ${slashed(plan.cli)}: ${result.error.message}\n`);
     return 1;
   }
   const note = skewNote(plan, ownRoot);

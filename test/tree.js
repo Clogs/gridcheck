@@ -1,6 +1,6 @@
 "use strict";
 
-// The tree a test process runs against, named by EVEJS_E2E_TREE, which also
+// The tree a test process runs against, named by GRIDCHECK_TREE, which also
 // sets the tree the default registry loads plugins for (core/plugins.js).
 // `npm test` names test/fixtures/tree: no EveJS code, only the files the lu
 // plugin checks for, so the plugins' tool halves load and every test that
@@ -13,8 +13,8 @@ const path = require("node:path");
 const { defaultRegistry } = require("../core/plugins");
 
 const FIXTURE_TREE = path.join(__dirname, "fixtures", "tree");
-const TREE_ROOT = String(process.env.EVEJS_E2E_TREE || "").trim()
-  ? path.resolve(process.env.EVEJS_E2E_TREE.trim())
+const TREE_ROOT = String(process.env.GRIDCHECK_TREE || "").trim()
+  ? path.resolve(process.env.GRIDCHECK_TREE.trim())
   : null;
 const SERVER_ROOT = TREE_ROOT ? path.join(TREE_ROOT, "server") : null;
 // A real tree has a server; the fixture tree only has the plugin's stand-ins.

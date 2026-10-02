@@ -88,11 +88,11 @@ const TRIGGER_TOOL = {
 
 const PRIMER = `Living Universe (plugin lu). The saved world lowsec-docked is a docked Rifter in Amamake with the Living Universe running.
 - up: realClock (default true in scenarios: the Living Universe clock runs at real time, which grid checks need), offgridTravel/offgridActivity (1-100, smoke tests only).
-- The trigger step and e2e_lu_trigger: { "trigger": "scout|hunt|fleet|materialize|skirmish", <args>, "as": "name", "retry": { "every": 15, "for": 480 } }. Args: system, flight, phase (stalking|committed), family, doctrine, to (self|system), count, anchor, go, shipClass, gap. "as" binds the flight or hunt IDs the reply names.
+- The trigger step and lu_trigger: { "trigger": "scout|hunt|fleet|materialize|skirmish", <args>, "as": "name", "retry": { "every": 15, "for": 480 } }. Args: system, flight, phase (stalking|committed), family, doctrine, to (self|system), count, anchor, go, shipClass, gap. "as" binds the flight or hunt IDs the reply names.
 - Kinds: SIGHTING HUNT HERE INCOMING ENTER EXIT ENGAGEMENT LOSS, from the off-grid tracker and hunter reports. Core grid events carry each NPC's flight, family, hunt phase and controller decision at ext.lu, and name them plainly in conditions (family on ARRIVE is ext.lu.family); groupKey is "flight:<flightID>". "self" on HUNT means the hunt targets you.
 - Example: "setup": ["undock", { "trigger": "fleet", "family": "pirate", "to": "self", "as": "fleet" }, { "waitFor": "INCOMING flightID=$fleet", "timeout": 300 }], "until": { "any": ["ARRIVE flightID=$fleet"], "timeout": 600 }, "expect": ["ARRIVE flightID=$fleet warpIn distanceMeters<=30km"].
 - A target can name a flight: "flight=$fleet", "family=police". The saved world's Rifter has no ammo, so give and load it in setup ({ "slash": "/giveitem EMP S 1000" }, { "loadAmmo": "weapons", "charge": "EMP S" }).
-- By hand: e2e_lu_trigger, then e2e_watch in the same turn to see its effect. e2e_teleport has no flight pin; trigger materialize with go does that.`;
+- By hand: lu_trigger, then watch in the same turn to see its effect. teleport has no flight pin; trigger materialize with go does that.`;
 
 module.exports = {
   kinds: KINDS,
@@ -156,7 +156,7 @@ module.exports = {
     },
   },
   // xeve.js: both multipliers change the ratios between timers, so they suit
-  // smoke tests only; `e2e warp` keeps the ratios.
+  // smoke tests only; `gridcheck warp` keeps the ratios.
   upNote(values) {
     const set = [["travel", values.offgridTravel], ["activity", values.offgridActivity]].filter(([, value]) => value);
     return set.length

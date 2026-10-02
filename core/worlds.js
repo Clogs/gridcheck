@@ -7,7 +7,7 @@
 //
 // Static reference data (the data dir, usually a link into another tree) and
 // content-pack state (content-packs beside it, files only) are not part of a
-// world and are never touched. Where each lives is the tree's e2e.config.json
+// world and are never touched. Where each lives is the tree's gridcheck.config.json
 // (treeConfig.js).
 
 const fs = require("node:fs");
@@ -138,7 +138,7 @@ function copyWorld(treeRoot, fromTree, { force = false } = {}) {
 //   onSave({ world, name }) -> data kept in world.json at ext.<plugin>
 //   onRestore({ world, source, name, saved, options }) -> a note for the user, or null
 // `world` is this tree's game store, `source` the saved copy, `saved` the
-// saved world.json, `options` the `e2e up` flags the plugins declared.
+// saved world.json, `options` the `gridcheck up` flags the plugins declared.
 function runHook(hook, method, ctx) {
   if (typeof hook[method] !== "function") return null;
   try {
@@ -226,7 +226,7 @@ function freshWorld(treeRoot) {
   const here = worldPaths(treeRoot);
   if (!fs.existsSync(here.manifest)) {
     throw new Error(`--fresh needs the tree's generated reference data (${here.manifest}); ` +
-      "run the tree's database setup first, or copy a world with `e2e world copy --from <tree>`");
+      "run the tree's database setup first, or copy a world with `gridcheck world copy --from <tree>`");
   }
   removeSqlite(here.world);
 }

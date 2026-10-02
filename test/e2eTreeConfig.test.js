@@ -1,6 +1,6 @@
 "use strict";
 
-// A tree's e2e.config.json (core/treeConfig.js): defaults, the file, the
+// A tree's gridcheck.config.json (core/treeConfig.js): defaults, the file, the
 // environment, the listener probe, and the CLI's auto, attach and managed modes.
 
 const test = require("node:test");
@@ -15,7 +15,7 @@ const {
 } = require("../core/treeConfig");
 const worlds = require("../core/worlds");
 
-const CLI = path.join(__dirname, "..", "bin", "e2e.js");
+const CLI = path.join(__dirname, "..", "bin", "gridcheck.js");
 
 function scratchTree(t, files = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "e2e-tree-config-"));
@@ -41,10 +41,10 @@ test("a tree with no file gets the stock layout, in auto mode", (t) => {
   assert.equal(config.gameStore, path.join(root, "_local", "gameStore", "gamestore.sqlite"));
   assert.equal(config.manifest, path.join(root, "_local", "gameStore", "manifest.json"));
   assert.equal(config.logFile, path.join(root, "_local", "logs", "server.log"));
-  assert.equal(config.runsDir, path.join(root, "_local", "e2e", "runs"));
-  assert.equal(config.worldsDir, path.join(root, "_local", "e2e", "worlds"));
+  assert.equal(config.runsDir, path.join(root, "_local", "gridcheck", "runs"));
+  assert.equal(config.worldsDir, path.join(root, "_local", "gridcheck", "worlds"));
   assert.equal(config.handshake, path.join(root, "_local", "agentBridge", "bridge.json"));
-  assert.equal(config.scenariosDir, path.join(root, "tools", "e2e-scenarios"));
+  assert.equal(config.scenariosDir, path.join(root, "tools", "gridcheck-scenarios"));
   assert.equal(config.market.enabled, false, "no market source, no market");
 });
 
@@ -137,8 +137,8 @@ test("writing refuses to replace a file without force, and refuses a bad config"
 });
 
 function cli(root, args) {
-  const env = { ...process.env, EVEJS_E2E_TREE: root };
-  for (const name of ["EVEJS_AGENT_BRIDGE_HANDSHAKE", "EVEJS_GAMESTORE_DATA_DIR", "EVEJS_DATA_ROOT", "EVEJS_E2E_PORT_SLOT"]) delete env[name];
+  const env = { ...process.env, GRIDCHECK_TREE: root };
+  for (const name of ["EVEJS_AGENT_BRIDGE_HANDSHAKE", "EVEJS_GAMESTORE_DATA_DIR", "EVEJS_DATA_ROOT", "GRIDCHECK_PORT_SLOT"]) delete env[name];
   const result = spawnSync(process.execPath, [CLI, ...args], { env, encoding: "utf8", timeout: 60_000, windowsHide: true });
   return { code: result.status, out: `${result.stdout}${result.stderr}` };
 }
@@ -146,15 +146,15 @@ function cli(root, args) {
 test("auto mode attaches to a server you started, and won't stop it, replace its world or boot over it", (t) => {
   const root = scratchTree(t, { "_local/gameStore/manifest.json": "{}" });
   const status = cli(root, ["status"]);
-  assert.match(status.out, /^mode {3}auto \(no e2e.config.json; e2e init writes one\): no server up; a run boots its own world$/m, status.out);
-  // A live bridge handshake with no `e2e up` run behind it: a server started by hand.
+  assert.match(status.out, /^mode {3}auto \(no gridcheck.config.json; gridcheck init writes one\): no server up; a run boots its own world$/m, status.out);
+  // A live bridge handshake with no `gridcheck up` run behind it: a server started by hand.
   const handshake = path.join(root, "_local", "agentBridge", "bridge.json");
   fs.mkdirSync(path.dirname(handshake), { recursive: true });
   fs.writeFileSync(handshake, JSON.stringify({ host: "127.0.0.1", port: 1, token: "t", pid: process.pid }));
   assert.match(cli(root, ["status"]).out, new RegExp(`attached to pid ${process.pid}, a server you started`));
   const down = cli(root, ["down"]);
   assert.equal(down.code, 1, down.out);
-  assert.match(down.out, /wasn't started by `e2e up`, so auto mode leaves it running/);
+  assert.match(down.out, /wasn't started by `gridcheck up`, so auto mode leaves it running/);
   for (const args of [["world", "save", "x"], ["up", "--fresh"]]) {
     const refused = cli(root, args);
     assert.equal(refused.code, 1, `${args.join(" ")}: ${refused.out}`);
@@ -189,8 +189,8 @@ test("init writes the config in auto mode, refuses to overwrite it, and managed 
   const root = scratchTree(t, { "_local/gameStore/manifest.json": "{}" });
   const first = cli(root, ["init"]);
   assert.equal(first.code, 0, first.out);
-  assert.match(first.out, /wrote e2e.config.json, mode auto/);
-  assert.match(first.out, /next: e2e world build starter, then e2e run <scenario>/);
+  assert.match(first.out, /wrote gridcheck.config.json, mode auto/);
+  assert.match(first.out, /next: gridcheck world build starter, then gridcheck run <scenario>/);
   assert.equal(cli(root, ["init"]).code, 1, "an existing config needs --force");
   const managed = cli(root, ["init", "--mode", "managed", "--force"]);
   assert.match(managed.out, /mode managed/);
@@ -203,6 +203,6 @@ test("a broken config stops every command but init, doctor, help and vendor", (t
   const root = scratchTree(t, { [CONFIG_NAME]: JSON.stringify({ configVersion: 1, mode: "sometimes" }) });
   const status = cli(root, ["status"]);
   assert.equal(status.code, 1);
-  assert.match(status.out, /mode is auto, attach or managed.*e2e init --force/s);
+  assert.match(status.out, /mode is auto, attach or managed.*gridcheck init --force/s);
   assert.equal(cli(root, ["help"]).code, 0);
 });

@@ -1,10 +1,10 @@
 "use strict";
 
-// A tree runs a vendored copy of this repo: one folder, tools/evejs-e2e/, plus
+// A tree runs a vendored copy of this repo: one folder, tools/gridcheck/, plus
 // the shim at server/src/_secondary/agentBridge/server.js that the stock
-// secondary-service loader finds. `e2e vendor update` writes both from a
-// commit of an evejs-e2e checkout, and VENDOR.json records that commit and a
-// sha256 for every file. `e2e vendor check` fails when the copy differs, so a
+// secondary-service loader finds. `gridcheck vendor update` writes both from a
+// commit of a Gridcheck checkout, and VENDOR.json records that commit and a
+// sha256 for every file. `gridcheck vendor check` fails when the copy differs, so a
 // fix made in a tree is made in the repo instead.
 //
 // Files come from git objects, not the checkout's working files, so each keeps
@@ -18,19 +18,19 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { spawnSync } = require("node:child_process");
 
-const VENDOR_DIR = path.join("tools", "evejs-e2e");
+const VENDOR_DIR = path.join("tools", "gridcheck");
 const SHIM_PATH = path.join("server", "src", "_secondary", "agentBridge", "server.js");
 const SHIM_SOURCE = "bridge/shim.js";
 const MANIFEST_NAME = "VENDOR.json";
-const PACKAGE_NAME = "evejs-e2e";
+const PACKAGE_NAME = "gridcheck";
 // The checkout this file sits in, when it is one.
 const OWN_CHECKOUT = path.resolve(__dirname, "..");
 // The tree this copy is vendored into, as core/plugins.js reads it. Repeated
 // here because this file must load when the rest of the copy doesn't.
-const OWN_TREE = String(process.env.EVEJS_E2E_TREE || "").trim()
-  ? path.resolve(process.env.EVEJS_E2E_TREE.trim())
+const OWN_TREE = String(process.env.GRIDCHECK_TREE || "").trim()
+  ? path.resolve(process.env.GRIDCHECK_TREE.trim())
   : path.resolve(__dirname, "..", "..", "..");
-const USAGE = "usage: e2e vendor update [--from <checkout|tag>] [--tree <path>] [--force] [--dry-run] | vendor check [--tree <path>]";
+const USAGE = "usage: gridcheck vendor update [--from <checkout|tag>] [--tree <path>] [--force] [--dry-run] | vendor check [--tree <path>]";
 // How many files of each kind a dry run lists.
 const DRY_RUN_FILES = 40;
 
@@ -70,17 +70,17 @@ function isInside(child, parent) {
   return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
 }
 
-// The root of an evejs-e2e git checkout, or a VendorError saying why dir isn't one.
+// The root of a Gridcheck git checkout, or a VendorError saying why dir isn't one.
 function checkoutRoot(dir) {
   if (!fs.existsSync(dir) || !fs.statSync(dir).isDirectory()) throw new VendorError(`${dir} is not a directory`);
   let top;
   try {
     top = git(dir, ["rev-parse", "--show-toplevel"]).trim();
   } catch (_error) {
-    throw new VendorError(`${dir} is not a git checkout; pass --from <evejs-e2e checkout>`);
+    throw new VendorError(`${dir} is not a git checkout; pass --from <Gridcheck checkout>`);
   }
   // A vendored copy sits inside its tree's checkout; that tree's git is not ours.
-  if (!samePath(top, dir)) throw new VendorError(`${dir} is not the root of an evejs-e2e checkout (its git root is ${top})`);
+  if (!samePath(top, dir)) throw new VendorError(`${dir} is not the root of a Gridcheck checkout (its git root is ${top})`);
   return path.resolve(dir);
 }
 
@@ -93,7 +93,7 @@ function resolveSource(from) {
   try {
     checkout = checkoutRoot(OWN_CHECKOUT);
   } catch (error) {
-    throw new VendorError(`${error.message}. This is a vendored copy: run vendor update from an evejs-e2e ` +
+    throw new VendorError(`${error.message}. This is a vendored copy: run vendor update from a Gridcheck ` +
       "checkout, or pass --from <checkout>");
   }
   return { checkout, ref: text || "HEAD" };
@@ -176,9 +176,16 @@ function buildManifest(source) {
   };
 }
 
+// Before the rename to Gridcheck a tree's copy was tools/evejs-e2e and its
+// config e2e.config.json; vendor update moves both.
+const LEGACY_VENDOR_DIR = path.join("tools", "evejs-e2e");
+const LEGACY_CONFIG = "e2e.config.json";
+const CONFIG_FILE = "gridcheck.config.json";
+
 function treePaths(tree) {
   const treeRoot = path.resolve(String(tree));
-  return { treeRoot, target: path.join(treeRoot, VENDOR_DIR), shim: path.join(treeRoot, SHIM_PATH) };
+  return { treeRoot, target: path.join(treeRoot, VENDOR_DIR), shim: path.join(treeRoot, SHIM_PATH),
+    legacy: path.join(treeRoot, LEGACY_VENDOR_DIR) };
 }
 
 function readManifest(target) {
@@ -193,8 +200,10 @@ function readManifest(target) {
 
 // -> { ok, manifest, problems: [{ file, problem }] }. problem: edited, missing,
 // added, not a file, shim edited, shim missing.
-function checkVendored({ tree }) {
-  const { target, shim } = treePaths(tree);
+// copy: the folder to check, when it isn't the tree's tools/gridcheck (an old copy before it moves).
+function checkVendored({ tree, copy = null }) {
+  const { target: own, shim } = treePaths(tree);
+  const target = copy || own;
   if (!fs.existsSync(target)) return { ok: false, manifest: null, problems: [{ file: VENDOR_DIR, problem: "missing" }] };
   const manifest = readManifest(target);
   if (!manifest || !manifest.files || typeof manifest.files !== "object") {
@@ -225,28 +234,35 @@ function problemLines(problems) {
   return problems.map((row) => `  ${row.problem.padEnd(12)} ${row.file}`);
 }
 
-// Replace tree/tools/evejs-e2e with the source commit's files, install the
+// Replace tree/tools/gridcheck with the source commit's files, install the
 // shim and write VENDOR.json. Refuses a copy that has drifted, or a folder that
 // was never vendored, unless force.
 function updateVendored({ tree, from, force = false, dryRun = false }) {
-  const { treeRoot, target, shim } = treePaths(tree);
+  const { treeRoot, target, shim, legacy } = treePaths(tree);
   if (!fs.existsSync(path.join(treeRoot, "server", "src"))) throw new VendorError(`${treeRoot} is not an EveJS tree (no server/src)`);
   const source = readSource({ from });
   if (isInside(source.checkout, target) || isInside(target, source.checkout)) {
     throw new VendorError(`the source checkout ${source.checkout} and ${target} overlap`);
   }
-  if (fs.existsSync(target) && !force) {
-    if (!readManifest(target)) {
-      throw new VendorError(`${target} has no ${MANIFEST_NAME}, so it was not vendored; --force replaces it`);
+  // A copy from before the rename, with nothing at the new place yet, is the copy this update replaces.
+  const migrating = !fs.existsSync(target) && fs.existsSync(legacy);
+  const current = migrating ? legacy : target;
+  if (fs.existsSync(current) && !force) {
+    if (!readManifest(current)) {
+      throw new VendorError(`${current} has no ${MANIFEST_NAME}, so it was not vendored; --force replaces it`);
     }
-    const drift = checkVendored({ tree: treeRoot });
+    const drift = checkVendored({ tree: treeRoot, copy: current });
     if (!drift.ok) {
-      throw new VendorError(`${target} differs from its ${MANIFEST_NAME}; --force replaces it:\n` +
+      throw new VendorError(`${current} differs from its ${MANIFEST_NAME}; --force replaces it:\n` +
         problemLines(drift.problems).join("\n"));
     }
   }
+  const legacyConfig = path.join(treeRoot, LEGACY_CONFIG);
+  const moveConfig = fs.existsSync(legacyConfig) && !fs.existsSync(path.join(treeRoot, CONFIG_FILE));
+  const migrated = migrating || moveConfig
+    ? { copy: migrating ? slashed(LEGACY_VENDOR_DIR) : null, config: moveConfig ? LEGACY_CONFIG : null } : null;
 
-  const before = new Map(walk(target).filter((entry) => entry.isFile && entry.file !== MANIFEST_NAME)
+  const before = new Map(walk(current).filter((entry) => entry.isFile && entry.file !== MANIFEST_NAME)
     .map((entry) => [entry.file, sha256(fs.readFileSync(entry.full))]));
   const manifest = buildManifest(source);
   const changes = { added: [], changed: [], removed: [], same: 0 };
@@ -260,13 +276,14 @@ function updateVendored({ tree, from, force = false, dryRun = false }) {
   const shimBytes = source.files.get(SHIM_SOURCE);
   const shimBefore = fs.existsSync(shim) ? fs.readFileSync(shim) : null;
   const shimState = shimBefore === null ? "installed" : shimBefore.equals(shimBytes) ? "unchanged" : "replaced";
-  const result = { manifest, target, treeRoot, checkout: source.checkout, dirty: source.dirty, counts, changes, shim: shimState };
+  const result = { manifest, target, treeRoot, checkout: source.checkout, dirty: source.dirty, counts, changes, shim: shimState,
+    migrated };
   if (dryRun) return { ...result, dryRun: true };
 
   const parent = path.dirname(target);
   fs.mkdirSync(parent, { recursive: true });
-  const staged = path.join(parent, `.evejs-e2e-${process.pid}.new`);
-  const retired = path.join(parent, `.evejs-e2e-${process.pid}.old`);
+  const staged = path.join(parent, `.gridcheck-${process.pid}.new`);
+  const retired = path.join(parent, `.gridcheck-${process.pid}.old`);
   fs.rmSync(staged, { recursive: true, force: true });
   try {
     for (const [file, bytes] of source.files) {
@@ -289,12 +306,24 @@ function updateVendored({ tree, from, force = false, dryRun = false }) {
 
   fs.mkdirSync(path.dirname(shim), { recursive: true });
   fs.writeFileSync(shim, shimBytes);
+  if (migrating) fs.rmSync(legacy, { recursive: true, force: true });
+  if (moveConfig) fs.renameSync(legacyConfig, path.join(treeRoot, CONFIG_FILE));
   return result;
 }
 
 const slashed = (file) => String(file).split(path.sep).join("/");
 
-// `e2e vendor <action>` -> the lines to print; a VendorError when it fails.
+// `gridcheck vendor <action>` -> the lines to print; a VendorError when it fails.
+// What a move from the old names did, or would do.
+function migrationLines(migrated, mood) {
+  if (!migrated) return [];
+  const verb = mood === "would" ? ["would move", "would rename"] : ["moved", "renamed"];
+  return [
+    ...(migrated.copy ? [`  ${verb[0]} the copy from ${migrated.copy}/ (its name before Gridcheck) to ${slashed(VENDOR_DIR)}/`] : []),
+    ...(migrated.config ? [`  ${verb[1]} ${migrated.config} to ${CONFIG_FILE}`] : []),
+  ];
+}
+
 function runVendor(action, { tree = OWN_TREE, from, force = false, dryRun = false } = {}) {
   const treeRoot = path.resolve(String(tree));
   const target = slashed(path.join(treeRoot, VENDOR_DIR));
@@ -314,6 +343,7 @@ function runVendor(action, { tree = OWN_TREE, from, force = false, dryRun = fals
         ...listed("~", result.changes.changed),
         ...listed("-", result.changes.removed),
         ...(result.dirty ? [`  ${slashed(result.checkout)} has uncommitted changes; they wouldn't be vendored`] : []),
+        ...migrationLines(result.migrated, "would"),
         "  nothing was written (--dry-run)",
       ];
     }
@@ -322,14 +352,16 @@ function runVendor(action, { tree = OWN_TREE, from, force = false, dryRun = fals
       `  ${target}: ${Object.keys(manifest.files).length} files, ${counts.added} added, ${counts.changed} changed, ` +
         `${counts.removed} removed; shim ${result.shim}`,
       ...(result.dirty ? [`  ${slashed(result.checkout)} has uncommitted changes; they were not vendored`] : []),
-      `  commit ${slashed(VENDOR_DIR)}/ and ${slashed(SHIM_PATH)} in ${slashed(treeRoot)}`,
+      ...migrationLines(result.migrated, "did"),
+      `  commit ${slashed(VENDOR_DIR)}/ and ${slashed(SHIM_PATH)} in ${slashed(treeRoot)}` +
+        (result.migrated ? ", and the removal of the old names" : ""),
     ];
   }
   if (action === "check") {
     const result = checkVendored({ tree: treeRoot });
     if (!result.ok) {
-      throw new VendorError([`${target} differs from ${MANIFEST_NAME}; change the evejs-e2e repo and run ` +
-        "e2e vendor update:", ...problemLines(result.problems)].join("\n"));
+      throw new VendorError([`${target} differs from ${MANIFEST_NAME}; change the Gridcheck repo and run ` +
+        "gridcheck vendor update:", ...problemLines(result.problems)].join("\n"));
     }
     const { manifest } = result;
     return [`${target} matches ${MANIFEST_NAME}: ${manifest.name} ${manifest.version} at ` +
@@ -355,7 +387,7 @@ function parseVendorArgs(argv) {
   return options;
 }
 
-// bin/e2e.js runs this before it loads anything else, so a copy whose other
+// bin/gridcheck.js runs this before it loads anything else, so a copy whose other
 // files no longer load can still say which ones changed.
 function main(argv, { stdout = process.stdout, stderr = process.stderr } = {}) {
   try {
@@ -364,7 +396,7 @@ function main(argv, { stdout = process.stdout, stderr = process.stderr } = {}) {
     return 0;
   } catch (error) {
     if (!(error instanceof VendorError)) throw error;
-    stderr.write(`e2e: ${error.message}\n`);
+    stderr.write(`gridcheck: ${error.message}\n`);
     return 1;
   }
 }

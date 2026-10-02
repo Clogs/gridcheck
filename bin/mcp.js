@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 "use strict";
 
-// MCP server over the e2e CLI. Every tool runs `node tools/evejs-e2e/bin/e2e.js
+// MCP server over the gridcheck CLI. Every tool runs `node tools/gridcheck/bin/gridcheck.js
 // <command>` in this tree and returns what it printed, so the CLI stays the
 // source of truth and anything a tool did can be repeated in a shell. The
 // only things it does itself are writing a scenario file it was handed,
@@ -26,12 +26,12 @@ const REGISTRY = defaultRegistry();
 const CONFIG = defaultTreeConfig();
 const MODE = CONFIG.mode;
 const MANAGED = MODE === "managed";
-const CLI_PATH = path.join(__dirname, "e2e.js");
+const CLI_PATH = path.join(__dirname, "gridcheck.js");
 const E2E_DIR = CONFIG.e2eDir;
 const RUNS_DIR = CONFIG.runsDir;
 const DRAFT_DIR = DRAFT_SCENARIO_DIR;
 
-const SERVER_INFO = { name: "e2e", version: "1.0.0" };
+const SERVER_INFO = { name: "gridcheck", version: "1.0.0" };
 const PROTOCOL_VERSIONS = ["2025-06-18", "2025-03-26", "2024-11-05"];
 // Claude Code warns above 10,000 tokens of tool output. The full text is
 // always in a file the reply names.
@@ -142,7 +142,7 @@ function argList(command) {
 
 // tool name -> (params) -> CLI arguments. Plugin tools bring their own args().
 const CLI_ARGS = {
-  e2e_up(p) {
+  up(p) {
     const { args, flag } = argList("up");
     flag("world", p.world);
     flag("fresh", p.fresh);
@@ -153,28 +153,28 @@ const CLI_ARGS = {
     flag("timeout", p.timeout);
     return args;
   },
-  e2e_down(p) {
+  down(p) {
     const { args, flag } = argList("down");
     flag("force", p.force);
     return args;
   },
-  e2e_login(p) {
+  login(p) {
     const { args, flag } = argList("login");
     flag("user", p.user);
     flag("name", p.name);
     return args;
   },
-  e2e_undock: () => ["undock"],
-  e2e_teleport: (p) => ["teleport", "--", String(p.system)],
-  e2e_grid(p) {
+  undock: () => ["undock"],
+  teleport: (p) => ["teleport", "--", String(p.system)],
+  grid(p) {
     const { args, flag } = argList("grid");
     flag("range", p.range);
     flag("all", p.all);
     flag("json", p.json);
     return args;
   },
-  e2e_slash: (p) => ["slash", "--", String(p.command)],
-  e2e_loadout(p) {
+  slash: (p) => ["slash", "--", String(p.command)],
+  loadout(p) {
     const { args, flag } = argList("loadout");
     const spec = { ship: p.ship };
     for (const key of ["modules", "drones", "cargo", "charges"]) if (p[key] !== undefined) spec[key] = p[key];
@@ -182,7 +182,7 @@ const CLI_ARGS = {
     flag("json", p.json);
     return args;
   },
-  e2e_watch(p) {
+  watch(p) {
     const { args, flag } = argList("watch");
     flag("for", p.seconds === undefined ? WATCH_DEFAULT_SECONDS : p.seconds);
     flag("every", p.every);
@@ -198,7 +198,7 @@ const CLI_ARGS = {
     flag("json", p.json);
     return args;
   },
-  e2e_perf(p) {
+  perf(p) {
     const { args, flag } = argList("perf");
     flag("for", p.now ? undefined : p.seconds);
     flag("now", p.now);
@@ -206,7 +206,7 @@ const CLI_ARGS = {
     return args;
   },
   // The same argument names as a scenario's action step (scenario.js).
-  e2e_act(p) {
+  act(p) {
     const { args, flag } = argList("act");
     flag("range", p.range);
     flag("target", p.action === "activate" ? p.target : undefined);
@@ -218,14 +218,14 @@ const CLI_ARGS = {
     args.push("--", p.action, ...(what === undefined ? [] : [String(what)]));
     return args;
   },
-  e2e_log(p) {
+  log(p) {
     const { args, flag } = argList("log");
     flag("grep", p.grep);
     flag("lines", p.lines);
     flag("any-pid", p.anyPid);
     return args;
   },
-  e2e_doctor(p) {
+  doctor(p) {
     const { args, flag } = argList("doctor");
     flag("offline", p.offline);
     flag("json", p.json);
@@ -285,9 +285,9 @@ const simple = (name) => async (params, context) => cliResult(await runCli(cliAr
 
 const TOOLS = [
   {
-    name: "e2e_status",
-    description: "Where things stand in this tree: whether the e2e server is up (pid, ports, boot time), the held character, " +
-      "the saved worlds a run can start from, the scenarios (the tree's tools/e2e-scenarios, the tool's and its plugins', and drafts in _local/e2e/scenarios), " +
+    name: "status",
+    description: "Where things stand in this tree: whether the gridcheck server is up (pid, ports, boot time), the held character, " +
+      "the saved worlds a run can start from, the scenarios (the tree's tools/gridcheck-scenarios, the tool's and its plugins', and drafts in _local/gridcheck/scenarios), " +
       "background runs, and the most recent runs. Call this first.",
     inputSchema: schema(),
     async run(_params, context) {
@@ -305,56 +305,56 @@ const TOOLS = [
     },
   },
   {
-    name: "e2e_up",
+    name: "up",
     description: "Managed and auto mode. Start this tree's server (and market daemon) in the background and wait until a character can log in, " +
-      "about 25 s warm. For grid checks pass world (a saved world e2e_status lists). Without world or fresh it keeps " +
-      "the current world. Refuses if the server is already up. e2e_run_scenario does its own up and down, so don't " +
+      "about 25 s warm. For grid checks pass world (a saved world status lists). Without world or fresh it keeps " +
+      "the current world. Refuses if the server is already up. run_scenario does its own up and down, so don't " +
       "call this before a run.",
     inputSchema: schema({
-      world: str("Saved world to restore before boot (e2e_status lists them)."),
+      world: str("Saved world to restore before boot (status lists them)."),
       fresh: bool("Drop the game store; the boot seeds a new world from the reference data."),
       market: bool("Start the market daemon (default true)."),
       ...Object.fromEntries(REGISTRY.upFlags.map((flag) => [flag.key, flag.type === "bool"
         ? bool(flag.description || `--${flag.flag}`)
         : num(flag.description || `--${flag.flag}`, { minimum: flag.min, maximum: flag.max })])),
-      profile: bool("Boot with the tree's tick profiler (EVEJS_TICK_PROFILE=1), so e2e_perf and a watch with perf " +
+      profile: bool("Boot with the tree's tick profiler (EVEJS_TICK_PROFILE=1), so perf and a watch with perf " +
         "break each window of ticks down by subsystem. Tick durations need no profiler."),
       profileEvery: int("With profile: ticks per profiler window (default 50, 5 s at 10 Hz).", { minimum: 1, maximum: 10000 }),
       timeout: int("Seconds to wait for boot (default 600).", { minimum: 10 }),
     }),
-    run: simple("e2e_up"),
+    run: simple("up"),
   },
   {
-    name: "e2e_down",
+    name: "down",
     description: "Stop this tree's server cleanly (store flushed, world lease released) and its market daemon. " +
       "Also ends a background run early: its watch ends and it writes its report.",
     inputSchema: schema({ force: bool("Kill a server that is still booting and has no agent bridge yet.") }),
-    run: simple("e2e_down"),
+    run: simple("down"),
   },
   {
-    name: "e2e_login",
+    name: "login",
     description: "Log the test character in through the web gateway (account e2eagent, character Agent Observer by default). " +
-      "Needed once after e2e_up, before undock, grid, slash, teleport, act or watch.",
+      "Needed once after up, before undock, grid, slash, teleport, act or watch.",
     inputSchema: schema({ user: str("Account name (default e2eagent)."), name: str("Character name (default the account's first).") }),
-    run: simple("e2e_login"),
+    run: simple("login"),
   },
   {
-    name: "e2e_undock",
+    name: "undock",
     description: "Undock the logged-in character's ship. Undocking puts the session in the system's scene, so the system " +
       "counts as observed. The ship has undock protection for a while.",
     inputSchema: schema(),
-    run: simple("e2e_undock"),
+    run: simple("undock"),
   },
   {
-    name: "e2e_teleport",
+    name: "teleport",
     description: "Teleport the ship to a system with stock /tr.",
     inputSchema: schema({
       system: str("Solar system name or ID, e.g. Amamake."),
     }, ["system"]),
-    run: simple("e2e_teleport"),
+    run: simple("teleport"),
   },
   {
-    name: "e2e_loadout",
+    name: "loadout",
     description: "Give the logged-in character a new ship by item name, fitted, with drones, cargo and loaded charges, and " +
       "board it where it is, docked or in space (in space the old ship is removed). Names must be exact item names; " +
       "\"Name xN\" is N of one. Every skill the hull, modules, drones and charges need is checked first: a refusal lists " +
@@ -367,10 +367,10 @@ const TOOLS = [
       charges: { type: "array", items: { type: "string" }, description: "Charges to load: a full clip in every fitted module that takes one; no count." },
       json: bool("The bridge's reply as JSON."),
     }, ["ship"]),
-    run: simple("e2e_loadout"),
+    run: simple("loadout"),
   },
   {
-    name: "e2e_grid",
+    name: "grid",
     description: "The ship's grid now, as a table: distance, name, type, NPC kind, mode, target and shield/armour/hull, " +
       "nearest first, with the ship's protection countdown.",
     inputSchema: schema({
@@ -378,21 +378,21 @@ const TOOLS = [
       all: bool("Everything the session can see."),
       json: bool("The bridge's full reply as JSON (field names match scenario conditions)."),
     }),
-    run: simple("e2e_grid"),
+    run: simple("grid"),
   },
   {
-    name: "e2e_slash",
+    name: "slash",
     description: "Run a slash command on the character's own session, as if typed in game chat, e.g. \"/tr me 30002537\", " +
       "\"/heal\", \"/dock\", \"/npc 3\", \"/ship Rifter\". Returns the command's reply. A refused command is an error.",
     inputSchema: schema({ command: str("The command line, starting with /.") }, ["command"]),
-    run: simple("e2e_slash"),
+    run: simple("slash"),
   },
   {
-    name: "e2e_watch",
+    name: "watch",
     description: "Watch the ship's grid and system for a number of seconds and return what changed, one line per event: " +
       `${kindsOf(REGISTRY).filter((kind) => !["GRID", "CLIENT", "FX"].includes(kind)).join(", ")} and more, with what the ` +
       "active plugins know about each NPC. The call blocks for the whole watch. To see an action's effect, call it in " +
-      "the same turn. The timeline is also written to _local/e2e/runs/<id>/timeline.jsonl.",
+      "the same turn. The timeline is also written to _local/gridcheck/runs/<id>/timeline.jsonl.",
     inputSchema: schema({
       seconds: int(`How long to watch (default ${WATCH_DEFAULT_SECONDS}; the CLI's own default is 600).`, { minimum: 1, maximum: 3000 }),
       every: num("Grid sample interval, seconds (default 2).", { exclusiveMinimum: 0 }),
@@ -400,7 +400,7 @@ const TOOLS = [
       client: str("What the client was sent: all (default), fx (DIVERGE plus special effects such as weapons firing), " +
         "diverge (only DIVERGE lines) or off.", { enum: ["all", "fx", "diverge", "off"] }),
       divergeMeters: num("Position error that counts as DIVERGE (default 5000).", { exclusiveMinimum: 0 }),
-      positions: bool("Record ball positions too, so the viewer (e2e view) can draw this watch."),
+      positions: bool("Record ball positions too, so the viewer (gridcheck view) can draw this watch."),
       grep: str("Keep every server log line matching this regex instead of the default NPC and plugin lines."),
       log: bool("Include server log lines (default true)."),
       json: bool("Print events as JSON lines, with the field names scenario conditions use."),
@@ -409,31 +409,31 @@ const TOOLS = [
         "PROFILE lines when the server runs it."),
       perfEvery: int("Seconds per PERF window (default 5); implies perf.", { minimum: 1, maximum: 60 }),
     }),
-    run: simple("e2e_watch"),
+    run: simple("watch"),
   },
   {
-    name: "e2e_perf",
+    name: "perf",
     description: "How the server's ticks are doing: samples for some seconds, then gives tick duration (average, p50, " +
       "p95, p99, max) against the 100 ms budget, how many ticks ran over it, event-loop delay, CPU and heap, the busiest " +
-      "scenes, and, when the server was booted with the tick profiler (e2e_up { profile: true }), the cost of each " +
-      "subsystem per tick. Needs a server up, not a character. Take one before a load (e2e_slash \"/npctest2 20\") and " +
+      "scenes, and, when the server was booted with the tick profiler (up { profile: true }), the cost of each " +
+      "subsystem per tick. Needs a server up, not a character. Take one before a load (slash \"/npctest2 20\") and " +
       "one during it, and compare.",
     inputSchema: schema({
       seconds: int("How long to sample (default 10).", { minimum: 1, maximum: 600 }),
       now: bool("Read the last ticks the server holds (about 12 s) at once, without CPU or loop delay."),
       json: bool("The bridge's reply as JSON, with every tick's duration."),
     }),
-    run: simple("e2e_perf"),
+    run: simple("perf"),
   },
   {
-    name: "e2e_act",
+    name: "act",
     description: "Act as the player, through the calls the web gateway allows a client: fly, lock, switch modules on and " +
       "off, load ammo and use drones. The server applies every rule (range, lock time, capacitor, ammo) and a refusal " +
       "is in its own words. A target is the nearest ball on grid that passes every term: \"nearest npc\", " +
       "\"name~Scout\", \"type~Rifter\", \"kind=station\", \"within=30km\", \"player\" or an itemID" +
       `${Object.keys(REGISTRY.targetFields).length ? `, and the plugins' ${Object.keys(REGISTRY.targetFields).map((term) => `${term}=`).join(", ")}` : ""}. ` +
       "Modules: weapons (default), high, mid, low, all, name~..., group~..., " +
-      "an itemID. Watch the effect with e2e_watch in the same turn (client: \"fx\" shows the guns firing).",
+      "an itemID. Watch the effect with watch in the same turn (client: \"fx\" shows the guns firing).",
     inputSchema: schema({
       action: str("The action.", { enum: ["approach", "orbit", "keepAtRange", "warpTo", "stop", "lock", "unlock", "activate",
         "deactivate", "loadAmmo", "launchDrones", "engageDrones"] }),
@@ -447,20 +447,20 @@ const TOOLS = [
       count: int("launchDrones: how many.", { minimum: 1, maximum: 50 }),
       timeout: int("lock: seconds to wait for the lock (default 30).", { minimum: 1, maximum: 600 }),
     }, ["action"]),
-    run: simple("e2e_act"),
+    run: simple("act"),
   },
   {
-    name: "e2e_log",
+    name: "log",
     description: "The tail of the server log, only the running server's lines unless anyPid.",
     inputSchema: schema({
       grep: str("Case-insensitive regex, e.g. NpcController."),
       lines: int("How many lines (default 40).", { minimum: 1, maximum: 2000 }),
       anyPid: bool("Keep every process's lines."),
     }),
-    run: simple("e2e_log"),
+    run: simple("log"),
   },
   {
-    name: "e2e_doctor",
+    name: "doctor",
     description: "What this tree can do for the tool: which gateway calls the CLI makes it allows, whether the client " +
       "view can run (the destiny layout check), which optional patches it has, which plugins are active or skipped and " +
       "why, and which ports can move. Asks the running server when there is one, else reads the tree's files.",
@@ -468,10 +468,10 @@ const TOOLS = [
       offline: bool("Read the tree's files even when a server is up."),
       json: bool("The whole report as JSON."),
     }),
-    run: simple("e2e_doctor"),
+    run: simple("doctor"),
   },
   {
-    name: "e2e_run_scenario",
+    name: "run_scenario",
     description: (MANAGED
       ? "Run a scenario: boot its world, run setup, watch until a stop condition, shut down, and write a "
       : MODE === "attach"
@@ -481,13 +481,13 @@ const TOOLS = [
           "when none is, boot the scenario's world and shut it down after. Run setup, watch until a stop condition, and write a ") +
       "report of expected against observed with tactical frames. Pass name to run a scenario file, or name and scenario " +
       "(the JSON object) to write one first. check: true only validates it, which boots nothing; do that first. " +
-      (MANAGED ? "The server must be down (e2e_down). " : "") +
-      "A run takes minutes; wait: false returns at once and e2e_report waits. " +
+      (MANAGED ? "The server must be down (down). " : "") +
+      "A run takes minutes; wait: false returns at once and report waits. " +
       "The scenario format is in this server's instructions and docs/GUIDE.md \"Scenarios\".",
     inputSchema: schema({
-      name: str("A scenario in tools/e2e-scenarios, tools/evejs-e2e/scenarios, a plugin's scenarios or _local/e2e/scenarios (without .json), or a path. With scenario: the file name to write."),
+      name: str("A scenario in tools/gridcheck-scenarios, tools/gridcheck/scenarios, a plugin's scenarios or _local/gridcheck/scenarios (without .json), or a path. With scenario: the file name to write."),
       scenario: { type: "object", description: "The scenario JSON to write as <name>.json before checking or running it." },
-      save: bool("With scenario: write it to tools/e2e-scenarios/ (to commit with the feature) instead of _local/e2e/scenarios/."),
+      save: bool("With scenario: write it to tools/gridcheck-scenarios/ (to commit with the feature) instead of _local/gridcheck/scenarios/."),
       check: bool("Only load and check the scenario; boot nothing."),
       run: str("Run ID (default: start time and scenario name). Must be new."),
       keepUp: bool("Leave the server running after the run, to look around with the other tools."),
@@ -504,7 +504,7 @@ const TOOLS = [
       } else if (params.name) {
         target = resolveScenario(params.name);
       } else {
-        throw new ToolError("pass name (a scenario file), or name and scenario (the JSON to write); e2e_status lists scenarios");
+        throw new ToolError("pass name (a scenario file), or name and scenario (the JSON to write); status lists scenarios");
       }
       const prefix = wrote ? `wrote ${relativePath(wrote)}\n` : "";
       const check = await runCli(["run", "--check", "--", target], context);
@@ -542,7 +542,7 @@ const TOOLS = [
     },
   },
   {
-    name: "e2e_report",
+    name: "report",
     description: "Read a run's report. Without run: the recent runs and their verdicts. section: summary (default: verdict, " +
       "expected against observed, stop conditions, frames, setup), full (with the timeline), result (result.json), or pr " +
       "(markdown to paste into a PR description, plus the frame files to attach). For a run still going in the background, " +
@@ -561,7 +561,7 @@ const TOOLS = [
 ];
 
 // The plugins' tools (registry.mcpTools), each one CLI command: name
-// e2e_<plugin>_<tool>, description, inputSchema and args(params).
+// <plugin>_<tool>, description, inputSchema and args(params).
 for (const tool of REGISTRY.mcpTools) {
   if (TOOLS.some((other) => other.name === tool.name)) continue;
   const inputSchema = tool.inputSchema && tool.inputSchema.type === "object"
@@ -707,7 +707,7 @@ function createServer({ write, log = () => {} }) {
 function main() {
   const server = createServer({
     write: (text) => process.stdout.write(text),
-    log: (text) => process.stderr.write(`e2e mcp: ${text}\n`),
+    log: (text) => process.stderr.write(`gridcheck mcp: ${text}\n`),
   });
   const work = new Set();
   let carry = "";

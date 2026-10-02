@@ -2,7 +2,7 @@
 
 // The Living Universe clock in a saved world: the row
 // server/src/space/npc/ambientTraffic/livingSimClock.js keeps. Only a world
-// restored from _local/e2e/worlds/ carries e2eWorld, and the server refuses to
+// restored from _local/gridcheck/worlds/ carries e2eWorld, and the server refuses to
 // warp any other, so dev's world never gets a clock offset. An offset the
 // saved world already has is kept: its stored deadlines are in that time.
 

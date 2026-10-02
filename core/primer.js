@@ -2,21 +2,21 @@
 
 // What an agent needs to drive the tool with no other context: the workflow,
 // the scenario format and the condition syntax, then each active plugin's
-// primer. The MCP server sends it as its instructions; `e2e primer` prints it
+// primer. The MCP server sends it as its instructions; `gridcheck primer` prints it
 // for agents that use the CLI. One text, with each tool named the way the
 // surface spells it. Guide: docs/GUIDE.md, docs/CLI.md.
 
 const { kindsOf } = require("./conditions");
 
-const CLI = "node tools/evejs-e2e/bin/e2e.js";
+const CLI = "node tools/gridcheck/bin/gridcheck.js";
 
 // name: the MCP tool without its prefix. mcp/cli: arguments as each surface writes them.
 function namer(surface) {
   if (surface === "cli") {
     const commands = { run_scenario: "run" };
-    return (name, _mcp = "", cli = "") => `\`e2e ${commands[name] || name}${cli ? ` ${cli}` : ""}\``;
+    return (name, _mcp = "", cli = "") => `\`gridcheck ${commands[name] || name}${cli ? ` ${cli}` : ""}\``;
   }
-  return (name, mcp = "") => `e2e_${name}${mcp ? ` ${mcp}` : ""}`;
+  return (name, mcp = "") => `\`${name}\`${mcp ? ` ${mcp}` : ""}`;
 }
 
 function modeText(mode, t) {
@@ -30,24 +30,24 @@ function modeText(mode, t) {
 
 // registry: the tool registry (core/plugins.js). mode: the tree's server mode.
 // surface: "mcp" or "cli". scenarioDirs: { tree, drafts } as the tree names them.
-function primer({ registry, mode = "auto", surface = "mcp", scenarioDirs = { tree: "tools/e2e-scenarios", drafts: "_local/e2e/scenarios" } }) {
+function primer({ registry, mode = "auto", surface = "mcp", scenarioDirs = { tree: "tools/gridcheck-scenarios", drafts: "_local/gridcheck/scenarios" } }) {
   const t = namer(surface);
   const cli = surface === "cli";
   const upKeys = ["market", "timeout", "profile", "profileEvery", ...registry.upFlags.map((flag) => flag.key)].join(", ");
   const pluginSteps = Object.keys(registry.steps);
   const kinds = kindsOf(registry).filter((kind) => !["CLIENT", "FX", "DIVERGE"].includes(kind)).join(" ");
-  const pluginTools = registry.mcpTools.map((tool) => (cli ? `\`e2e ${tool.name.replace(/^e2e_[^_]+_/, "")}\`` : tool.name));
+  const pluginTools = registry.mcpTools.map((tool) => `\`${cli ? `gridcheck ${tool.name.replace(/^[^_]+_/, "")}` : tool.name}\``);
 
   const intro = cli
-    ? `End-to-end grid testing for EveJS with no EVE client. A server boots from a saved world; a character logs in through the web gateway, undocks, and you read its grid, run slash commands, act as the player and watch what happens as a timeline. Every command here is \`${CLI} <command>\`, run in this tree and written \`e2e <command>\` below; \`e2e help\` lists them all. The command reference for agents is tools/evejs-e2e/docs/CLI.md, and the full guide tools/evejs-e2e/docs/GUIDE.md.`
-    : `End-to-end grid testing for EveJS with no EVE client. A server boots from a saved world; a character logs in through the web gateway, undocks, and you read its grid, run slash commands, act as the player and watch what happens as a timeline. Every tool runs the CLI \`${CLI}\` in this tree; the guide is tools/evejs-e2e/docs/GUIDE.md.`;
+    ? `End-to-end grid testing for EveJS with no EVE client. A server boots from a saved world; a character logs in through the web gateway, undocks, and you read its grid, run slash commands, act as the player and watch what happens as a timeline. Every command here is \`${CLI} <command>\`, run in this tree and written \`gridcheck <command>\` below; \`gridcheck help\` lists them all. The command reference for agents is tools/gridcheck/docs/CLI.md, and the full guide tools/gridcheck/docs/GUIDE.md.`
+    : `End-to-end grid testing for EveJS with no EVE client. A server boots from a saved world; a character logs in through the web gateway, undocks, and you read its grid, run slash commands, act as the player and watch what happens as a timeline. Every tool runs the CLI \`${CLI}\` in this tree; the guide is tools/gridcheck/docs/GUIDE.md.`;
 
   const writeAndCheck = cli
-    ? `Write the scenario to ${scenarioDirs.tree}/<name>.json to commit with the feature, or to ${scenarioDirs.drafts}/<name>.json as a draft (\`e2e scenario new <name>\` writes a starting point), then \`e2e run <name> --check\`: that validates it without booting.`
+    ? `Write the scenario to ${scenarioDirs.tree}/<name>.json to commit with the feature, or to ${scenarioDirs.drafts}/<name>.json as a draft (\`gridcheck scenario new <name>\` writes a starting point), then \`gridcheck run <name> --check\`: that validates it without booting.`
     : `Write the file with ${t("run_scenario", "{ name, scenario, check: true }")} first: that validates without booting. save:true writes it to ${scenarioDirs.tree}/ to commit with the feature; otherwise it goes to ${scenarioDirs.drafts}/.`;
 
   const runs = cli
-    ? "Runs take minutes (boot about 25 s, then real-time grid behaviour). `e2e run <name>` blocks until the verdict; `e2e run <name> --detach` starts it in the background and prints its run ID, and `e2e report <run> --wait 600` waits for it and prints the verdict. Exit codes: 0 passed, 1 an expectation failed, 2 the run did not complete. `e2e report <run> --section pr` gives the markdown to cite the run in a PR description."
+    ? "Runs take minutes (boot about 25 s, then real-time grid behaviour). `gridcheck run <name>` blocks until the verdict; `gridcheck run <name> --detach` starts it in the background and prints its run ID, and `gridcheck report <run> --wait 600` waits for it and prints the verdict. Exit codes: 0 passed, 1 an expectation failed, 2 the run did not complete. `gridcheck report <run> --section pr` gives the markdown to cite the run in a PR description."
     : `Runs take minutes (boot about 25 s, then real-time grid behaviour). wait:false starts one in the background; ${t("report", "{ run, waitSeconds }")} waits for it and reads the verdict. ${t("report", "{ run, section: \"pr\" }")} gives the markdown to cite the run in a PR description.`;
 
   const byHand = ["up", "login", "undock", "loadout", "grid", "act", "watch", "slash", "teleport", "log", "perf", "down"]
@@ -77,12 +77,12 @@ Performance: how the server copes with a load. The bridge reads every tick's dur
 ${runs}
 
 By hand: ${byHand.join(", ")}${pluginTools.length ? `, and the plugins' ${pluginTools.join(", ")}` : ""}. A person can replay any run, or follow a live one, in the viewer: \`${CLI} view [<run>]\` prints its URL. ${cli
-    ? "Running `e2e watch --for 60` in the background while you act lets you see an action's effect."
-    : `Calling ${t("watch")} and an action in the same turn lets you see its effect. Replies are the CLI's own output, so a message naming a command such as \`e2e login\` means the tool ${t("login")}.`}`;
+    ? "Running `gridcheck watch --for 60` in the background while you act lets you see an action's effect."
+    : `Calling ${t("watch")} and an action in the same turn lets you see its effect. Replies are the CLI's own output, so a message naming a command such as \`gridcheck login\` means the tool ${t("login")}.`}`;
 
   const plugins = registry.primers.map((entry) => entry.text);
   if (cli && plugins.length) {
-    plugins.unshift("The plugin notes below name MCP tools: a tool e2e_<plugin>_<name> is the CLI command `e2e <name>`, and e2e_<name> is `e2e <name>`.");
+    plugins.unshift("The plugin notes below name MCP tools: the tool `<plugin>_<name>` is the CLI command `gridcheck <name>`, and any other tool `<name>` is `gridcheck <name>`.");
   }
   return [core, ...plugins].join("\n\n");
 }

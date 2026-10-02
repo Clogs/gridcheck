@@ -1,7 +1,7 @@
 "use strict";
 
 // Scenario conditions: the `until` and `expect` lines of a scenario, matched
-// against the events `e2e watch` writes to timeline.jsonl. A condition is an
+// against the events `gridcheck watch` writes to timeline.jsonl. A condition is an
 // event kind and field tests, in the names the watch prints:
 //
 //   ARRIVE who=npc count>=3
@@ -79,7 +79,7 @@ const EVENT_FIELDS = Object.freeze({
     tidiMin: "num",
     busiest: { list: { systemID: "id", systemName: "str", workAvgMs: "ms", workMaxMs: "ms", entities: "num", sessions: "num" } },
   },
-  // One tick profiler window: needs a server booted with the profiler (e2e up --profile).
+  // One tick profiler window: needs a server booted with the profiler (gridcheck up --profile).
   PROFILE: {
     ticks: "num", totalMsPerTick: "ms", totalLabel: "str",
     sections: { list: { label: "str", msPerTick: "ms", pct: "num", calls: "num", msPerCall: "ms", nested: "bool", afterTick: "bool" } },

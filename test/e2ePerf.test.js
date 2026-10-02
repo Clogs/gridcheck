@@ -369,14 +369,14 @@ test("PERF and PROFILE print as one timeline line each", () => {
   assert.match(start, /client=diverge, perf every 5s, profiler off$/);
 });
 
-test("e2e perf's text: ticks, process, busiest scenes, then the profiler or how to turn it on", () => {
+test("gridcheck perf's text: ticks, process, busiest scenes, then the profiler or how to turn it on", () => {
   const reply = { profiler: { enabled: false, everyTicks: 100 }, seconds: 10, perf: { ...PERF_EVENT, scenes: 1, tidiMin: 0.8 }, profile: null };
   const text = perfTools.formatPerf(reply);
   assert.match(text, /^over 10 s: 50 ticks, budget 100 ms a tick/);
   assert.match(text, /tick {7}avg 4\.00 {2}p50 - {2}p95 9\.00 {2}p99 30\.0 {2}max 140 ms; 1 over budget/);
   assert.match(text, /time dilation down to 0\.8/);
   assert.match(text, /Amamake +3\.50 +20\.0 +25 +1/);
-  assert.match(text, /tick profiler off: .*e2e up --profile/);
+  assert.match(text, /tick profiler off: .*gridcheck up --profile/);
   const on = perfTools.formatPerf({ ...reply, profiler: { enabled: true, everyTicks: 50 },
     profile: perfTools.mergeProfiles([perfTools.parseTickProfile(MARKED_BLOCK)]) });
   assert.match(on, /tick profiler: 1 window\(s\), 2 ticks/);
@@ -385,13 +385,13 @@ test("e2e perf's text: ticks, process, busiest scenes, then the profiler or how 
 
 test("the MCP tools map perf and profile onto the CLI", () => {
   const mcp = require("../bin/mcp.js");
-  assert.ok(mcp.TOOLS.some((tool) => tool.name === "e2e_perf"));
-  assert.deepStrictEqual(mcp.cliArgs("e2e_perf", {}), ["perf"]);
-  assert.deepStrictEqual(mcp.cliArgs("e2e_perf", { seconds: 30, json: true }), ["perf", "--for=30", "--json"]);
-  assert.deepStrictEqual(mcp.cliArgs("e2e_perf", { now: true, seconds: 30 }), ["perf", "--now"]);
-  assert.ok(mcp.cliArgs("e2e_up", { profile: true, profileEvery: 20 }).includes("--profile-every=20"));
-  assert.ok(!mcp.cliArgs("e2e_up", { profileEvery: 20 }).some((arg) => arg.startsWith("--profile")), "profileEvery only with profile");
-  assert.deepStrictEqual(mcp.cliArgs("e2e_watch", { perf: true }).slice(1), ["--for=60", "--perf"]);
-  assert.deepStrictEqual(mcp.cliArgs("e2e_watch", { perf: true, perfEvery: 10 }).slice(1), ["--for=60", "--perf-every=10"]);
-  assert.match(mcp.instructions(), /e2e_perf \{ seconds: 30 \}/);
+  assert.ok(mcp.TOOLS.some((tool) => tool.name === "perf"));
+  assert.deepStrictEqual(mcp.cliArgs("perf", {}), ["perf"]);
+  assert.deepStrictEqual(mcp.cliArgs("perf", { seconds: 30, json: true }), ["perf", "--for=30", "--json"]);
+  assert.deepStrictEqual(mcp.cliArgs("perf", { now: true, seconds: 30 }), ["perf", "--now"]);
+  assert.ok(mcp.cliArgs("up", { profile: true, profileEvery: 20 }).includes("--profile-every=20"));
+  assert.ok(!mcp.cliArgs("up", { profileEvery: 20 }).some((arg) => arg.startsWith("--profile")), "profileEvery only with profile");
+  assert.deepStrictEqual(mcp.cliArgs("watch", { perf: true }).slice(1), ["--for=60", "--perf"]);
+  assert.deepStrictEqual(mcp.cliArgs("watch", { perf: true, perfEvery: 10 }).slice(1), ["--for=60", "--perf-every=10"]);
+  assert.match(mcp.instructions(), /`perf` \{ seconds: 30 \}/);
 });

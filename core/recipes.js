@@ -8,7 +8,7 @@
 //               { "loadout": { "ship": "Tristan", ... } }, "undock",
 //               { "teleport": "Amamake" }, "dock"] }
 //
-// `e2e world build <recipe>` boots a fresh world, runs the steps and saves the
+// `gridcheck world build <recipe>` boots a fresh world, runs the steps and saves the
 // world under the recipe's name. The saved world.json keeps a fingerprint of
 // what built it; a scenario that names the recipe ("recipe": "starter") gets
 // the world rebuilt when the fingerprint no longer matches (recipeStale).

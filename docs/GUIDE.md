@@ -1,119 +1,119 @@
-# The evejs-e2e guide
+# The Gridcheck guide
 
 How an agent checks what happens on grid in an EveJS tree without the EVE client. A character logs
 in through the web gateway, undocks, runs slash commands on its own session, flies and fights, and
 reads its grid as a table or a timeline. Use it for final verification of a feature; it doesn't
 replace a tree's own unit tests.
 
-Commands here are run from the tree's root, where the tool is vendored as `tools/evejs-e2e/`. The
+Commands here are run from the tree's root, where the tool is vendored as `tools/gridcheck/`. The
 [README](../README.md) covers installing it. [TREES.md](TREES.md) covers a tree's config and the two
 ways to run its server, [WORLDS.md](WORLDS.md) loadouts and world recipes, [PATCHES.md](PATCHES.md)
 the optional stock edits, and [GUI.md](GUI.md) the web page.
 
 ```bash
-node tools/evejs-e2e/bin/e2e.js world build starter        # a fitted Tristan docked in Amamake
-node tools/evejs-e2e/bin/e2e.js up --world starter         # boot it
-node tools/evejs-e2e/bin/e2e.js login                      # account e2eagent, character Agent Observer
-node tools/evejs-e2e/bin/e2e.js undock
-node tools/evejs-e2e/bin/e2e.js slash "/npc 2"             # any slash command, on the character's session
-node tools/evejs-e2e/bin/e2e.js grid
-node tools/evejs-e2e/bin/e2e.js act lock nearest npc       # fly, lock, fire, drones; see "Player actions"
-node tools/evejs-e2e/bin/e2e.js watch --for 120            # what changed and where the client's view disagrees
-node tools/evejs-e2e/bin/e2e.js down
-node tools/evejs-e2e/bin/e2e.js run loadout-npc-fight      # all of that in one command, with a report
-node tools/evejs-e2e/bin/e2e.js view                       # replay a run in a browser
+node tools/gridcheck/bin/gridcheck.js world build starter        # a fitted Tristan docked in Amamake
+node tools/gridcheck/bin/gridcheck.js up --world starter         # boot it
+node tools/gridcheck/bin/gridcheck.js login                      # account e2eagent, character Agent Observer
+node tools/gridcheck/bin/gridcheck.js undock
+node tools/gridcheck/bin/gridcheck.js slash "/npc 2"             # any slash command, on the character's session
+node tools/gridcheck/bin/gridcheck.js grid
+node tools/gridcheck/bin/gridcheck.js act lock nearest npc       # fly, lock, fire, drones; see "Player actions"
+node tools/gridcheck/bin/gridcheck.js watch --for 120            # what changed and where the client's view disagrees
+node tools/gridcheck/bin/gridcheck.js down
+node tools/gridcheck/bin/gridcheck.js run loadout-npc-fight      # all of that in one command, with a report
+node tools/gridcheck/bin/gridcheck.js view                       # replay a run in a browser
 ```
 
-`e2e help` lists every command, the active plugins' included. State (account, character,
-`bridgeSessionID`) lives in `_local/e2e/state.json`, so each command is a separate process. An
-agent can do all of this through the `e2e` MCP tools instead of a shell.
+`gridcheck help` lists every command, the active plugins' included. State (account, character,
+`bridgeSessionID`) lives in `_local/gridcheck/state.json`, so each command is a separate process. An
+agent can do all of this through the `gridcheck` MCP tools instead of a shell.
 
 ## Agent MCP tools
 
-`tools/evejs-e2e/bin/mcp.js` is an MCP server over the CLI. Each tool runs
-`node tools/evejs-e2e/bin/e2e.js <command>` in the tree and returns what the CLI printed, so a
+`tools/gridcheck/bin/mcp.js` is an MCP server over the CLI. Each tool runs
+`node tools/gridcheck/bin/gridcheck.js <command>` in the tree and returns what the CLI printed, so a
 session in a worktree drives that worktree's server. The CLI stays the source of truth: a tool adds
 no rule of its own, and anything a tool did can be repeated in a shell. The server speaks MCP over
 stdio, has no dependencies and opens no port.
 
 ### Setting up agents
 
-`e2e agents` says which agents this machine has and whether each already runs this tree's server.
-`e2e agents setup` registers it with every agent it finds; name `claude` or `codex` to choose, or
+`gridcheck agents` says which agents this machine has and whether each already runs this tree's server.
+`gridcheck agents setup` registers it with every agent it finds; name `claude` or `codex` to choose, or
 to set one up that it didn't find. `--dry-run` prints the lines it would add and writes nothing. The
 GUI's Install tab runs the same command, with the agents it found ticked.
 
 | Agent | Found by | Writes |
 | --- | --- | --- |
-| Claude Code | `claude` on `PATH`, `~/.claude` or `~/.claude.json` | `.mcp.json` at the tree's root: server `e2e`, `node tools/evejs-e2e/bin/mcp.js`. Start Claude Code in the tree; it asks once to approve the project's server. |
-| Codex | `codex` on `PATH`, or `~/.codex` (`CODEX_HOME` moves it) | `[mcp_servers.e2e]` at the end of `config.toml`, with the copy's absolute path and `tool_timeout_sec = 600`. |
-| `cli`, any other agent | only when named: `e2e agents setup cli` | A marked pointer to [CLI.md](CLI.md) at the end of the tree's `AGENTS.md`, or of its `CLAUDE.md` when it has no `AGENTS.md`. For agents without MCP. |
+| Claude Code | `claude` on `PATH`, `~/.claude` or `~/.claude.json` | `.mcp.json` at the tree's root: server `gridcheck`, `node tools/gridcheck/bin/mcp.js`. Start Claude Code in the tree; it asks once to approve the project's server. |
+| Codex | `codex` on `PATH`, or `~/.codex` (`CODEX_HOME` moves it) | `[mcp_servers.gridcheck]` at the end of `config.toml`, with the copy's absolute path and `tool_timeout_sec = 600`. |
+| `cli`, any other agent | only when named: `gridcheck agents setup cli` | A marked pointer to [CLI.md](CLI.md) at the end of the tree's `AGENTS.md`, or of its `CLAUDE.md` when it has no `AGENTS.md`. For agents without MCP. |
 
 A setup only adds. It merges into an existing `.mcp.json` and keeps its other servers, and it
 appends to `config.toml`, keeping every byte before its own table. Codex reads one file for every
-folder. When another tree already has `e2e` there, this tree's server is named
-`e2e-<folder>`. The one entry setup replaces is a Codex `e2e` whose `mcp.js` no longer exists. A
+folder. When another tree already has `gridcheck` there, this tree's server is named
+`e2e-<folder>`. The one entry setup replaces is a Codex `gridcheck` whose `mcp.js` no longer exists. A
 `config.toml` that defines `mcp_servers` inline isn't edited, and the error shows the table to add
 by hand. When an entry already runs this tree's `mcp.js`, setup leaves it as it is.
 
 | Tool | CLI | Notes |
 | --- | --- | --- |
-| `e2e_status` | `status`, `world list`, `run` | Start here: server, character, saved worlds and recipes, scenarios, active plugins, recent runs and background runs. |
-| `e2e_doctor` | `doctor` | What the tree supports: gateway calls, the client view, patches, plugins, ports, loadouts. |
-| `e2e_up`, `e2e_down` | `up`, `down` | Auto and managed mode. In auto mode `down` stops only a server `up` started. |
-| `e2e_login`, `e2e_undock`, `e2e_teleport` | `login`, `undock`, `teleport` | `e2e_teleport` is stock `/tr`. |
-| `e2e_loadout` | `loadout` | A ship and its fit by item name, skills checked first. |
-| `e2e_grid` | `grid` | `json: true` prints the field names conditions use. |
-| `e2e_slash` | `slash` | The command goes after `--`, so it is never read as flags. A refused command is a tool error. |
-| `e2e_watch` | `watch` | `seconds` defaults to 60, not the CLI's 600, because the call blocks for the whole watch. Call `e2e_act` in the same turn to watch its effect. |
-| `e2e_act` | `act` | A player action, with the names a scenario's action step uses: `action`, `target`, `modules`, `drones`, `range`, `once`, `charge`, `count`, `timeout`. |
-| `e2e_log` | `log` | |
-| `e2e_perf` | `perf` | `seconds` (default 10) to sample, or `now`. See [Performance testing](#performance-testing). `e2e_up` takes `profile` and `profileEvery`, and `e2e_watch` takes `perf` and `perfEvery`. |
-| `e2e_run_scenario` | `run` | Writes a scenario it is handed, checks it, runs it. See below. |
-| `e2e_report` | none | Reads a run's `report.md` and `result.json`; waits for a background run. |
+| `status` | `status`, `world list`, `run` | Start here: server, character, saved worlds and recipes, scenarios, active plugins, recent runs and background runs. |
+| `doctor` | `doctor` | What the tree supports: gateway calls, the client view, patches, plugins, ports, loadouts. |
+| `up`, `down` | `up`, `down` | Auto and managed mode. In auto mode `down` stops only a server `up` started. |
+| `login`, `undock`, `teleport` | `login`, `undock`, `teleport` | `teleport` is stock `/tr`. |
+| `loadout` | `loadout` | A ship and its fit by item name, skills checked first. |
+| `grid` | `grid` | `json: true` prints the field names conditions use. |
+| `slash` | `slash` | The command goes after `--`, so it is never read as flags. A refused command is a tool error. |
+| `watch` | `watch` | `seconds` defaults to 60, not the CLI's 600, because the call blocks for the whole watch. Call `act` in the same turn to watch its effect. |
+| `act` | `act` | A player action, with the names a scenario's action step uses: `action`, `target`, `modules`, `drones`, `range`, `once`, `charge`, `count`, `timeout`. |
+| `log` | `log` | |
+| `perf` | `perf` | `seconds` (default 10) to sample, or `now`. See [Performance testing](#performance-testing). `up` takes `profile` and `profileEvery`, and `watch` takes `perf` and `perfEvery`. |
+| `run_scenario` | `run` | Writes a scenario it is handed, checks it, runs it. See below. |
+| `report` | none | Reads a run's `report.md` and `result.json`; waits for a background run. |
 
-A plugin's tools are named `e2e_<plugin>_<tool>`. The server's MCP instructions carry a primer:
+A plugin's tools are named `<plugin>_<tool>`. The server's MCP instructions carry a primer:
 the workflow, the scenario format and the condition syntax, then each active plugin's own primer.
 An agent with no other context can write a scenario from them. When an argument fails its schema
 check, the tool returns an error naming the argument, and the CLI never runs. CLI messages name CLI
-commands: "`e2e login` first" means the `e2e_login` tool.
+commands: "`gridcheck login` first" means the `login` tool.
 
-**Runs.** `e2e_run_scenario` takes `name`: a scenario in the tree's `tools/e2e-scenarios/`, the
-tool's `tools/evejs-e2e/scenarios/` or a plugin's `plugins/<name>/scenarios/`, or a path. With
-`scenario`, a JSON object, it first writes `<name>.json`: to `_local/e2e/scenarios/` as a draft,
-or with `save: true` to `tools/e2e-scenarios/` to commit with the feature. It always runs
-`e2e run --check` first and stops there on a problem, or when `check: true`. Then:
+**Runs.** `run_scenario` takes `name`: a scenario in the tree's `tools/gridcheck-scenarios/`, the
+tool's `tools/gridcheck/scenarios/` or a plugin's `plugins/<name>/scenarios/`, or a path. With
+`scenario`, a JSON object, it first writes `<name>.json`: to `_local/gridcheck/scenarios/` as a draft,
+or with `save: true` to `tools/gridcheck-scenarios/` to commit with the feature. It always runs
+`gridcheck run --check` first and stops there on a problem, or when `check: true`. Then:
 
 - by default it waits for the run and returns the end of the console, the report without its
   timeline, and the paths of the report, timeline and frames. With a progress token it sends one
   progress notification a second with the latest console line;
 - `wait: false` starts the run detached and returns its run ID at once, with the console in
-  `_local/e2e/background/<run>.log`. `e2e_report { run, waitSeconds: 600 }` waits for it, up to 600 s a
+  `_local/gridcheck/background/<run>.log`. `report { run, waitSeconds: 600 }` waits for it, up to 600 s a
   call. Use this where the client limits a tool call's time (Codex: 60 s by default);
-- cancelling the call kills the CLI and runs `e2e down`, since a killed CLI can't, unless the run
-  was using a server that was already up (attach mode, or auto mode with a server up). `e2e_down`
+- cancelling the call kills the CLI and runs `gridcheck down`, since a killed CLI can't, unless the run
+  was using a server that was already up (attach mode, or auto mode with a server up). `down`
   ends a background run early, and the run still writes its report.
 
-`e2e_report` with no `run` lists recent runs and their verdicts; `run: "latest"` is the newest.
+`report` with no `run` lists recent runs and their verdicts; `run: "latest"` is the newest.
 `section` is `summary` (the default), `full` (with the timeline), `result` (`result.json`) or `pr`
 (see [Citing a run in a PR](#citing-a-run-in-a-pr)).
 
-Every tool has a CLI form, for agents that don't use MCP. `e2e run <scenario> --detach` is
-`wait: false`, `e2e report [<run>|latest] [--section ...] [--wait <s>]` is `e2e_report`, and
-`e2e primer` prints these instructions naming CLI commands. [CLI.md](CLI.md) is the reference.
+Every tool has a CLI form, for agents that don't use MCP. `gridcheck run <scenario> --detach` is
+`wait: false`, `gridcheck report [<run>|latest] [--section ...] [--wait <s>]` is `report`, and
+`gridcheck primer` prints these instructions naming CLI commands. [CLI.md](CLI.md) is the reference.
 
 ## What runs where
 
 | Piece | Where | What it does |
 | --- | --- | --- |
 | Web gateway | the tree's `server/src/_secondary/express/` | Account, character, session select, `ship.Undock`, and the player calls. Stock EveJS. |
-| Agent bridge | `tools/evejs-e2e/bridge/`, loaded by the shim `server/src/_secondary/agentBridge/server.js` | `/slash`, `/grid`, `/watch`, `/tee`, `/loadout`, `/capabilities`, `/shutdown`, the [viewer](#viewer) at `/viewer`, and the plugins' routes. Off unless `EVEJS_AGENT_BRIDGE=1`. |
-| CLI | `tools/evejs-e2e/bin/e2e.js`, with `core/` | Calls the gateway and the bridge, and runs the plugins' commands and steps. Writes `_local/e2e/`. |
-| MCP server | `tools/evejs-e2e/bin/mcp.js` | The CLI as MCP tools over stdio. |
-| GUI | `tools/evejs-e2e/gui/`, `core/gui.js` | `e2e gui`: runs, install and patches in a browser ([GUI.md](GUI.md)). |
-| Plugins | `tools/evejs-e2e/plugins/<name>/` | What a mod adds, on both sides. Skipped in a tree without the mod. |
-| Tree config | `e2e.config.json` at the tree's root | The tree's paths, the mode, which listeners move, optional daemons ([TREES.md](TREES.md)). |
-| Market daemon | `externalservices/market-server/`, in trees that have one | Started by `e2e up` when the config turns it on. Stock EveJS has none. |
+| Agent bridge | `tools/gridcheck/bridge/`, loaded by the shim `server/src/_secondary/agentBridge/server.js` | `/slash`, `/grid`, `/watch`, `/tee`, `/loadout`, `/capabilities`, `/shutdown`, the [viewer](#viewer) at `/viewer`, and the plugins' routes. Off unless `EVEJS_AGENT_BRIDGE=1`. |
+| CLI | `tools/gridcheck/bin/gridcheck.js`, with `core/` | Calls the gateway and the bridge, and runs the plugins' commands and steps. Writes `_local/gridcheck/`. |
+| MCP server | `tools/gridcheck/bin/mcp.js` | The CLI as MCP tools over stdio. |
+| GUI | `tools/gridcheck/gui/`, `core/gui.js` | `gridcheck gui`: runs, install and patches in a browser ([GUI.md](GUI.md)). |
+| Plugins | `tools/gridcheck/plugins/<name>/` | What a mod adds, on both sides. Skipped in a tree without the mod. |
+| Tree config | `gridcheck.config.json` at the tree's root | The tree's paths, the mode, which listeners move, optional daemons ([TREES.md](TREES.md)). |
+| Market daemon | `externalservices/market-server/`, in trees that have one | Started by `gridcheck up` when the config turns it on. Stock EveJS has none. |
 
 The gateway session is a real registered session. After `undock` it sits in the scene's
 `sessions` map, as a client's would. Slash commands go through the bridge, which calls the tree's
@@ -129,7 +129,7 @@ server's ports, log and data dir. `GET /health` needs no token. Override the por
 
 The core reads only stock EveJS modules (`bridge/stock.js`) and names no mod: a test
 (`test/e2ePurity.test.js`) fails if `core/`, `bridge/`, `bin/` or the core scenarios name a mod's
-identifiers. Anything a mod adds is a plugin in `tools/evejs-e2e/plugins/<name>/plugin.js`. The
+identifiers. Anything a mod adds is a plugin in `tools/gridcheck/plugins/<name>/plugin.js`. The
 loader (`core/plugins.js`) scans that folder only; the bridge loads it only when
 `EVEJS_AGENT_BRIDGE=1`. A plugin exports `name`, `apiVersion: 1`, `applies(tree)`, `server(ctx)`
 and `tool`:
@@ -137,7 +137,7 @@ and `tool`:
 - `applies({ treeRoot, serverRoot, resolve })` answers `true` or `{ ok: false, reason }`. A
   plugin that doesn't apply, has another `apiVersion`, or throws is skipped on both sides. The
   server log then has one line saying why, for example `[AgentBridge] plugin lu skipped: no Living
-  Universe in this tree (no server/src/modApi.js)`, and `e2e doctor`, `e2e status` and `e2e help`
+  Universe in this tree (no server/src/modApi.js)`, and `gridcheck doctor`, `gridcheck status` and `gridcheck help`
   say the same.
 - `server(ctx)` gets `ctx.stock` (the stock modules), `ctx.require(path)` for a module under
   `server/src`, `ctx.seams` (`findSession`, `executeChatCommand`, `describeType`,
@@ -180,21 +180,21 @@ Three kinds of world can start a run:
 - **`fresh`**: `up --fresh` deletes `gamestore.sqlite` and keeps `manifest.json`. The boot seeds a
   new store from the reference data's seed tables, which is what a first boot does. A fresh world
   has only the seed accounts, so `login` creates `e2eagent` again.
-- **A recipe**: `e2e world build <recipe>` builds a world from nothing and saves it, and a
+- **A recipe**: `gridcheck world build <recipe>` builds a world from nothing and saves it, and a
   scenario that names the recipe gets it built when it's missing or stale. `starter` gives the
   character every skill and a fitted Tristan docked in Amamake. [WORLDS.md](WORLDS.md) has the
   format.
-- **A saved world**: a snapshot taken with `e2e world save`.
+- **A saved world**: a snapshot taken with `gridcheck world save`.
 
 ```bash
-node tools/evejs-e2e/bin/e2e.js world save my-world --note "what's in it"
-node tools/evejs-e2e/bin/e2e.js world list
-node tools/evejs-e2e/bin/e2e.js up --world my-world      # restore it, then boot
-node tools/evejs-e2e/bin/e2e.js world copy --from ../other-tree
+node tools/gridcheck/bin/gridcheck.js world save my-world --note "what's in it"
+node tools/gridcheck/bin/gridcheck.js world list
+node tools/gridcheck/bin/gridcheck.js up --world my-world      # restore it, then boot
+node tools/gridcheck/bin/gridcheck.js world copy --from ../other-tree
 ```
 
 - `world save` needs a stopped world. It snapshots the databases and `manifest.json` into
-  `_local/e2e/worlds/<name>/` with a `world.json` note. Plugins keep their own data there under
+  `_local/gridcheck/worlds/<name>/` with a `world.json` note. Plugins keep their own data there under
   `ext.<plugin>`. `--force` replaces a saved world.
 - `up --world <name>` replaces the tree's world with the saved copy before boot, then lets each
   plugin mark the copy. Every run from it starts in the same place; nothing from the last run
@@ -214,13 +214,13 @@ world commands need the server down.
 In auto mode, the default, the tool uses the tree's server when it's up and starts its own when it
 isn't. In attach mode you start the server with `EVEJS_AGENT_BRIDGE=1` set, and the tool works on
 it. In managed mode the CLI starts and stops it. [TREES.md](TREES.md) has all three, and
-`e2e status` prints the mode and, in auto mode, which case applies now.
+`gridcheck status` prints the mode and, in auto mode, which case applies now.
 
-`e2e up` starts any daemons the config turns on, then the server's own start command, in the
+`gridcheck up` starts any daemons the config turns on, then the server's own start command, in the
 background, with `EVEJS_AGENT_BRIDGE=1` and every listener it can move on the tree's port block. It
 waits until the bridge answers `/health`, the gateway reports ready and the game port accepts a
 connection, which happens in the last boot stage. It prints the ports and the boot time and
-records them in `_local/e2e/run.json`.
+records them in `_local/gridcheck/run.json`.
 
 - **Refusals.** `up` exits non-zero, before touching the world, when:
   - another process holds the tree's world lease, such as a server started by hand. The message
@@ -231,18 +231,18 @@ records them in `_local/e2e/run.json`.
 - **Boot failure.** If the server dies during boot, `up` stops the daemons it started and prints
   the last 40 console lines, plus any live lease another process holds. After `--timeout`
   (600 s) it leaves the server running and says so.
-- `e2e down` asks the bridge to stop. The bridge emits `SIGTERM` inside the server, which runs the
+- `gridcheck down` asks the bridge to stop. The bridge emits `SIGTERM` inside the server, which runs the
   shutdown hooks, flushes the store and releases the world lease. Windows has no other graceful
   stop for a detached process. `down` waits for the pid to exit, then stops the daemons.
   `down --force` kills a server that has no bridge yet, leaving its lease live for 30 s.
-- `e2e status` shows the ports, server pid and boot time, gateway, bridge, daemons and the held
+- `gridcheck status` shows the ports, server pid and boot time, gateway, bridge, daemons and the held
   character.
 
 ### Ports
 
 Each tree has a block of 20 ports from 30000 to 45999, chosen from a hash of the tree's path, so
 two trees can run at once and neither takes the stock ports (26000 and up) a hand-started server
-uses. `e2e ports` prints the block:
+uses. `gridcheck ports` prints the block:
 
 | Offset | Listener | Set by |
 | --- | --- | --- |
@@ -257,13 +257,13 @@ uses. `e2e ports` prints the block:
 | +10 | XMPP chat (stock: 5222) | `EVEJS_XMPP_SERVER_PORT`, with the `xmpp-port` patch |
 
 A plugin declares its own listeners at free offsets (`tool.listeners`; the lu plugin takes +6);
-`e2e up` sets each one's variable and checks its port with the rest. A listener moves only when
-the tree's source reads its variable, which `e2e init` probes. Stock EveJS fixes chat at 5222, so
+`gridcheck up` sets each one's variable and checks its port with the rest. A listener moves only when
+the tree's source reads its variable, which `gridcheck init` probes. Stock EveJS fixes chat at 5222, so
 two stock trees clash there until the `xmpp-port` patch is applied. An EVE client can't use an
-e2e server, since it only connects to chat on 5222.
+gridcheck server, since it only connects to chat on 5222.
 
 If two trees hash to the same block, or something else holds a port, `up` names the port. Run
-`up` with `EVEJS_E2E_PORT_SLOT=<0-799>` to pick another block. Later commands read the running
+`up` with `GRIDCHECK_PORT_SLOT=<0-799>` to pick another block. Later commands read the running
 server's ports from `run.json`, so they don't need the variable.
 
 ## Reading the grid
@@ -292,7 +292,7 @@ grid stays alive.
 
 ## Watching a grid over time
 
-`e2e watch` prints what changed on the grid and why, as one timeline, until `--for` runs out
+`gridcheck watch` prints what changed on the grid and why, as one timeline, until `--for` runs out
 (default 600 s). It makes one HTTP call: the bridge samples the grid on the server every `--every`
 seconds (default 2) and streams each change as a line of NDJSON. The watch follows you across
 `/tr` and jumps: a `SYSTEM` line, then a fresh baseline.
@@ -329,7 +329,7 @@ Plugins add kinds of their own, often from an off-grid scan of the system you ar
 Stock's logger writes no `[pid N]` tag, so in a stock tree `LOG` lines can't be told from another
 process's that writes the same file.
 
-The timeline is also written to `_local/e2e/runs/<id>/timeline.jsonl`, one event per line with
+The timeline is also written to `_local/gridcheck/runs/<id>/timeline.jsonl`, one event per line with
 `seq`, `t` (ms since the watch started), `atMs` (server time) and `kind`. The run ID is the start
 time, or `--run <id>`. `--json` prints those lines instead of text. Lines are held for 1.5 s and
 released in server-time order, so log lines interleave with samples.
@@ -359,14 +359,14 @@ At boot the bridge has the tree's own encoder write a set of test balls and read
 the layout differs from what the decoder knows, the client view stays off and says so in the log,
 on `/tee` and in every watch's `START` line, rather than reporting DIVERGEs that aren't there.
 
-`e2e login` attaches the tee through `POST /tee`, so the client view starts from the undock's
+`gridcheck login` attaches the tee through `POST /tee`, so the client view starts from the undock's
 SetState. A watch also attaches it, but the view then stays empty until the next undock, jump or
 `/tr`, and the `CLIENT` line says so. A real client binds the remote park straight after undock
-or a jump, and that bind makes the server send SetState. `e2e undock`, `e2e teleport` and any
-`e2e slash` that changes system make the same call, `beyonce.MachoBindObject` through
+or a jump, and that bind makes the server send SetState. `gridcheck undock`, `gridcheck teleport` and any
+`gridcheck slash` that changes system make the same call, `beyonce.MachoBindObject` through
 `/bound/bind`.
 
-`e2e watch` prints these lines beside the server ones. Each carries `source: "client"` in
+`gridcheck watch` prints these lines beside the server ones. Each carries `source: "client"` in
 `timeline.jsonl`.
 
 | Kind | When |
@@ -409,19 +409,19 @@ average and 0.69 ms at most, under 0.1% of the tick.
 
 ## Player actions
 
-`e2e act` makes the character act, through the calls the web gateway already allows a browser
+`gridcheck act` makes the character act, through the calls the web gateway already allows a browser
 client. The server applies every rule, so a refusal comes back in its own words: out of range, no
 charges, not enough capacitor.
 
 ```bash
-node tools/evejs-e2e/bin/e2e.js act lock nearest npc                 # waits until the server lists the lock
-node tools/evejs-e2e/bin/e2e.js act activate weapons                 # at the first locked target; --target, --once
-node tools/evejs-e2e/bin/e2e.js act orbit "name~Blood" --range 2km
-node tools/evejs-e2e/bin/e2e.js act loadAmmo --charge "Antimatter Charge S"   # from the cargo hold
-node tools/evejs-e2e/bin/e2e.js act launchDrones --count 5
-node tools/evejs-e2e/bin/e2e.js act engageDrones nearest npc
-node tools/evejs-e2e/bin/e2e.js act warpTo kind=planet --range 20km
-node tools/evejs-e2e/bin/e2e.js act stop
+node tools/gridcheck/bin/gridcheck.js act lock nearest npc                 # waits until the server lists the lock
+node tools/gridcheck/bin/gridcheck.js act activate weapons                 # at the first locked target; --target, --once
+node tools/gridcheck/bin/gridcheck.js act orbit "name~Blood" --range 2km
+node tools/gridcheck/bin/gridcheck.js act loadAmmo --charge "Antimatter Charge S"   # from the cargo hold
+node tools/gridcheck/bin/gridcheck.js act launchDrones --count 5
+node tools/gridcheck/bin/gridcheck.js act engageDrones nearest npc
+node tools/gridcheck/bin/gridcheck.js act warpTo kind=planet --range 20km
+node tools/gridcheck/bin/gridcheck.js act stop
 ```
 
 | Action | Gateway call | Arguments |
@@ -452,19 +452,19 @@ node tools/evejs-e2e/bin/e2e.js act stop
 
 ## Scenarios
 
-`e2e run <scenario>` runs a whole check in one command. In managed mode it boots the scenario's
+`gridcheck run <scenario>` runs a whole check in one command. In managed mode it boots the scenario's
 world, runs setup, watches until a stop condition, shuts the server down and writes a report of
 expected against observed. In attach mode it uses the live server as it is. In auto mode it does
 the first when no server is up and the second when one is. Scenarios are JSON
-files in the tree's `tools/e2e-scenarios/`, in `tools/evejs-e2e/scenarios/` and in each active
-plugin's `plugins/<name>/scenarios/`; `e2e run` lists them all, and `e2e run --json` lists each
+files in the tree's `tools/gridcheck-scenarios/`, in `tools/gridcheck/scenarios/` and in each active
+plugin's `plugins/<name>/scenarios/`; `gridcheck run` lists them all, and `gridcheck run --json` lists each
 with its world, timeout, expectations and any problem loading it. Pass a name or a path.
 
 ```bash
-node tools/evejs-e2e/bin/e2e.js run                               # list the scenarios
-node tools/evejs-e2e/bin/e2e.js run loadout-npc-fight --check     # load and check it; boots nothing
-node tools/evejs-e2e/bin/e2e.js run loadout-npc-fight             # [--run <id>] [--world <name>|fresh] [--keep-up | --reuse]
-node tools/evejs-e2e/bin/e2e.js run loadout-npc-fight --reuse     # again: resets the server it left up instead of booting
+node tools/gridcheck/bin/gridcheck.js run                               # list the scenarios
+node tools/gridcheck/bin/gridcheck.js run loadout-npc-fight --check     # load and check it; boots nothing
+node tools/gridcheck/bin/gridcheck.js run loadout-npc-fight             # [--run <id>] [--world <name>|fresh] [--keep-up | --reuse]
+node tools/gridcheck/bin/gridcheck.js run loadout-npc-fight --reuse     # again: resets the server it left up instead of booting
 ```
 
 ```json
@@ -486,7 +486,7 @@ node tools/evejs-e2e/bin/e2e.js run loadout-npc-fight --reuse     # again: reset
 
 | Key | What it holds |
 | --- | --- |
-| `world` or `recipe` | A saved world (`e2e world list`), `"fresh"`, or `"recipe": "<name>"` for a world the tool builds ([WORLDS.md](WORLDS.md)). One is required. |
+| `world` or `recipe` | A saved world (`gridcheck world list`), `"fresh"`, or `"recipe": "<name>"` for a world the tool builds ([WORLDS.md](WORLDS.md)). One is required. |
 | `up` | `market` (default `true`), `timeout` (boot, seconds), `profile` (boot with the tick profiler; turns `watch.perf` on), `profileEvery` (ticks per profiler window, default 50), and the plugins' `up` flags. |
 | `setup` | Steps, in order. A login runs first if the list doesn't start with one. |
 | `during` | Steps that run after setup, beside the stop conditions; see [During](#during). Optional. |
@@ -499,11 +499,11 @@ Steps:
 
 | Step | Does |
 | --- | --- |
-| `"login"` or `{ "login": { "user": ..., "name": ... } }` | `e2e login`. First, or left out. |
-| `"undock"`, `"dock"` | `e2e undock`, `e2e dock`. |
-| `{ "slash": "/heal" }` | `e2e slash`. A refused command fails setup; in a tree that doesn't report refusals (stock without `slash-success`) every command counts as done. |
-| `{ "teleport": "Amamake" }` | `e2e teleport`, stock `/tr`. |
-| `{ "loadout": { "ship": "Tristan", "modules": [...], "drones": [...], "cargo": [...], "charges": [...] } }` | `e2e loadout` ([WORLDS.md](WORLDS.md)). |
+| `"login"` or `{ "login": { "user": ..., "name": ... } }` | `gridcheck login`. First, or left out. |
+| `"undock"`, `"dock"` | `gridcheck undock`, `gridcheck dock`. |
+| `{ "slash": "/heal" }` | `gridcheck slash`. A refused command fails setup; in a tree that doesn't report refusals (stock without `slash-success`) every command counts as done. |
+| `{ "teleport": "Amamake" }` | `gridcheck teleport`, stock `/tr`. |
+| `{ "loadout": { "ship": "Tristan", "modules": [...], "drones": [...], "cargo": [...], "charges": [...] } }` | `gridcheck loadout` ([WORLDS.md](WORLDS.md)). |
 | `{ "wait": 30 }` | Waits that many seconds. Prefer `waitFor` on the event you are waiting for: a `GRID` with the new `systemName` after a teleport, or the first `GRID` after an undock. |
 | `{ "waitFor": "<condition>", "timeout": 300 }` | Waits for an event, seen after the step starts, that matches the condition. Setup fails if none comes before the timeout (default 300 s). |
 | `{ "lock": "nearest npc", "as": "mark" }`, `{ "activate": "weapons", "target": "$mark" }`, `"stop"`, ... | A [player action](#player-actions): `approach`, `orbit`, `keepAtRange`, `warpTo`, `stop`, `lock`, `unlock`, `activate`, `deactivate`, `loadAmmo`, `launchDrones`, `engageDrones`. The value is the target, or the modules or drones; the other arguments are keys (`range`, `target`, `once`, `charge`, `count`, `timeout`). `as` binds the target's item ID, or the drones launched. A refused action fails the step. |
@@ -536,7 +536,7 @@ those `STEP` lines `during:`.
 
 ### Conditions
 
-A condition names an event kind, then field tests, with the names `e2e watch --json` writes:
+A condition names an event kind, then field tests, with the names `gridcheck watch --json` writes:
 
 ```
 ARRIVE who=npc count>=2
@@ -607,18 +607,18 @@ or auto mode):
   without `--reuse`, from a fresh boot.
 - A server is reused only when a `--reuse` run left it up, on the scenario's recipe world, with
   the same `up` options and a world that is current with its recipe. Otherwise the run stops it
-  and boots. A server you started yourself is never reset. `e2e down` stops a reused server.
+  and boots. A server you started yourself is never reset. `gridcheck down` stops a reused server.
 
 Boot time itself is the server's own work. On stock, about 5 s of it validates the content
 packs' hashes and 2.5 s builds the dungeon cache. Node's compile cache (`NODE_COMPILE_CACHE`)
 didn't shorten it.
 
-`_local/e2e/runs/<id>/` then holds:
+`_local/gridcheck/runs/<id>/` then holds:
 
 - `report.md`: the verdict, a table of expected against observed, the stop conditions and which
   one fired, the tactical frames, the setup and `during` steps with their replies, and every
   timeline line. Each observed cell is the first matching line and its time.
-- `timeline.jsonl`: every event, as `e2e watch` writes it, plus the runner's `STEP` and `STOP`,
+- `timeline.jsonl`: every event, as `gridcheck watch` writes it, plus the runner's `STEP` and `STOP`,
   and the `POS` samples the frames are drawn from.
 - `frames/*.svg`: the tactical frames, below.
 - `result.json`: the same verdict for scripts, with the frames and the commit the run ran on.
@@ -632,7 +632,7 @@ didn't shorten it.
 
 ### Tactical frames
 
-`e2e run` also draws `frames/*.svg` in the run dir: a top-down view of the grid at each key event.
+`gridcheck run` also draws `frames/*.svg` in the run dir: a top-down view of the grid at each key event.
 
 - **When.** The first `ARRIVE` of each group, the first `TARGET` lock on self, each
   `DESTROYED`, and the stop condition. Balls in no group (a `/npc` spawn, CONCORD) landing in one
@@ -653,7 +653,7 @@ didn't shorten it.
   10 s in space. Each lists up to 150 balls within 1,000 km, with position, mode, target, locks,
   group and the plugins' frame fields. Colours are the core's (self, CONCORD, players) and the
   plugins', then one per group. They go to `timeline.jsonl` only: they are not printed, matched or
-  listed in the report. A plain `e2e watch` writes none unless it has `--positions`.
+  listed in the report. A plain `gridcheck watch` writes none unless it has `--positions`.
 - **In the report.** A "Tactical frames" table links each frame with its time, reason and event
   line, and the stop frame is embedded below it. The GUI's Runs tab shows them too.
 
@@ -679,7 +679,7 @@ A scenario is the final check for a feature you built: it starts the feature the
 would, and states what a person watching the grid should see.
 
 1. **Start from a world** where the feature can happen: `starter`, a recipe of your own, or a
-   saved world. `e2e scenario new <name>` writes a draft that checks out as it stands, and
+   saved world. `gridcheck scenario new <name>` writes a draft that checks out as it stands, and
    `--from <scenario>` copies one that is close to what you need instead.
 2. **Set the feature off in setup**, with a slash command, a teleport, `/npc`, a player action or
    a plugin's step. If nothing reaches your feature on demand, add a slash command or a plugin
@@ -694,26 +694,26 @@ would, and states what a person watching the grid should see.
 4. **Write each expectation as one thing a reviewer would check**, with a `note` saying why it
    matters. Include the steps on the way, not only the outcome, so a failed run shows where the
    behaviour stopped. Add `"no DIVERGE reason=server-only"` when what the client receives matters.
-5. **Find field names** with `e2e_watch { json: true }` or `e2e_grid { json: true }`, or name a
+5. **Find field names** with `watch { json: true }` or `grid { json: true }`, or name a
    field and let the check list the kind's fields.
 6. **Check, then run.** `--check` (or `check: true`) costs nothing. Once the run has finished, read
    the observed column: a met expectation whose first match is the wrong event means the condition
    is too loose. Tighten it with `$name`.
 7. **Judge the feature from the report.** A missing expectation can be a bug in the feature or a
    wrong scenario, and the timeline shows which.
-8. **Commit the scenario with the feature** in the tree's `tools/e2e-scenarios/` (`save: true`
-   from MCP), so a reviewer can run it again. Don't save into `tools/evejs-e2e/`: that folder is
+8. **Commit the scenario with the feature** in the tree's `tools/gridcheck-scenarios/` (`save: true`
+   from MCP), so a reviewer can run it again. Don't save into `tools/gridcheck/`: that folder is
    vendored, and `vendor check` fails on an edited copy.
 
 ### Citing a run in a PR
 
 `report.md` is the evidence. A PR description should carry its verdict, its "Expected against
 observed" table and its frames, and name the run ID, the scenario file and the commit the run
-ran on. `e2e run` records the commit (`git rev-parse HEAD`) in `result.json` and in the report's
+ran on. `gridcheck run` records the commit (`git rev-parse HEAD`) in `result.json` and in the report's
 table, marked "plus uncommitted changes" when the tree had any, untracked files included. Evidence
 from a dirty tree is weaker, so commit first and run again before citing.
 
-`e2e_report { run, section: "pr" }` writes that markdown: the verdict, the table, the frames to
+`report { run, section: "pr" }` writes that markdown: the verdict, the table, the frames to
 attach and the command that reproduces the run. The run dir is under `_local/`, which isn't
 committed, so don't link into it; attach the SVGs, or PNGs rendered from them with headless
 Chrome: `chrome --headless=new --screenshot=frame.png --window-size=1100,760 file:///<path>.svg`.
@@ -726,13 +726,13 @@ How the server copes with a load. Take a baseline, add the load, and compare the
 before and after. The space runtime ticks every 100 ms, so a tick has 100 ms of budget.
 
 ```bash
-node tools/evejs-e2e/bin/e2e.js up --world starter --profile   # boot with the tick profiler
-node tools/evejs-e2e/bin/e2e.js login
-node tools/evejs-e2e/bin/e2e.js undock
-node tools/evejs-e2e/bin/e2e.js perf --for 10                  # the baseline
-node tools/evejs-e2e/bin/e2e.js slash "/npctest2 20"           # 20 NPCs fighting each other
-node tools/evejs-e2e/bin/e2e.js perf --for 30                  # the load
-node tools/evejs-e2e/bin/e2e.js run perf-npc-load              # all of that, with a report
+node tools/gridcheck/bin/gridcheck.js up --world starter --profile   # boot with the tick profiler
+node tools/gridcheck/bin/gridcheck.js login
+node tools/gridcheck/bin/gridcheck.js undock
+node tools/gridcheck/bin/gridcheck.js perf --for 10                  # the baseline
+node tools/gridcheck/bin/gridcheck.js slash "/npctest2 20"           # 20 NPCs fighting each other
+node tools/gridcheck/bin/gridcheck.js perf --for 30                  # the load
+node tools/gridcheck/bin/gridcheck.js run perf-npc-load              # all of that, with a report
 ```
 
 `/npctest2 20` spawns 20 NPCs that fight each other and leave your ship alone. `/npc 20` spawns 20
@@ -765,7 +765,7 @@ tick profiler: 5 window(s), 250 ticks, 15.6 ms/tick in all
   ring (`bridge/perf.js`), so the figures cost the server nothing it doesn't already spend. Stock
   EveJS keeps the ring on a runtime object it doesn't export. The bridge finds it with a one-shot
   wrapper on the runtime's `tick()`, which the first tick removes.
-- **The breakdown needs the tick profiler.** `e2e up --profile` sets `EVEJS_TICK_PROFILE=1` and
+- **The breakdown needs the tick profiler.** `gridcheck up --profile` sets `EVEJS_TICK_PROFILE=1` and
   `EVEJS_TICK_PROFILE_EVERY` (`--profile-every`, default 50 ticks, 5 s). The tree's own profiler
   (`space/tickProfiler.js`) then logs a `[TickProfile]` block each window. The bridge parses each
   one as it is logged, and the line still reaches the log. A `↳` row is inside the row above it, so
@@ -778,17 +778,17 @@ tick profiler: 5 window(s), 250 ticks, 15.6 ms/tick in all
 - **The world.** How many scenes ticked, their entities, the lowest time dilation, and the three
   busiest scenes by work per tick.
 
-`e2e status` says whether the running server has the profiler. In auto or attach mode, a server you
+`gridcheck status` says whether the running server has the profiler. In auto or attach mode, a server you
 started has it only if you set `EVEJS_TICK_PROFILE=1`. Without it you still get every tick figure.
 
 ### Commands
 
 | Command | Does |
 | --- | --- |
-| `e2e perf [--for 10] [--json]` | Samples that many seconds (1 to 600), then prints the ticks, the process, the busiest scenes and the profiler's sections merged over the windows that ended in the sample. Needs a server up, not a character. |
-| `e2e perf --now` | The ticks the runtime holds now, about the last 12 s, at once. No CPU or loop delay, which need a window to measure over. |
-| `e2e up --profile [--profile-every 50]` | Boots with the tick profiler. |
-| `e2e watch --perf [--perf-every 5]` | Adds a `PERF` line per window and a `PROFILE` line per profiler window to the timeline. |
+| `gridcheck perf [--for 10] [--json]` | Samples that many seconds (1 to 600), then prints the ticks, the process, the busiest scenes and the profiler's sections merged over the windows that ended in the sample. Needs a server up, not a character. |
+| `gridcheck perf --now` | The ticks the runtime holds now, about the last 12 s, at once. No CPU or loop delay, which need a window to measure over. |
+| `gridcheck up --profile [--profile-every 50]` | Boots with the tick profiler. |
+| `gridcheck watch --perf [--perf-every 5]` | Adds a `PERF` line per window and a `PROFILE` line per profiler window to the timeline. |
 
 The bridge routes are `GET /perf` and `POST /perf { seconds }`, and `perfEverySeconds` on
 `POST /watch`. At most four samples run at once.
@@ -832,16 +832,16 @@ against several runs.
 ## Viewer
 
 A small page that draws a run's tactical view in a browser, as a replay or live while the run
-writes it. Any run with a `timeline.jsonl` works. An `e2e run`, or an `e2e watch --positions`,
+writes it. Any run with a `timeline.jsonl` works. An `gridcheck run`, or an `gridcheck watch --positions`,
 also has the positions the map needs. The GUI's Runs tab opens it for any run.
 
 ```bash
-node tools/evejs-e2e/bin/e2e.js view                          # the newest run
-node tools/evejs-e2e/bin/e2e.js view <run>                    # a given run
-node tools/evejs-e2e/bin/e2e.js view --serve [--port 35099]   # serve it from the CLI, even with a server up
+node tools/gridcheck/bin/gridcheck.js view                          # the newest run
+node tools/gridcheck/bin/gridcheck.js view <run>                    # a given run
+node tools/gridcheck/bin/gridcheck.js view --serve [--port 35099]   # serve it from the CLI, even with a server up
 ```
 
-`e2e view` prints a URL such as `http://127.0.0.1:35027/viewer#token=<token>&run=<run>`. While the
+`gridcheck view` prints a URL such as `http://127.0.0.1:35027/viewer#token=<token>&run=<run>`. While the
 tree's server is up, its agent bridge serves the page. Otherwise the CLI serves the same page on a
 free loopback port until Ctrl-C.
 
@@ -876,7 +876,7 @@ To look at a moment as an image, render the URL with headless Chrome:
 
 ## Server log
 
-`e2e log` prints the tail of the server's log (`_local/logs/server.log` by default, or what the
+`gridcheck log` prints the tail of the server's log (`_local/logs/server.log` by default, or what the
 config and the handshake name). In a tree whose logger tags lines with `[pid N]` it keeps only the
 running server's lines; stock's logger doesn't, so every line stays. `--grep <regex>` filters
 case-insensitively, `--lines N` sets the count, and `--any-pid` keeps every process.
@@ -886,9 +886,9 @@ case-insensitively, `--lines N` sets the count, and `--any-pid` keeps every proc
 - **"Session has been unable to receive destiny updates for 15s and is being recovered"** and
   **"Beyonce bind wait timed out … forcing initial ballpark bootstrap"**. The server holds a
   session's SetState until it binds the remote park, as a real client does straight after undock
-  or a jump. `e2e undock`, `e2e teleport` and any `e2e slash` that changes system bind it, so these
+  or a jump. `gridcheck undock`, `gridcheck teleport` and any `gridcheck slash` that changes system bind it, so these
   lines mean something else entered space unbound, e.g. a gateway call made directly.
-- **"done (this tree doesn't say whether it refused)"** after `e2e slash`. Stock's slash commands
+- **"done (this tree doesn't say whether it refused)"** after `gridcheck slash`. Stock's slash commands
   report no outcome. The `slash-success` patch makes the commands the tool drives report one.
 - **Protection.** Undock sets undock invulnerability; the grid header shows it. NPCs may ignore a
   protected ship, so wait out any countdown first.

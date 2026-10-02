@@ -1,6 +1,6 @@
 "use strict";
 
-// `e2e warp`: durations, the economy report and the fidelity comparison. Pure
+// `gridcheck warp`: durations, the economy report and the fidelity comparison. Pure
 // functions over what the agent bridge's /economy and /warp return, so they
 // are testable from literals.
 

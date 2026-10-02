@@ -2,7 +2,7 @@
 
 // The human viewer the agent bridge serves (agentBridgeViewer.js and its page
 // in viewer/), through the real HTTP layer: the page loads without a token,
-// run data needs one, and a run ID can't reach outside _local/e2e/runs/. The
+// run data needs one, and a run ID can't reach outside _local/gridcheck/runs/. The
 // live path is in docs/GUIDE.md "Viewer".
 
 const test = require("node:test");

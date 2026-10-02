@@ -4,8 +4,8 @@
 // payload through these, as they would through the tree's own modules:
 //
 //   npm test                    replays test/fixtures/destiny.json; no tree
-//   EVEJS_E2E_FIXTURES=record   calls the real encoders of EVEJS_E2E_TREE and
-//                               writes each result to EVEJS_E2E_FIXTURES_OUT
+//   GRIDCHECK_FIXTURES=record   calls the real encoders of GRIDCHECK_TREE and
+//                               writes each result to GRIDCHECK_FIXTURES_OUT
 //                               when the process exits
 //
 // `npm run fixtures:capture` records this way, and the compatibility script
@@ -97,14 +97,14 @@ function readRecording(file) {
   }
 }
 
-// -> the encoder calls, recorded or replayed per EVEJS_E2E_FIXTURES.
+// -> the encoder calls, recorded or replayed per GRIDCHECK_FIXTURES.
 function encoders({ env = process.env, fixture = DESTINY_FIXTURE } = {}) {
-  const recording = String(env.EVEJS_E2E_FIXTURES || "").trim() === "record";
+  const recording = String(env.GRIDCHECK_FIXTURES || "").trim() === "record";
   const names = ["ballState", "destinyUpdate", "setState", "addBalls", "action", "packaged", "marshalDecode"];
   if (recording) {
-    const tree = String(env.EVEJS_E2E_TREE || "").trim();
-    const out = String(env.EVEJS_E2E_FIXTURES_OUT || "").trim() || fixture;
-    if (!tree) throw new Error("EVEJS_E2E_FIXTURES=record needs EVEJS_E2E_TREE");
+    const tree = String(env.GRIDCHECK_TREE || "").trim();
+    const out = String(env.GRIDCHECK_FIXTURES_OUT || "").trim() || fixture;
+    if (!tree) throw new Error("GRIDCHECK_FIXTURES=record needs GRIDCHECK_TREE");
     const live = liveCalls((relativePath) => require(path.join(path.resolve(tree), "server", "src", relativePath)));
     const recorded = {};
     process.once("exit", () => {

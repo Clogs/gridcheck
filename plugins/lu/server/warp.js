@@ -1,6 +1,6 @@
 "use strict";
 
-// What `e2e warp` and `e2e economy` read and drive: the Living Universe clock,
+// What `gridcheck warp` and `gridcheck economy` read and drive: the Living Universe clock,
 // the warp driver, and the economy telemetry a report is built from. Every
 // engine reach is a seam passed in, so the projections are testable from
 // literals.

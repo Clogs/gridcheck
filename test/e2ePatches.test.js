@@ -65,13 +65,25 @@ test("apply inserts each hunk with its anchor line's ending, and revert gives th
   assert.deepEqual(applied.files, ["a.js"]);
   assert.ok(applied.notes.some((note) => /isn't a git checkout/.test(note)));
   const text = bytes(root, "a.js").toString("utf8");
-  assert.ok(text.includes("  const port = 1;\r\n  // evejs-e2e:patch demo v2\r\n  if (options.port) return options.port;\r\n  return port;\n"), text);
-  assert.ok(text.includes("\r\n// evejs-e2e:patch demo v2\n// runs it\nfunction run(options = {}) {\n"), text);
+  assert.ok(text.includes("  const port = 1;\r\n  // gridcheck:patch demo v2\r\n  if (options.port) return options.port;\r\n  return port;\n"), text);
+  assert.ok(text.includes("\r\n// gridcheck:patch demo v2\n// runs it\nfunction run(options = {}) {\n"), text);
   assert.equal(patchState(DEMO, createReader(root.serverRoot)).state, "applied");
   assert.equal(patchState(DEMO, createReader(root.serverRoot)).version, 2);
 
   changePatch("revert", "demo", { ...root, patches: [DEMO] });
   assert.ok(bytes(root, "a.js").equals(before), "revert restores every byte, line endings included");
+});
+
+test("a patch applied before the rename, with evejs-e2e markers, reads as applied and reverts byte for byte", (t) => {
+  const root = tree(t, { "a.js": MIXED });
+  const before = bytes(root, "a.js");
+  changePatch("apply", "demo", { ...root, patches: [DEMO], dirtyCheck: NO_GIT });
+  const file = path.join(root.serverRoot, "src", "a.js");
+  fs.writeFileSync(file, fs.readFileSync(file, "utf8").split("gridcheck:patch").join("evejs-e2e:patch"));
+  assert.equal(patchState(DEMO, createReader(root.serverRoot)).state, "applied");
+  assert.match(planApply(DEMO, createReader(root.serverRoot)).problems.join("\n"), /already has this patch's marker/);
+  changePatch("revert", "demo", { ...root, patches: [DEMO], dirtyCheck: NO_GIT });
+  assert.ok(bytes(root, "a.js").equals(before), "the old markers come out too");
 });
 
 test("a missing or repeated anchor refuses the whole patch and writes nothing", (t) => {
@@ -104,7 +116,7 @@ test("apply refuses an applied, partly applied or equivalent patch, a running se
     dirtyCheck: () => ({ git: true, dirty: ["server/src/a.js"] }) });
   assert.equal(dryRun.dryRun, true, "a dry run previews even with the server up");
   assert.ok(dryRun.preview.some((line) => /a\.js:5 inserts 2 lines before "return port;" \(CRLF\)/.test(line)), dryRun.preview.join("\n"));
-  assert.deepEqual(dryRun.blockers, ["up. Stop it first (e2e down)", "uncommitted changes in server/src/a.js. Commit or discard them first"],
+  assert.deepEqual(dryRun.blockers, ["up. Stop it first (gridcheck down)", "uncommitted changes in server/src/a.js. Commit or discard them first"],
     "and says what would refuse the real change");
   assert.equal(bytes(root, "a.js").toString("utf8"), MIXED, "a dry run writes nothing");
 
@@ -116,7 +128,7 @@ test("apply refuses an applied, partly applied or equivalent patch, a running se
     /already has equivalent code/);
   assert.equal(patchState(DEMO, createReader(equivalent.serverRoot)).state, "detected");
 
-  const partial = tree(t, { "a.js": MIXED.replace("function run", "// evejs-e2e:patch demo v2\n// runs it\nfunction run") });
+  const partial = tree(t, { "a.js": MIXED.replace("function run", "// gridcheck:patch demo v2\n// runs it\nfunction run") });
   assert.equal(patchState(DEMO, createReader(partial.serverRoot)).state, "partial");
   assert.throws(() => changePatch("apply", "demo", { ...partial, patches: [DEMO], dirtyCheck: NO_GIT }), /partly applied/);
 });
@@ -190,7 +202,7 @@ test("each shipped patch round-trips on a copy of the tree's files", REAL_TREE ?
       // Every inserted line ends as the lines around it do.
       const lines = splitLines(text);
       lines.forEach((line, index) => {
-        if (!line.text.includes("evejs-e2e:patch")) return;
+        if (!line.text.includes("gridcheck:patch")) return;
         assert.equal(line.eol, lines[index + 1].eol, `${patch.id} ${file}:${index + 1}`);
       });
     }

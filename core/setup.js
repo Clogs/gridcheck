@@ -1,6 +1,6 @@
 "use strict";
 
-// e2e setup --tree <path>: everything a tree needs before its first run, done
+// gridcheck setup --tree <path>: everything a tree needs before its first run, done
 // as the commands a person would type, each printed before it runs: install
 // the copy, write the config, connect the agents, apply the patches, build the
 // starter world, and run smoke-undock. A step already done is skipped, so
@@ -19,11 +19,11 @@ const { enclosingTree } = require("./launcher");
 const { prerequisites, serverUpReason } = require("./treeState");
 
 const OWN_ROOT = path.resolve(__dirname, "..");
-const OWN_CLI = path.join(OWN_ROOT, "bin", "e2e.js");
+const OWN_CLI = path.join(OWN_ROOT, "bin", "gridcheck.js");
 const SKIPPABLE = Object.freeze(["agents", "patches", "world", "smoke"]);
 const STARTER = "starter";
 const SMOKE = "smoke-undock";
-const USAGE = "usage: e2e setup --tree <path> [--mode auto|attach|managed] [--agents claude,codex,cli|none] " +
+const USAGE = "usage: gridcheck setup --tree <path> [--mode auto|attach|managed] [--agents claude,codex,cli|none] " +
   "[--skip agents,patches,world,smoke] [--force] [--dry-run]";
 
 class SetupError extends Error {}
@@ -119,8 +119,8 @@ function shown(tree, args) {
 async function runSetup(options, io = defaultIO(), context = ownContext()) {
   const { tree, dryRun } = options;
   const say = io.out;
-  const treeCli = path.join(tree, vendor.VENDOR_DIR, "bin", "e2e.js");
-  const env = { EVEJS_E2E_TREE: tree };
+  const treeCli = path.join(tree, vendor.VENDOR_DIR, "bin", "gridcheck.js");
+  const env = { GRIDCHECK_TREE: tree };
   const label = slashed(tree);
 
   if (context.vendored && !samePath(context.tree, tree)) {
@@ -134,7 +134,7 @@ async function runSetup(options, io = defaultIO(), context = ownContext()) {
   }
   const config = treeConfig.loadTreeConfig(tree);
   const up = serverUpReason(tree, config);
-  if (up) blockers.push(`${up}. Stop it first: \`e2e down\` if e2e started it, or close the server you started.`);
+  if (up) blockers.push(`${up}. Stop it first: \`gridcheck down\` if gridcheck started it, or close the server you started.`);
   for (const row of prerequisites(tree, config).filter((one) => !one.ok)) blockers.push(`${row.name} missing (${row.path}): ${row.fix}.`);
   if (!context.vendored && !context.head) blockers.push(`${slashed(OWN_ROOT)} is not a git checkout, so it can't install itself; clone the tool and run setup from there.`);
 
@@ -227,7 +227,7 @@ async function runSetup(options, io = defaultIO(), context = ownContext()) {
       rows = null;
     }
     if (!Array.isArray(rows)) {
-      patchPlan = { skip: "the copy's `patch status --json` didn't answer; `e2e patch status` shows why" };
+      patchPlan = { skip: "the copy's `patch status --json` didn't answer; `gridcheck patch status` shows why" };
     } else {
       const partial = rows.filter((row) => row.state === "partial");
       const absent = rows.filter((row) => row.state === "absent" && row.applies !== false).map((row) => row.id);
@@ -235,7 +235,7 @@ async function runSetup(options, io = defaultIO(), context = ownContext()) {
         say("");
         say(`[4/${total}] Apply the optional patches`);
         say(`setup stopped: ${partial.map((row) => row.id).join(", ")} ${partial.length === 1 ? "is" : "are"} partly applied. ` +
-          `\`e2e patch revert ${partial[0].id}\` puts the file back, then run setup again.`);
+          `\`gridcheck patch revert ${partial[0].id}\` puts the file back, then run setup again.`);
         return 1;
       }
       patchPlan = absent.length ? { args: dry([treeCli, "patch", "apply", ...absent]) }
@@ -267,7 +267,7 @@ async function runSetup(options, io = defaultIO(), context = ownContext()) {
 
   let smokePlan;
   if (options.skip.has("smoke")) smokePlan = { skip: "--skip smoke" };
-  else if (attach) smokePlan = { skip: `attach mode: start the server with EVEJS_AGENT_BRIDGE=1 set, then \`e2e run ${SMOKE}\`` };
+  else if (attach) smokePlan = { skip: `attach mode: start the server with EVEJS_AGENT_BRIDGE=1 set, then \`gridcheck run ${SMOKE}\`` };
   else if (dryRun) smokePlan = { args: [treeCli, "run", SMOKE], onlyShow: "boots a fresh world, undocks and reads the grid: about 50 s" };
   else smokePlan = { args: [treeCli, "run", SMOKE] };
   if (!await step(6, "Run the smoke test", smokePlan)) return 1;
@@ -278,9 +278,9 @@ async function runSetup(options, io = defaultIO(), context = ownContext()) {
     return 0;
   }
   say(`ready: ${label} can run tests.`);
-  say(`  e2e --tree ${quote(label)} run loadout-npc-fight     # a fitted ship fights two rats`);
-  say(`  e2e gui --tree ${quote(label)} --open                # replay runs in the browser`);
-  say("  Agents: docs/CLI.md (shell) or the e2e MCP tools; `e2e primer` prints the scenario format.");
+  say(`  gridcheck --tree ${quote(label)} run loadout-npc-fight     # a fitted ship fights two rats`);
+  say(`  gridcheck gui --tree ${quote(label)} --open                # replay runs in the browser`);
+  say("  Agents: docs/CLI.md (shell) or the gridcheck MCP tools; `gridcheck primer` prints the scenario format.");
   return 0;
 }
 
@@ -290,7 +290,7 @@ async function main(argv, io = defaultIO(), context = ownContext()) {
     options = parseSetupArgs(argv, { defaultTree: context.vendored ? context.tree : null });
   } catch (error) {
     if (!(error instanceof SetupError)) throw error;
-    io.out(`e2e: ${error.message}`);
+    io.out(`gridcheck: ${error.message}`);
     return 2;
   }
   return runSetup(options, io, context);

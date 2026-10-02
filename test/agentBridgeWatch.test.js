@@ -1,6 +1,6 @@
 "use strict";
 
-// `e2e watch`, server side (bridge/watch.js, and the Living Universe plugin's
+// `gridcheck watch`, server side (bridge/watch.js, and the Living Universe plugin's
 // join and off-grid tracker): the grid differ, the LU join, the off-grid
 // tracker, the plugin hooks, the /watch route and the NDJSON stream, each from
 // injected seams so no booted server is needed.

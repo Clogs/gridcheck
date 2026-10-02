@@ -21,7 +21,7 @@ function optional(load) {
   }
 }
 
-// `e2e warp`: the Living Universe clock and its step driver. The host is
+// `gridcheck warp`: the Living Universe clock and its step driver. The host is
 // resolved on first use, because the space tick creates it with the profiler's
 // section hook and must be the first to ask.
 function buildWarp(engine, stock, log) {

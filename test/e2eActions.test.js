@@ -1,6 +1,6 @@
 "use strict";
 
-// Player actions for `e2e act` and scenario steps (core/actions.js):
+// Player actions for `gridcheck act` and scenario steps (core/actions.js):
 // picking a target and modules, and the gateway calls each action makes, with
 // the gateway faked. The live path is in docs/GUIDE.md "Player actions".
 
@@ -218,7 +218,7 @@ test("launchDrones counts what reached space, and engageDrones sends this ship's
   assert.strictEqual(none.ok, false);
 });
 
-test("e2e act arguments become an action, and a bad one is refused before any call", () => {
+test("gridcheck act arguments become an action, and a bad one is refused before any call", () => {
   assert.deepStrictEqual(actionFromArgs("orbit", ["nearest", "npc"], { range: "5km" }),
     { type: "orbit", target: "nearest npc", range: 5000 });
   assert.deepStrictEqual(actionFromArgs("activate", [], { target: "$m", once: true }),

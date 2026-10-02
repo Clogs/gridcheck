@@ -1,6 +1,6 @@
 "use strict";
 
-// `e2e run <scenario>` (core/scenario.js, core/conditions.js): the
+// `gridcheck run <scenario>` (core/scenario.js, core/conditions.js): the
 // condition language, scenario checks at load, the run with its server calls
 // faked, and the report. The live path is in docs/GUIDE.md
 // "Scenarios".
@@ -424,7 +424,7 @@ test("a run stops at its stop condition, flags the unmet expectation and keeps t
     "the grace period's ARRIVE and the runner's own lines are kept");
   assert.deepStrictEqual(result.events, ops.timeline, "the report reads the same events the timeline holds");
 
-  const report = renderReport(result, { runID: "r1", scenario, scenarioFile: "tools/evejs-e2e/scenarios/t.json" });
+  const report = renderReport(result, { runID: "r1", scenario, scenarioFile: "tools/gridcheck/scenarios/t.json" });
   assert.match(report, /^# Scenario t: FAILED/);
   assert.match(report, /1 of 2 expectations met\. stop condition `HERE` met at t\+00:00:00, then watched 0\.\d s of 0\.2 s grace \(grace ran out\)\./,
     "an unmet expectation keeps grace running to its end");

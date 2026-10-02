@@ -1,6 +1,6 @@
 "use strict";
 
-// evejs-e2e: the pure parts of the headless observer CLI -- argument parsing,
+// Gridcheck: the pure parts of the headless observer CLI -- argument parsing,
 // log filtering and the grid table. The live path is checked by
 // docs/GUIDE.md.
 
@@ -9,7 +9,7 @@ const assert = require("node:assert");
 const { needsPlugin } = require("./tree");
 
 const { formatDistance, formatGrid, formatClock } = require("../core/format");
-const { CORE_COMMANDS, helpText, parseArgs, selectLogLines, systemsSeen, upKeyFor, upOptions } = require("../bin/e2e");
+const { CORE_COMMANDS, helpText, parseArgs, selectLogLines, systemsSeen, upKeyFor, upOptions } = require("../bin/gridcheck");
 const { selectScouts } = require("../plugins/lu/tool/commands");
 
 // These read the lu plugin through the default registry, so they need a tree
@@ -164,16 +164,16 @@ test("a plugin's up flags become the server's variables and the world restore's 
 
 test("help lists the core commands, then each plugin's, and names the active plugins", LU, () => {
   const help = helpText();
-  assert.match(help, /e2e teleport <system name\|ID>/);
-  assert.match(help, /e2e trigger fleet <family>/);
+  assert.match(help, /gridcheck teleport <system name\|ID>/);
+  assert.match(help, /gridcheck trigger fleet <family>/);
   assert.match(help, /plugins {2}lu active/);
-  assert.ok(help.indexOf("e2e help") < help.indexOf("e2e trigger"), "core commands first");
+  assert.ok(help.indexOf("gridcheck help") < help.indexOf("gridcheck trigger"), "core commands first");
   assert.ok(CORE_COMMANDS.trigger === undefined, "trigger is the plugin's");
 });
 
 test("trigger arguments become bridge bodies; a fleet goes to your grid unless --to names a system", LU, () => {
   const ctx = { characterID: 7, resolveSystemID: (text) => (text === "Amamake" ? 30002537 : Number(text)) };
-  const { parseArgs } = require("../bin/e2e");
+  const { parseArgs } = require("../bin/gridcheck");
   const body = (line) => {
     const { positionals, flags } = parseArgs(["trigger", ...line]);
     return triggerRequest(positionals[0], positionals.slice(1), flags, ctx);
@@ -209,26 +209,26 @@ test("help --json: every core command has a summary, and every docs entry names 
   assert.deepStrictEqual(usageParts("watch", ["watch [--for 600]", "      [--perf]"]), ["watch [--for 600] [--perf]"]);
   const up = catalog.commands.find((command) => command.name === "up");
   assert.strictEqual(up.managed, true);
-  assert.strictEqual(up.mcp, "e2e_up");
+  assert.strictEqual(up.mcp, "up");
   assert.ok(up.flags.some((flag) => flag.flag === "--timeout" && flag.default === "600 s"));
 
   const withPlugin = buildCatalog({ core: { help: CORE_COMMANDS.help },
     plugins: { scouts: { usage: ["scouts [--all]"], summary: "Lists them.", needs: "up", plugin: "lu" } },
     handlers: { teleport: [{ flags: ["flight"], usage: ["teleport <system> --flight <id>"], summary: "Pins a flight.", plugin: "lu" }] },
-    mcpTools: [{ name: "e2e_status", description: "Where things stand. Call this first." }] });
+    mcpTools: [{ name: "status", description: "Where things stand. Call this first." }] });
   assert.deepStrictEqual(withPlugin.groups.map((group) => group.id), ["tool", "plugin:lu"]);
   assert.deepStrictEqual(withPlugin.commands.filter((command) => command.plugin).map((command) => [command.name, command.needs || null]),
     [["scouts", "up"], ["teleport --flight", null]]);
-  assert.deepStrictEqual(withPlugin.mcpTools, [{ name: "e2e_status", description: "Where things stand." }]);
+  assert.deepStrictEqual(withPlugin.mcpTools, [{ name: "status", description: "Where things stand." }]);
 });
 
 test("an unknown command or scenario names the closest ones and how to list them", () => {
   const { spawnSync } = require("node:child_process");
   const path = require("node:path");
-  const cli = path.join(__dirname, "..", "bin", "e2e.js");
+  const cli = path.join(__dirname, "..", "bin", "gridcheck.js");
   const typo = spawnSync(process.execPath, [cli, "stauts"], { encoding: "utf8" });
   assert.strictEqual(typo.status, 1);
-  assert.match(typo.stderr, /unknown command: stauts\. Did you mean .*`e2e status`.*`e2e help` lists them all/);
+  assert.match(typo.stderr, /unknown command: stauts\. Did you mean .*`gridcheck status`.*`gridcheck help` lists them all/);
   const scenario = spawnSync(process.execPath, [cli, "run", "smoke-undok", "--check"], { encoding: "utf8" });
-  assert.match(scenario.stderr, /no such scenario file\. Did you mean `smoke-undock`\? `e2e run` lists the scenarios/);
+  assert.match(scenario.stderr, /no such scenario file\. Did you mean `smoke-undock`\? `gridcheck run` lists the scenarios/);
 });

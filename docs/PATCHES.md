@@ -7,18 +7,18 @@ works without them, with less.
 | --- | --- | --- |
 | `xmpp-port` | `EVEJS_XMPP_SERVER_PORT` moves the XMPP chat listener | Two trees both want port 5222, so only one server runs at a time |
 | `last-decision` | each NPC controller records the branch its last think took | grid rows carry no `decision`, and a watch reports no `DECISION` events |
-| `slash-success` | the slash commands the tool drives say whether they refused | `e2e slash` can't tell a refusal from a success, and says so |
+| `slash-success` | the slash commands the tool drives say whether they refused | `gridcheck slash` can't tell a refusal from a success, and says so |
 
-The LU fork has its own code for all three, so `e2e doctor` and `e2e patch status` show them there
+The LU fork has its own code for all three, so `gridcheck doctor` and `gridcheck patch status` show them there
 as `detected`, and apply refuses them.
 
 ## Commands
 
 ```
-node tools/evejs-e2e/bin/e2e.js patch list                  # each patch, its files and hunks
-node tools/evejs-e2e/bin/e2e.js patch status [<id>]         # applied, detected, absent; whether apply would work
-node tools/evejs-e2e/bin/e2e.js patch apply <id>... [--dry-run]
-node tools/evejs-e2e/bin/e2e.js patch revert <id>... [--dry-run]
+node tools/gridcheck/bin/gridcheck.js patch list                  # each patch, its files and hunks
+node tools/gridcheck/bin/gridcheck.js patch status [<id>]         # applied, detected, absent; whether apply would work
+node tools/gridcheck/bin/gridcheck.js patch apply <id>... [--dry-run]
+node tools/gridcheck/bin/gridcheck.js patch revert <id>... [--dry-run]
 ```
 
 `--dry-run` prints each insertion: the file and line, the line it goes beside, the line ending it
@@ -30,13 +30,13 @@ Apply refuses when:
 - the patch is applied already, partly applied, or the tree has equivalent code without the marker;
 - a target file has uncommitted changes. In a tree that isn't a git checkout, such as an unpacked
   zip, this can't be checked, and apply says so;
-- the tree's server is up. The tool sees a server through its bridge handshake or `e2e up`'s
+- the tree's server is up. The tool sees a server through its bridge handshake or `gridcheck up`'s
   record, so a server started without `EVEJS_AGENT_BRIDGE=1` isn't seen.
 
 A refusal writes nothing. A patch that changes several files writes all of them or none.
 
 After a change, the tool probes the tree's listeners again and rewrites the `listeners` in
-`e2e.config.json` when one changed. That happens with `xmpp-port`, which makes the chat listener
+`gridcheck.config.json` when one changed. That happens with `xmpp-port`, which makes the chat listener
 movable.
 
 ## How a patch is written
@@ -54,7 +54,7 @@ file, once:
 }
 ```
 
-- **Marker.** Every hunk is written as a marker line, `// evejs-e2e:patch <id> v<n>`, followed by
+- **Marker.** Every hunk is written as a marker line, `// gridcheck:patch <id> v<n>`, followed by
   its lines. `doctor` reads a patch as applied by its markers, and as partial when only some are in
   place.
 - **Line endings.** Each inserted line ends as its anchor line does, so a file that mixes CRLF and
@@ -73,7 +73,7 @@ file, once:
 
 The patch adds one hunk in `edge/chat/chatEdgeRuntime.js`. When the caller passes no port and
 `EVEJS_XMPP_SERVER_PORT` is set, the runtime's `options.port` takes the variable. The chat worker
-binds whatever port the runtime hands it. `e2e up` sets the variable to the tree's own port, so with
+binds whatever port the runtime hands it. `gridcheck up` sets the variable to the tree's own port, so with
 the patch on both, two stock trees run at once.
 
 ### `last-decision`
@@ -99,7 +99,7 @@ controller. The run that measured this cost is in the plan's run log.
 ### `slash-success`
 
 Stock's slash commands answer `{ handled, message }` and never say whether they did what was asked.
-Every caller in stock ignores `success`. Without the patch, `e2e slash` reports `done (this tree
+Every caller in stock ignores `success`. Without the patch, `gridcheck slash` reports `done (this tree
 doesn't say whether it refused)` and exits 0. The bridge's `/slash` reports `success: null`.
 
 The patch doesn't convert every refusal in stock. That would take hundreds of hunks. It covers the

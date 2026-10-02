@@ -22,17 +22,17 @@
 //   ids(event)   -> [id]                    IDs a log line may name, so the watch keeps it
 //   costText(costs) -> text                 the plugin's share of a watch's END line
 //   steps        { name: step }             scenario steps (scenario.js)
-//   commands     { name: command }          CLI subcommands (bin/e2e.js)
+//   commands     { name: command }          CLI subcommands (bin/gridcheck.js)
 //   handles      { command: { flags, run } } core commands the plugin takes over for some flags
-//   mcpTools     [tool]                     MCP tools, named e2e_<plugin>_<name> (bin/mcp.js)
+//   mcpTools     [tool]                     MCP tools, named <plugin>_<name> (bin/mcp.js)
 //   primer       text                       appended to the MCP instructions
 //   colours      [{ match, colour, label }] frames and viewer, matched on the ball's plugin data
-//   upFlags      { key: flag }              `e2e up` options, also scenario `up` keys and e2e_up arguments
-//   upNote(values) -> text                  printed after `e2e up` with any of them set
+//   upFlags      { key: flag }              `gridcheck up` options, also scenario `up` keys and up arguments
+//   upNote(values) -> text                  printed after `gridcheck up` with any of them set
 //   listeners    { name: { offset, env, label } }   ports in the tree's block
 //   logTags      [tag]                      server log tags the watch keeps by default
 //   world        { onSave(ctx), onRestore(ctx) }    saved-world hooks (worlds.js)
-//   targetFields { term: field }            `e2e act` target terms read from the plugin's data
+//   targetFields { term: field }            `gridcheck act` target terms read from the plugin's data
 //
 // Each consumer documents the shape it reads.
 
@@ -41,11 +41,11 @@ const path = require("node:path");
 
 const API_VERSION = 1;
 const DEFAULT_PLUGINS_DIR = path.join(__dirname, "..", "plugins");
-// tools/evejs-e2e/core -> the tree the copy is vendored into. EVEJS_E2E_TREE
+// tools/gridcheck/core -> the tree the copy is vendored into. GRIDCHECK_TREE
 // names another tree, so this repo's tests and CLI can run against one (npm
 // test names test/fixtures/tree; npm run compat names real ones).
-const DEFAULT_TREE_ROOT = String(process.env.EVEJS_E2E_TREE || "").trim()
-  ? path.resolve(process.env.EVEJS_E2E_TREE.trim())
+const DEFAULT_TREE_ROOT = String(process.env.GRIDCHECK_TREE || "").trim()
+  ? path.resolve(process.env.GRIDCHECK_TREE.trim())
   : path.resolve(__dirname, "..", "..", "..");
 
 function errorText(error) {
@@ -134,7 +134,7 @@ const isObject = (value) => value !== null && typeof value === "object" && !Arra
 
 // The tool halves of the active plugins, merged. The first plugin to claim a
 // name keeps it; later claims are dropped with a warning. Core names are the
-// consumers' to protect (conditions.js, scenario.js, e2e.js, mcp.js).
+// consumers' to protect (conditions.js, scenario.js, gridcheck.js, mcp.js).
 function createToolRegistry(loaded = { active: [], skipped: [] }) {
   const registry = {
     plugins: [],
@@ -220,7 +220,7 @@ function createToolRegistry(loaded = { active: [], skipped: [] }) {
         warn(`plugin ${name}: an MCP tool needs a lower-case name and args(params)`);
         continue;
       }
-      registry.mcpTools.push({ ...mcpTool, plugin: name, name: `e2e_${name}_${mcpTool.name}` });
+      registry.mcpTools.push({ ...mcpTool, plugin: name, name: `${name}_${mcpTool.name}` });
     }
     if (typeof tool.primer === "string" && tool.primer.trim()) registry.primers.push({ plugin: name, text: tool.primer.trim() });
     for (const rule of tool.colours || []) {

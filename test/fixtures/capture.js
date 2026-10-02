@@ -10,7 +10,7 @@
 //                 undock, from the tree's running server
 //
 // live.json needs that server up with this checkout vendored into the tree
-// (the bridge's /capabilities): `e2e up --fresh` in managed mode, or the
+// (the bridge's /capabilities): `gridcheck up --fresh` in managed mode, or the
 // server started with EVEJS_AGENT_BRIDGE=1. The capture logs the test
 // character in and undocks it. --out writes somewhere else, which is how the
 // compatibility script compares a fresh capture with the committed one.
@@ -39,7 +39,7 @@ function readJSON(file) {
 // Runs the destiny tests against the tree's encoders and writes what they returned.
 function captureDestiny({ tree, out }) {
   const result = runTests({ tree, files: [DESTINY_TEST], stdio: "pipe",
-    extraEnv: { EVEJS_E2E_FIXTURES: "record", EVEJS_E2E_FIXTURES_OUT: out } });
+    extraEnv: { GRIDCHECK_FIXTURES: "record", GRIDCHECK_FIXTURES_OUT: out } });
   if (result.code !== 0 || !fs.existsSync(out)) {
     throw new CaptureError(`the destiny tests failed against ${tree}'s encoders:\n${(result.stdout + result.stderr).split(/\r?\n/)
       .filter((line) => /not ok|Error|expected|actual/.test(line)).slice(0, 20).join("\n")}`);
@@ -49,9 +49,9 @@ function captureDestiny({ tree, out }) {
 
 // The tree's own copy of the CLI, as a person would run it.
 function treeCli(tree) {
-  const vendored = path.join(tree, "tools", "evejs-e2e", "bin", "e2e.js");
+  const vendored = path.join(tree, "tools", "gridcheck", "bin", "gridcheck.js");
   return (args) => {
-    const env = { ...process.env, EVEJS_E2E_TREE: tree };
+    const env = { ...process.env, GRIDCHECK_TREE: tree };
     const result = spawnSync(process.execPath, [vendored, ...args], { cwd: tree, env, encoding: "utf8", timeout: 180_000,
       windowsHide: true });
     return { code: result.status, out: `${result.stdout || ""}${result.stderr || ""}`.trim() };
@@ -72,17 +72,17 @@ async function captureLive({ tree }) {
   const config = loadTreeConfig(tree);
   const handshake = readJSON(config.handshake);
   if (!handshake || !handshake.token) {
-    throw new CaptureError(`no live agent bridge in ${tree} (${config.handshake}). Start its server (e2e up --fresh, ` +
+    throw new CaptureError(`no live agent bridge in ${tree} (${config.handshake}). Start its server (gridcheck up --fresh, ` +
       "or by hand with EVEJS_AGENT_BRIDGE=1), or pass --destiny-only.");
   }
   const cli = treeCli(tree);
   const login = cli(["login"]);
-  if (login.code !== 0) throw new CaptureError(`e2e login failed:\n${login.out}`);
+  if (login.code !== 0) throw new CaptureError(`gridcheck login failed:\n${login.out}`);
   cli(["dock"]);
   const undock = cli(["undock"]);
-  if (undock.code !== 0) throw new CaptureError(`e2e undock failed:\n${undock.out}`);
+  if (undock.code !== 0) throw new CaptureError(`gridcheck undock failed:\n${undock.out}`);
   const state = readJSON(path.join(config.e2eDir, "state.json")) || {};
-  if (!state.characterID) throw new CaptureError("e2e login left no character in state.json");
+  if (!state.characterID) throw new CaptureError("gridcheck login left no character in state.json");
   // The grid an undock produces: the ship, protected, among the station's neighbours.
   await new Promise((resolve) => setTimeout(resolve, 2000));
   const capabilities = await bridgeCall(handshake, `/capabilities?characterID=${state.characterID}`);
