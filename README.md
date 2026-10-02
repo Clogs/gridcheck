@@ -215,8 +215,10 @@ gridcheck view | gui
 
 A tree runs a vendored copy: `tools/gridcheck/`, the shim at
 `server/src/_secondary/agentBridge/server.js`, and `tools/gridcheck/VENDOR.json`, which records the
-commit and a sha256 for every file. In a tree kept in git, commit all three. Change the tool here,
-never in a tree's copy:
+commit and a sha256 for every file. Those hashes, not git, show whether the copy was edited, so
+committing it in the tree's repository is optional. Commit it when the copy should travel with the
+tree, as in a team's fork. Otherwise leave it untracked, or list it in the tree's
+`.git/info/exclude` to keep `git status` quiet. Change the tool here, never in a tree's copy:
 
 ```bash
 node bin/gridcheck.js vendor update --tree <tree>                # this checkout's HEAD

@@ -416,8 +416,6 @@ function runVendor(action, { tree = OWN_TREE, from, force = false, dryRun = fals
         `${counts.removed} removed; shim ${result.shim}`,
       ...(result.dirty ? [`  ${slashed(result.checkout)} has uncommitted changes; they were not vendored`] : []),
       ...migrationLines(result.migrated, "did"),
-      `  commit ${slashed(VENDOR_DIR)}/ and ${slashed(SHIM_PATH)} in ${slashed(treeRoot)}` +
-        (result.migrated ? ", and the removal of the old names" : ""),
     ];
   }
   if (action === "check") {

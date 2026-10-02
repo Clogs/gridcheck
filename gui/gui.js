@@ -2034,8 +2034,6 @@
   function doneNext(request, p, result) {
     const output = result.steps.map((step) => step.output || "").join("\n");
     if (request.action === "agents") return nextSteps(summaryOf(p), p.root);
-    const commit = /^\s+commit (.+)$/m.exec(output);
-    if (request.action === "vendor" && commit) return [[`Commit ${commit[1]}, so git tracks the copy.`]];
     const next = /^next: (.+)$/m.exec(output);
     if (request.action === "init" && next) return [[capital(next[1])]];
     return [];
