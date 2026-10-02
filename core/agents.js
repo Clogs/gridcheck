@@ -54,7 +54,8 @@ function samePath(a, b, platform) {
 function onPath(name, io) {
   const windows = io.platform === "win32";
   const dirs = String(io.env.PATH || io.env.Path || "").split(windows ? ";" : ":").filter(Boolean);
-  const extensions = windows ? String(io.env.PATHEXT || ".EXE;.CMD;.BAT").split(";").filter(Boolean) : [""];
+  // Windows paths ignore case; lower-case reads as the file is usually named.
+  const extensions = windows ? String(io.env.PATHEXT || ".EXE;.CMD;.BAT").toLowerCase().split(";").filter(Boolean) : [""];
   for (const dir of dirs) {
     for (const extension of extensions) {
       const file = path.join(dir, `${name}${extension}`);
