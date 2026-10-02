@@ -65,15 +65,18 @@ node bin/e2e.js gui --tree F:/EveJS-0.12.9 --open
 ```
 
 On Windows, double-clicking `OpenGui.bat` in the checkout does the same without `--tree`: add the
-tree by its path on the Install tab. Open the printed URL if no browser opens. Then, on the **Install** tab:
+tree by its path on the Install tab. Open the printed URL if no browser opens. The **Install** tab
+is a checklist, with a banner that says when the tree is ready to run tests:
 
-1. "Preview install", read what it will copy, then **Run**. That vendors this checkout into
+1. "Install…", read what it will copy, then **Run**. That vendors this checkout into
    `tools/evejs-e2e/` and adds a one-file shim the server's loader finds.
-2. Keep **auto** mode, "Preview config", then **Run**. That writes `e2e.config.json`. In auto mode
-   the tool uses the tree's server when it's up and starts its own when it isn't.
-3. Under **Agents**, the agents found on this machine (Claude Code, Codex) are already ticked.
-   "Preview setup" shows the entry each gets, then **Run** writes it.
-4. Check that "What the tree needs to run" is all ticked, and run **e2e doctor**.
+2. Under "Choose a server mode", keep **Auto**, "Write config…", then **Run**. That writes
+   `e2e.config.json`. In auto mode the tool uses the tree's server when it's up and starts its own
+   when it isn't.
+3. Under **AI agents**, "Connect…" next to each agent found on this machine (Claude Code, Codex)
+   shows the entry it gets, then **Run** writes it. Agents are optional.
+4. Check that "Dependencies and reference data" has a tick, and run the **health check**
+   (`e2e doctor`) on the Plugins row.
 
 An unpacked zip isn't a git checkout, so the GUI can't check its files for uncommitted changes,
 and each preview says so. In a tree that is a git checkout, a change to a file with uncommitted

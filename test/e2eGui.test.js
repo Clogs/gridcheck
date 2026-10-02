@@ -56,6 +56,7 @@ function setup(t) {
   fs.mkdirSync(checkout);
   const tree = path.join(dir, "tree");
   write(tree, "server/src/server.js", "// a tree\n");
+  write(tree, "server/package.json", JSON.stringify({ name: "eve.js", version: "0.12.9" }));
   write(tree, "tools/evejs-e2e/bin/e2e.js", "// the vendored CLI\n");
   write(tree, "tools/evejs-e2e/VENDOR.json", JSON.stringify({ name: "evejs-e2e", version: "9.9.9", commit: "c0ffee", files: {} }));
   const run = path.join(tree, "_local", "e2e", "runs", "20261001-120000-demo");
@@ -80,6 +81,8 @@ test("from a checkout it offers trees beside it, adds a typed one and remembers 
   assert.deepStrictEqual(listed.map((tree) => [tree.name, tree.source, Boolean(tree.copy)]).sort(),
     [["other", "nearby", false], ["tree", "nearby", true]]);
   assert.strictEqual(listed.find((tree) => tree.name === "tree").copy.version, "9.9.9");
+  assert.deepStrictEqual(listed.map((tree) => [tree.name, tree.evejs]).sort(), [["other", null], ["tree", "0.12.9"]],
+    "the EveJS version comes from server/package.json, and a tree without one has none");
 
   const elsewhere = path.join(os.tmpdir(), `e2e-gui-far-${process.pid}`);
   write(elsewhere, "server/src/x.js", "\n");

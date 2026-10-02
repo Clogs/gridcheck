@@ -271,10 +271,20 @@ function listEntry(root, trees) {
     name: path.basename(root),
     source: trees.sourceOf(root),
     isTree: isTree(root),
+    evejs: config ? evejsVersion(root, config) : null,
     copy: manifest ? { version: manifest.version || null, commit: manifest.commit || null } : null,
     mode: config && config.exists ? config.mode : null,
     up: config ? Boolean(serverUpReason(root, config)) : false,
   };
+}
+
+// EveJS keeps its version in server/package.json; the root one is a fork's fallback.
+function evejsVersion(root, config) {
+  for (const dir of [config.serverDir, root]) {
+    const pkg = readJSON(path.join(dir, "package.json"));
+    if (pkg && typeof pkg.version === "string" && pkg.version.trim()) return pkg.version.trim();
+  }
+  return null;
 }
 
 function summarizeTree(root, { context, trees }) {

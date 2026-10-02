@@ -93,29 +93,43 @@ Ctrl + wheel and the + and − keys. Shift + wheel pans a zoomed timeline.
 
 ## Install
 
-For the chosen tree:
+The tree list on the left is split into trees with e2e installed ("Set up") and the rest. Each
+tree shows its path and its EveJS version, read from the tree's `server/package.json` (or its root
+`package.json`). Set-up trees also show the copy's version, the mode and whether the server is up. A
+filter box appears once there are six trees or more.
 
-1. **The vendored copy.** Not installed, or its version and commit, and whether it still matches
-   its `VENDOR.json` (the drift check, with every edited, added or missing file listed). From a
-   checkout it also says whether the copy is that checkout's commit. "Preview install" or "Preview
-   update" runs `vendor update`. A copy with edits, or a folder that was never vendored, needs "replace
-   edited files" (`--force`). The shim's state is shown below it.
-2. **The tree's config.** Whether `e2e.config.json` exists, its mode and any problems in it.
-   "Preview config" runs `e2e init --mode <mode>`, with `--force` when the file exists. Auto mode,
-   the default, uses the tree's server when it's up and starts its own when it isn't. Managed mode
-   always starts its own; attach mode only uses a server you start.
-3. **Agents.** Claude Code and Codex: whether each is on this machine (and what gave it away),
-   and whether it already runs this tree's MCP server. The agents found and not set up yet start
-   ticked. "Preview setup" runs `e2e agents setup <agents>`, and the preview shows the lines it adds
-   to the tree's `.mcp.json` and to Codex's `config.toml`. Setup only adds entries.
-   [GUIDE.md](GUIDE.md#setting-up-agents) has the rules.
-4. **What the tree needs to run.** Its npm dependencies (`node_modules` at the root and in `server/`,
-   where their `package.json` lists any) and the reference data
-   (the data dir's `solarSystems/data.json`), each with the command that fixes it. The GUI doesn't
-   run these; they are the tree's own setup. Also whether the tree's server is up.
-5. **Plugins and doctor.** The plugins that apply to the tree and the ones skipped, with the
-   reason. "Run e2e doctor" runs the tree's `e2e doctor --json` and shows its report.
-6. **Next.** The commands to run once the tree is ready.
+For the chosen tree, a banner at the top says whether it can run tests: "Ready to run tests", how
+many things are left to do, or "Not set up yet" with an Install button. Below it is a checklist.
+Each row has a mark (done, needed, optional, a problem, or information), one line on its state and
+at most one button. Click a row to open its details. Rows that need you start open.
+
+1. **e2e is installed.** Not installed, or its version and commit, and whether it still matches
+   its `VENDOR.json` (the drift check, with every edited, added or missing file in the details).
+   From a checkout it also says whether the copy is that checkout's commit, and offers "Update…"
+   when it isn't. "Install…", "Update…" and "Replace edited files…" run `vendor update`. The last
+   adds `--force`, as does replacing a folder that was never vendored. The shim's state is in the
+   details.
+2. **Server mode.** The mode from `e2e.config.json`, or "Choose a server mode" when there's no
+   file. The details have the three modes side by side, and "Write config…" runs
+   `e2e init --mode <mode>`, with `--force` when the file exists. Auto mode uses the tree's
+   server when it's up and starts its own when it isn't. Managed mode always starts its own; attach
+   mode only uses a server you start.
+3. **AI agents.** Claude Code and Codex: whether each is on this machine and whether it already
+   runs this tree's MCP server. Each agent that isn't connected has its own "Connect…" button
+   ("Set up anyway…" when it wasn't found), which runs `e2e agents setup <agent>`. The preview
+   shows the lines it adds to the tree's `.mcp.json` or to Codex's `config.toml`. Setup only adds
+   entries. [GUIDE.md](GUIDE.md#setting-up-agents) has the rules. Agents are optional.
+4. **Dependencies and reference data.** Its npm dependencies (`node_modules` at the root and in
+   `server/`, where their `package.json` lists any) and the reference data (the data dir's
+   `solarSystems/data.json`), each missing one with the command that fixes it. The GUI doesn't run
+   these; they are the tree's own setup.
+5. **Plugins.** The plugins that apply to the tree and the ones skipped, with the reason. "Run
+   health check" runs the tree's `e2e doctor --json` and shows its report in the row.
+6. **The game server.** Whether it's up, and what that means in the tree's mode. It never blocks
+   the banner.
+
+Under the checklist, **Run a test** has the commands to run once the tree is ready, each with a
+Copy button, and a second tab on asking a connected agent instead.
 
 ## Patches
 
