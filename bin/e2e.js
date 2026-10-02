@@ -70,7 +70,8 @@ const MANAGED = MODE === "managed";
 const AUTO = MODE === "auto";
 
 const BOOLEAN_FLAGS = new Set(["all", "json", "any-pid", "force", "fresh", "no-market", "no-log", "help",
-  "check", "keep-up", "positions", "once", "serve", "offline", "dry-run", "profile", "perf", "now", ...REGISTRY.booleanFlags]);
+  "check", "keep-up", "reuse", "positions", "once", "serve", "offline", "dry-run", "profile", "perf", "now",
+  ...REGISTRY.booleanFlags]);
 
 class CliError extends Error {}
 
@@ -964,7 +965,8 @@ function printScenario(file, scenario) {
     console.log(`  until  matched ${scenario.until.from === "start" ? "from the watch's start, setup included" : "after setup ends"}`);
   }
   console.log(`  until  timeout ${scenario.until.timeout}s after setup` +
-    `${scenario.until.grace ? `, then ${scenario.until.grace}s more` : ""}`);
+    `${scenario.until.grace ? `, then up to ${scenario.until.grace}s more (at least ${scenario.until.graceMin}s, ` +
+      "less once every expectation is met)" : ""}`);
   for (const entry of scenario.expect) console.log(`  expect ${entry.text}${entry.note ? `  (${entry.note})` : ""}`);
 }
 
@@ -981,6 +983,76 @@ function gitCommit() {
 // up, setup, watch until a stop condition, down; then report.md and
 // result.json beside the watch's timeline.jsonl. Exit 1 when an expectation
 // is missing, 2 when the run could not finish.
+// --reuse keeps the server a run booted, so the next run skips the boot (16 s
+// on stock, about 50 s on LU). Only a server `e2e up` started on the
+// scenario's recipe world, built from the current recipe, is reused; anything
+// else is stopped and booted again. Returns why it can't be reused, or null.
+function reuseBlocker(run, recipe, upKey) {
+  if (!run || !run.reuse) return "it wasn't left up by a --reuse run";
+  if (run.world !== `saved ${recipe.name}`) return `it runs world ${run.world}, not ${recipe.name}`;
+  if (run.reuse.up !== upKey) return `it was booted with other up options (${run.reuse.up}, this scenario wants ${upKey})`;
+  const stale = recipeTools.recipeStale(worlds.savedWorldInfo(REPO_ROOT, recipe.name), currentFingerprint(recipe));
+  return stale ? `world ${recipe.name} must be built again (${stale})` : null;
+}
+
+// Puts a reused server back near the recipe's world. In each system earlier
+// runs visited it removes NPCs, gate rats and what /sysjunkclear takes; then
+// it clears crimewatch, docks and runs the recipe's steps again, which board a
+// new fitted ship where the recipe left it. What else a run changed stays:
+// abandoned drones, some wrecks, killmails, wallet, standings, anything a
+// plugin keeps.
+async function resetForReuse(run, recipe) {
+  const startedAtMs = Date.now();
+  const exitCode = process.exitCode;
+  const { runs, systems } = run.reuse;
+  console.log(`reuse: server pid ${run.pid} is up on world ${recipe.name} after ${runs.length} run(s); ` +
+    `resetting it in place (${systems.length} system(s) to clear)`);
+  await cmdLogin({});
+  const declined = [];
+  const tryCommand = async (command) => {
+    const result = await runSlash(command);
+    if (!result.ok) declined.push(result.text.split("\n")[0]);
+  };
+  for (const systemID of systems) {
+    await tryCommand(`/tr me ${systemID}`);
+    await tryCommand("/npcclear system all");
+    await tryCommand("/gaterats off");
+    await tryCommand("/sysjunkclear");
+  }
+  await tryCommand("/cwatch clear");
+  // Docked, the recipe's loadout puts the old ship in the hangar; in space it
+  // would leave a wreck for the next run to find.
+  await tryCommand("/dock");
+  for (const step of recipe.steps) {
+    const label = scenarioTools.describeStep(step, REGISTRY);
+    const result = step.type === "wait" ? (await sleep(step.seconds * 1000), { ok: true }) : await runScenarioStep(step);
+    if (result && result.ok === false) {
+      throw new CliError(`reuse: recipe step ${label} refused: ${String(result.text || "").split("\n").slice(-1)[0]}`);
+    }
+  }
+  process.exitCode = exitCode;
+  console.log(`reuse: reset in ${((Date.now() - startedAtMs) / 1000).toFixed(1)}s` +
+    `${declined.length ? `; declined, which is fine when there was nothing to clear: ${declined.join("; ")}` : ""}`);
+}
+
+// A scenario's up options as text, to compare with the reused server's.
+function upKeyFor(up) {
+  const flags = upFlagsFor(up);
+  delete flags.timeout;
+  return Object.entries(flags).filter(([, value]) => value !== undefined)
+    .sort(([a], [b]) => a.localeCompare(b)).map(([key, value]) => `--${key}${value === true ? "" : ` ${value}`}`).join(" ") || "none";
+}
+
+// The systems a run's timeline saw, for the next reset to clear.
+function systemsSeen(events) {
+  const ids = new Set();
+  for (const event of events) {
+    if (event.kind === "GRID" && event.systemID) ids.add(Number(event.systemID));
+    if (event.kind === "SYSTEM" && event.toSystemID) ids.add(Number(event.toSystemID));
+  }
+  return [...ids].filter((id) => Number.isInteger(id) && id > 0);
+}
+
 async function cmdRun(positionals, flags) {
   if (!positionals[0]) {
     const rows = scenarioTools.listScenarios({ registry: REGISTRY });
@@ -988,21 +1060,50 @@ async function cmdRun(positionals, flags) {
       console.log(`${row.name.padEnd(28)} ${String(row.world || "?").padEnd(16)} ${row.plugin ? `[${row.plugin}] ` : ""}${row.description}`);
     }
     if (!rows.length) console.log(`no scenarios in ${relativePath(scenarioTools.SCENARIO_DIR)}`);
-    console.log("usage: e2e run <scenario> [--check] [--run <id>] [--world <name>|fresh] [--keep-up]");
+    console.log("usage: e2e run <scenario> [--check] [--run <id>] [--world <name>|fresh] [--keep-up | --reuse]");
     return;
   }
   const override = flags.world === undefined ? null : String(flags.world);
+  const reuse = Boolean(flags.reuse);
   // Managed: the run boots the scenario's world (or --world) and stops it after.
   // Attach: it runs on the live server as it is, and leaves it running.
   // Auto: attach when the tree's server is up, else boot as managed does.
-  const running = readHandshake();
-  const boots = MANAGED || (AUTO && !running);
-  const { file, scenario: loaded } = loadScenarioOrFail(positionals.join(" "), { anyWorld: !boots || override !== null });
+  // --reuse (managed or auto): reset the server a --reuse run left up instead
+  // of booting, and leave it up.
+  let running = readHandshake();
+  const { file, scenario: loaded } = loadScenarioOrFail(positionals.join(" "),
+    { anyWorld: !(MANAGED || (AUTO && !running) || reuse) || override !== null });
   if (flags.check) {
     printScenario(file, loaded);
     return;
   }
-  if (MANAGED && running) {
+  let reusing = null;
+  if (reuse) {
+    if (MODE === "attach") throw new CliError("--reuse needs auto or managed mode: attach mode always runs on the live server as it is");
+    if (override !== null) throw new CliError("--reuse runs on the scenario's own recipe world; drop --world");
+    if (!loaded.recipe) {
+      throw new CliError(`--reuse resets the server by running the scenario's recipe again, and ${loaded.name} names ` +
+        `world ${loaded.world}, not a recipe. Use --keep-up to leave the server up without a reset.`);
+    }
+    if (running && startedElsewhere(running)) {
+      throw new CliError(`the server up (pid ${running.pid}) wasn't started by \`e2e up\`, so --reuse won't reset it; ` +
+        "stop it where you started it, or run without --reuse to attach to it");
+    }
+    if (running) {
+      const run = readRun();
+      const recipe = loadRecipeOrFail(loaded.recipe);
+      const blocker = reuseBlocker(run, recipe, upKeyFor(loaded.up));
+      if (blocker) {
+        console.log(`reuse: not reusing pid ${running.pid}: ${blocker}; stopping it to boot ${recipe.name}`);
+        await cmdDown({});
+        running = null;
+      } else {
+        reusing = { run, recipe };
+      }
+    }
+  }
+  const boots = !reusing && (MANAGED || (AUTO && !running));
+  if (MANAGED && running && !reusing) {
     throw new CliError(`this tree's server is running (pid ${running.pid}); a run boots its own world. \`e2e down\` first.`);
   }
   if (!boots && !running) {
@@ -1018,7 +1119,9 @@ async function cmdRun(positionals, flags) {
   }
   if (boots && override === null && loaded.recipe) await ensureRecipeWorld(loaded.recipe);
   const world = boots ? override || loaded.world : null;
-  const scenario = boots ? { ...loaded, world } : { ...loaded, world: `attached to pid ${running.pid}`, up: {} };
+  const scenario = boots ? { ...loaded, world }
+    : reusing ? { ...loaded, world: `${loaded.world}, reused server pid ${running.pid} reset in place` }
+      : { ...loaded, world: `attached to pid ${running.pid}`, up: {} };
   const runID = flags.run ? String(flags.run).replace(/[^A-Za-z0-9._-]/g, "_") : `${runStamp(Date.now())}-${scenario.name}`;
   const runDir = path.join(RUNS_DIR, runID);
   if (fs.existsSync(runDir)) throw new CliError(`run ${runID} already exists (${relativePath(runDir)}); pass another --run`);
@@ -1032,7 +1135,8 @@ async function cmdRun(positionals, flags) {
   const onInterrupt = () => controller.abort();
   process.on("SIGINT", onInterrupt);
   const ops = {
-    up: boots
+    up: reusing ? () => resetForReuse(reusing.run, reusing.recipe)
+      : boots
       ? () => cmdUp({ ...(world === scenarioTools.FRESH_WORLD ? { fresh: true } : { world }), ...upFlagsFor(scenario.up) })
       : async () => {
         console.log(`run: ${AUTO ? "auto mode found the server up" : "attach mode"}: scenario world ${loaded.world} ` +
@@ -1060,8 +1164,9 @@ async function cmdRun(positionals, flags) {
       onEvent,
     }),
     down: async () => {
-      if (!boots) return;
-      if (flags["keep-up"]) console.log("--keep-up: the server stays up; `e2e down` stops it");
+      if (!boots && !reusing) return;
+      if (reuse) console.log("--reuse: the server stays up for the next --reuse run; `e2e down` stops it");
+      else if (flags["keep-up"]) console.log("--keep-up: the server stays up; `e2e down` stops it");
       else await cmdDown({});
     },
   };
@@ -1073,6 +1178,20 @@ async function cmdRun(positionals, flags) {
     });
   } finally {
     process.removeListener("SIGINT", onInterrupt);
+  }
+  if (reuse && (boots || reusing)) {
+    // The next --reuse run resets what this one touched. A server whose reset
+    // failed isn't reused: the next run boots again.
+    const run = readRun();
+    if (runLive(run)) {
+      const failedReset = result.failure && result.failure.stage === "up";
+      const before = run.reuse || { runs: [], systems: [] };
+      writeRun({ ...run, reuse: failedReset ? null : {
+        up: upKeyFor(loaded.up),
+        runs: [...before.runs, runID],
+        systems: [...new Set([...before.systems, ...systemsSeen(result.events)])],
+      } });
+    }
   }
   const reportPath = path.join(runDir, "report.md");
   const scenarioFile = relativePath(file);
@@ -2083,7 +2202,7 @@ const CORE_COMMANDS = {
     run: (positionals, flags) => require("../core/gui").main([...positionals,
       ...Object.entries(flags).flatMap(([key, value]) => (value === true ? [`--${key}`] : [`--${key}`, String(value)]))]),
   },
-  run: { usage: ["run [<scenario>] [--check] [--run <id>] [--world <name>|fresh] [--keep-up]"], run: cmdRun },
+  run: { usage: ["run [<scenario>] [--check] [--run <id>] [--world <name>|fresh] [--keep-up | --reuse]"], run: cmdRun },
   log: { usage: ["log [--grep NpcController] [--lines 40] [--any-pid]"], run: (_positionals, flags) => cmdLog(flags) },
   perf: { usage: ["perf [--for 10] [--now] [--json]"], run: (_positionals, flags) => cmdPerf(flags) },
   help: { usage: ["help"], run: () => { console.log(helpText()); } },
@@ -2135,5 +2254,7 @@ module.exports = {
   helpText,
   parseArgs,
   selectLogLines,
+  systemsSeen,
+  upKeyFor,
   upOptions,
 };

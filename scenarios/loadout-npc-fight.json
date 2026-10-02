@@ -3,7 +3,7 @@
   "recipe": "starter",
   "setup": [
     "undock",
-    { "wait": 3, "note": "so the watch's first grid is taken before the rats exist, and they arrive" },
+    { "waitFor": "GRID", "timeout": 30, "note": "so the watch's first grid is taken before the rats exist, and they arrive" },
     { "slash": "/npc 2 parity_blood_raider_pulse_frigate", "note": "the default /npc pool rolls cruisers that outfight a Tristan" },
     { "launchDrones": "all" },
     { "lock": "nearest npc", "as": "mark", "timeout": 30 },

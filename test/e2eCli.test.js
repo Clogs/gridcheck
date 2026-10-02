@@ -9,7 +9,7 @@ const assert = require("node:assert");
 const { needsPlugin } = require("./tree");
 
 const { formatDistance, formatGrid, formatClock } = require("../core/format");
-const { CORE_COMMANDS, helpText, parseArgs, selectLogLines, upOptions } = require("../bin/e2e");
+const { CORE_COMMANDS, helpText, parseArgs, selectLogLines, systemsSeen, upKeyFor, upOptions } = require("../bin/e2e");
 const { selectScouts } = require("../plugins/lu/tool/commands");
 
 // These read the lu plugin through the default registry, so they need a tree
@@ -36,6 +36,19 @@ test("arguments: command, positionals, valued and boolean flags", () => {
   assert.deepStrictEqual(parseArgs(["slash", "--", "--weird"]).positionals, ["--weird"]);
   assert.strictEqual(parseArgs([]).command, "help");
   assert.throws(() => parseArgs(["log", "--grep"]), /needs a value/);
+});
+
+test("--reuse is a flag; a reused server is matched on the scenario's up options and cleared in the systems a run saw", () => {
+  assert.strictEqual(parseArgs(["run", "loadout-npc-fight", "--reuse"]).flags.reuse, true);
+  assert.strictEqual(upKeyFor({ market: true }), "none");
+  assert.strictEqual(upKeyFor({ market: false, timeout: 120 }), "--no-market", "the boot timeout doesn't change the server");
+  assert.deepStrictEqual(systemsSeen([
+    { kind: "START" },
+    { kind: "GRID", systemID: 30002537 },
+    { kind: "SYSTEM", fromSystemID: 30002537, toSystemID: 30002539 },
+    { kind: "GRID", systemID: 30002539 },
+    { kind: "GRID", systemID: null },
+  ]), [30002537, 30002539]);
 });
 
 test("log lines keep the server's pid and the pattern, newest last", () => {

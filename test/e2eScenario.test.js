@@ -426,7 +426,9 @@ test("a run stops at its stop condition, flags the unmet expectation and keeps t
 
   const report = renderReport(result, { runID: "r1", scenario, scenarioFile: "tools/evejs-e2e/scenarios/t.json" });
   assert.match(report, /^# Scenario t: FAILED/);
-  assert.match(report, /1 of 2 expectations met\. stop condition `HERE` met at t\+00:00:00\./);
+  assert.match(report, /1 of 2 expectations met\. stop condition `HERE` met at t\+00:00:00, then watched 0\.\d s of 0\.2 s grace \(grace ran out\)\./,
+    "an unmet expectation keeps grace running to its end");
+  assert.strictEqual(result.stop.grace.endedBy, "elapsed");
   assert.match(report, /\| met \| `GRID systemName=Amamake` \| `t\+00:00:00  GRID {6}Amamake/);
   assert.match(report, /\| MISSING \| `SYSTEM toSystemName=Jita` can't happen \| not seen \|/);
   assert.match(report, /- `HERE` \*\*fired\*\*/);
@@ -435,6 +437,35 @@ test("a run stops at its stop condition, flags the unmet expectation and keeps t
   const record = resultRecord(result, { runID: "r1", scenarioFile: "t.json" });
   assert.strictEqual(record.exitCode, 1);
   assert.strictEqual(record.events, undefined, "events stay in timeline.jsonl");
+});
+
+test("grace ends once every expectation is met, but not before graceMin", async () => {
+  const scenario = scenarioOf({
+    until: { any: ["GRID"], from: "start", timeout: 5, grace: 4, graceMin: 0.3 },
+    expect: ["GRID", "DESTROYED", "no DIVERGE"],
+  });
+  assert.strictEqual(scenario.until.graceMin, 0.3);
+  const ops = fakeOps([
+    { afterMs: 10, event: { kind: "GRID", systemName: "Amamake" } },
+    { afterMs: 50, event: { kind: "DESTROYED", itemID: 7 } },
+  ]);
+  const started = Date.now();
+  const result = await runScenario(scenario, ops);
+  const took = Date.now() - started;
+  assert.strictEqual(result.stop.grace.endedBy, "met");
+  assert.ok(result.stop.grace.ms >= 290, `waited out graceMin (${result.stop.grace.ms} ms)`);
+  assert.ok(took < 2000, `ended long before the 4 s grace (${took} ms)`);
+  assert.strictEqual(result.passed, true);
+  assert.match(renderReport(result, { runID: "r1", scenario, scenarioFile: "t.json" }),
+    /then watched 0\.\d s of 4 s grace \(every expectation met\)/);
+});
+
+test("graceMin defaults to 5 s or the whole grace, and can't exceed grace", () => {
+  assert.strictEqual(scenarioOf({ until: { any: ["GRID"], timeout: 5, grace: 20 }, expect: ["GRID"] }).until.graceMin, 5);
+  assert.strictEqual(scenarioOf({ until: { any: ["GRID"], timeout: 5, grace: 2 }, expect: ["GRID"] }).until.graceMin, 2);
+  assert.strictEqual(scenarioOf({ until: { any: ["GRID"], timeout: 5 }, expect: ["GRID"] }).until.graceMin, 0);
+  assert.throws(() => scenarioOf({ until: { any: ["GRID"], timeout: 5, grace: 2, graceMin: 3 }, expect: ["GRID"] }),
+    /until\.graceMin: seconds, from 0 to grace \(2\)/);
 });
 
 test("stop conditions match only events after setup unless until.from is start", async () => {

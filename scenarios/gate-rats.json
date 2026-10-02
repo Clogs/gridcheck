@@ -4,7 +4,7 @@
   "setup": [
     "undock",
     { "teleport": "Siseide" },
-    { "wait": 5 },
+    { "waitFor": "GRID systemName=Siseide", "timeout": 30, "note": "the watch has the gate grid before the rats spawn" },
     { "slash": "/gaterats on" }
   ],
   "until": { "any": ["DESTROYED self"], "timeout": 240, "grace": 20 },

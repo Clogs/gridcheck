@@ -38,7 +38,11 @@ const WATCH_KEYS = new Set(["every", "offgridEvery", "client", "divergeMeters", 
 // A tick profiler window every 50 ticks (5 s at 10 Hz), beside a PERF window every 5 s.
 const PROFILE_EVERY_TICKS = 50;
 const PERF_EVERY_SECONDS = 5;
-const UNTIL_KEYS = new Set(["any", "timeout", "grace", "from"]);
+const UNTIL_KEYS = new Set(["any", "timeout", "grace", "graceMin", "from"]);
+// Grace ends once every expectation that isn't a "no" is met, but not before
+// this: the watch holds lines back 1.5 s to order them, and a DIVERGE needs
+// 3 s to settle, so a "no DIVERGE" still sees what the stop led to.
+const DEFAULT_GRACE_MIN_SECONDS = 5;
 const UNTIL_FROM = ["setup", "start"];
 const EXPECT_KEYS = new Set(["match", "absent", "note"]);
 
@@ -455,7 +459,7 @@ function validateScenario(raw, { source = "scenario", defaultName = null, worldE
     else during = parseSteps(raw.during, "during");
   }
 
-  const until = { any: [], timeout: null, grace: 0, from: "setup" };
+  const until = { any: [], timeout: null, grace: 0, graceMin: 0, from: "setup" };
   if (!isObject(raw.until)) {
     problem("until", 'an object: { "any": ["DESTROYED self"], "timeout": 600 }');
   } else {
@@ -472,6 +476,14 @@ function validateScenario(raw, { source = "scenario", defaultName = null, worldE
     if (raw.until.grace !== undefined) {
       if (!(typeof raw.until.grace === "number" && raw.until.grace >= 0)) problem("until.grace", "seconds, 0 or more");
       else until.grace = raw.until.grace;
+    }
+    until.graceMin = Math.min(DEFAULT_GRACE_MIN_SECONDS, until.grace);
+    if (raw.until.graceMin !== undefined) {
+      if (!(typeof raw.until.graceMin === "number" && raw.until.graceMin >= 0 && raw.until.graceMin <= until.grace)) {
+        problem("until.graceMin", `seconds, from 0 to grace (${until.grace}): grace ends this soon at the earliest`);
+      } else {
+        until.graceMin = raw.until.graceMin;
+      }
     }
     if (raw.until.from !== undefined) {
       if (!UNTIL_FROM.includes(raw.until.from)) {
@@ -621,6 +633,8 @@ async function runScenario(scenario, ops, { now = Date.now, signal = null, log =
   let failure = null;
   let stop = null;
   const startedAtMs = now();
+  // While grace runs: the expectations that aren't a "no" and have no match yet.
+  let graceWatch = null;
 
   const onEvent = (event) => {
     events.push(event);
@@ -628,6 +642,10 @@ async function runScenario(scenario, ops, { now = Date.now, signal = null, log =
       if (!waiter.accept(event)) continue;
       const hit = waiter.conditions.find((condition) => condition.test(event, ctx));
       if (hit) waiter.resolve({ type: "match", condition: hit, event });
+    }
+    if (graceWatch) {
+      for (const entry of graceWatch.unmet) if (entry.condition.test(event, ctx)) graceWatch.unmet.delete(entry);
+      if (!graceWatch.unmet.size) graceWatch.resolve();
     }
   };
   const waitFor = (conditions, sinceIndex, accept = () => true) => {
@@ -787,8 +805,24 @@ async function runScenario(scenario, ops, { now = Date.now, signal = null, log =
         if (outcome.type === "interrupted") failure = { stage: "until", error: "interrupted" };
         if (outcome.type === "during-failed") failure = duringFailure;
         if (outcome.type === "match" && scenario.until.grace > 0) {
-          log(`stop condition met: ${outcome.condition.text}; watching ${scenario.until.grace}s more`);
-          await race([timer(scenario.until.grace * 1000, { type: "done" }), watchEnded(), interrupted()]);
+          const { grace, graceMin } = scenario.until;
+          log(`stop condition met: ${outcome.condition.text}; watching up to ${grace}s more, ` +
+            `until every expectation is met and at least ${graceMin}s`);
+          const graceStartedAtMs = now();
+          const unmet = new Set(scenario.expect.filter((entry) => !entry.absent &&
+            !events.some((event) => entry.condition.test(event, ctx))));
+          const allMet = unmet.size ? new Promise((resolve) => { graceWatch = { unmet, resolve }; }) : Promise.resolve();
+          let floor = null;
+          const met = {
+            promise: allMet.then(() => {
+              floor = timer(graceMin * 1000 - (now() - graceStartedAtMs), { type: "met" });
+              return floor.promise;
+            }),
+            cancel: () => { if (floor) floor.cancel(); },
+          };
+          const ended = await race([timer(grace * 1000, { type: "elapsed" }), met, watchEnded(), interrupted()]);
+          graceWatch = null;
+          stop.grace = { ms: now() - graceStartedAtMs, of: grace * 1000, endedBy: ended.type };
         }
         runStopped = true;
         releaseStop();
@@ -876,12 +910,19 @@ function stopText(result) {
   const stop = result.stop || {};
   const at = stop.event ? ` at ${formatOffset(stop.event.t)}` : "";
   switch (stop.reason) {
-    case "until": return `stop condition ${code(stop.condition)} met${at}`;
+    case "until": return `stop condition ${code(stop.condition)} met${at}${graceText(stop.grace)}`;
     case "timeout": return `no stop condition met; timed out after ${Math.round((stop.waitedMs || 0) / 1000)} s`;
     case "watch-ended": return `the watch ended early (${stop.watchEnd || "?"})`;
     case "interrupted": return "interrupted";
     default: return result.failure ? `${result.failure.stage} failed` : String(stop.reason || "?");
   }
+}
+
+function graceText(grace) {
+  if (!grace) return "";
+  const seconds = (ms) => `${Math.round(ms / 100) / 10} s`;
+  const why = grace.endedBy === "met" ? "every expectation met" : grace.endedBy === "elapsed" ? "grace ran out" : grace.endedBy;
+  return `, then watched ${seconds(grace.ms)} of ${seconds(grace.of)} grace (${why})`;
 }
 
 // How a scenario's `up` options read in its report: each plugin flag's own
@@ -948,7 +989,10 @@ function renderReport(result, { runID, scenario, scenarioFile = null, timelineFi
         : "- matched only against events after setup ended");
     }
     lines.push(`- timeout ${scenario.until.timeout} s after setup${result.stop.reason === "timeout" ? " **reached**" : ""}`);
-    if (scenario.until.grace) lines.push(`- then ${scenario.until.grace} s more, for what follows`);
+    if (scenario.until.grace) {
+      lines.push(`- then up to ${scenario.until.grace} s more, for what follows; it ends once every expectation ` +
+        `is met and ${scenario.until.graceMin} s have passed`);
+    }
   }
   lines.push("");
   if (framesSection) lines.push(framesSection);

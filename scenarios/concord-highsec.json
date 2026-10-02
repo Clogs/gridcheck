@@ -4,7 +4,7 @@
   "setup": [
     "undock",
     { "teleport": "Rens" },
-    { "wait": 5 },
+    { "waitFor": "GRID systemName=Rens", "timeout": 30, "note": "the watch has the Rens grid before CONCORD is called" },
     { "slash": "/naughty" }
   ],
   "watch": { "every": 0.5 },

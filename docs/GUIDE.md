@@ -457,14 +457,15 @@ plugin's `plugins/<name>/scenarios/`; `e2e run` lists them all. Pass a name or a
 ```bash
 node tools/evejs-e2e/bin/e2e.js run                               # list the scenarios
 node tools/evejs-e2e/bin/e2e.js run loadout-npc-fight --check     # load and check it; boots nothing
-node tools/evejs-e2e/bin/e2e.js run loadout-npc-fight             # [--run <id>] [--world <name>|fresh] [--keep-up]
+node tools/evejs-e2e/bin/e2e.js run loadout-npc-fight             # [--run <id>] [--world <name>|fresh] [--keep-up | --reuse]
+node tools/evejs-e2e/bin/e2e.js run loadout-npc-fight --reuse     # again: resets the server it left up instead of booting
 ```
 
 ```json
 {
   "description": "Two frigates attack the ship; it fights back and kills one.",
   "recipe": "starter",
-  "setup": ["undock", { "wait": 3 },
+  "setup": ["undock", { "waitFor": "GRID", "timeout": 30 },
     { "slash": "/npc 2 parity_blood_raider_pulse_frigate" },
     { "launchDrones": "all" },
     { "lock": "nearest npc", "as": "mark" },
@@ -484,7 +485,7 @@ node tools/evejs-e2e/bin/e2e.js run loadout-npc-fight             # [--run <id>]
 | `setup` | Steps, in order. A login runs first if the list doesn't start with one. |
 | `during` | Steps that run after setup, beside the stop conditions; see [During](#during). Optional. |
 | `watch` | `every` (2 s), `offgridEvery` (5 s), `client` (`diverge` by default; `FX` lines need `"fx"` or `"all"`, `CLIENT` lines `"all"`), `divergeMeters`, `log` (`true`), `grep`, `perf` (`true` for a `PERF` window every 5 s, or seconds). |
-| `until` | `any`: stop conditions; the first one met stops the run. `timeout`: seconds after setup, required. `grace`: seconds to keep watching after a stop condition, e.g. for the `KILLMAIL` after a `DESTROYED`. `from`: `"setup"` (default) matches only events after setup ends; `"start"` matches every event since the watch began, for a stop condition that setup itself causes, such as the `GRID` after an undock. |
+| `until` | `any`: stop conditions; the first one met stops the run. `timeout`: seconds after setup, required. `grace`: at most this many seconds more after a stop condition, e.g. for the `KILLMAIL` after a `DESTROYED`. Grace ends early once every expectation that isn't a `no` is met, but not before `graceMin` (default 5 s, or all of a shorter grace), which gives a `no DIVERGE` time to open: the watch delivers lines 1.5 s late and a divergence settles over 3 s. Set `graceMin` to `grace` when a `no` expectation needs the whole window. The report says how long grace ran and why it ended. `from`: `"setup"` (default) matches only events after setup ends; `"start"` matches every event since the watch began, for a stop condition that setup itself causes, such as the `GRID` after an undock. |
 | `expect` | Expected observations, as conditions. `"no <condition>"` or `{ "match": ..., "absent": true }` expects none. `{ "match": ..., "note": ... }` adds a note to the report. |
 | `name`, `description` | Default name: the file name. |
 
@@ -497,7 +498,7 @@ Steps:
 | `{ "slash": "/heal" }` | `e2e slash`. A refused command fails setup; in a tree that doesn't report refusals (stock without `slash-success`) every command counts as done. |
 | `{ "teleport": "Amamake" }` | `e2e teleport`, stock `/tr`. |
 | `{ "loadout": { "ship": "Tristan", "modules": [...], "drones": [...], "cargo": [...], "charges": [...] } }` | `e2e loadout` ([WORLDS.md](WORLDS.md)). |
-| `{ "wait": 30 }` | Waits that many seconds. |
+| `{ "wait": 30 }` | Waits that many seconds. Prefer `waitFor` on the event you are waiting for: a `GRID` with the new `systemName` after a teleport, or the first `GRID` after an undock. |
 | `{ "waitFor": "<condition>", "timeout": 300 }` | Waits for an event, seen after the step starts, that matches the condition. Setup fails if none comes before the timeout (default 300 s). |
 | `{ "lock": "nearest npc", "as": "mark" }`, `{ "activate": "weapons", "target": "$mark" }`, `"stop"`, ... | A [player action](#player-actions): `approach`, `orbit`, `keepAtRange`, `warpTo`, `stop`, `lock`, `unlock`, `activate`, `deactivate`, `loadAmmo`, `launchDrones`, `engageDrones`. The value is the target, or the modules or drones; the other arguments are keys (`range`, `target`, `once`, `charge`, `count`, `timeout`). `as` binds the target's item ID, or the drones launched. A refused action fails the step. |
 
@@ -577,9 +578,34 @@ checked scenario.
    still belongs to setup. With `"from": "start"`, setup's events count too, and a condition setup
    already met stops the run at once. The timeout counts from the end of setup. `expect` always
    matches the whole timeline.
-6. Writes a `STOP` line, stops the watch and runs `down` when it booted. `down` runs whatever
+6. Watches for up to `until.grace` more, and less once every expectation is met.
+7. Writes a `STOP` line, stops the watch and runs `down` when it booted. `down` runs whatever
    happened before it: a failed boot, a refused step or Ctrl-C. `--keep-up` leaves the server
    running.
+
+### Reusing the server
+
+A boot takes about 16 s on stock EveJS and about 50 s on LU's `lowsec-docked`, before the
+scenario starts. While you iterate on a scenario that names a recipe, `--reuse` skips it (managed
+or auto mode):
+
+- The first `--reuse` run boots as usual and leaves the server up.
+- The next one resets that server instead of booting, in about 2 s. In each system earlier runs
+  saw, it teleports there and runs `/npcclear system all`, `/gaterats off` and `/sysjunkclear`.
+  Then it runs `/cwatch clear` and `/dock`, and the recipe's steps again, which board a new
+  fitted ship where the recipe leaves it. Its report's world reads `<recipe>, reused server pid
+  <n> reset in place`.
+- A reset doesn't undo everything a run changed. Drones left in space stay, and so do some
+  wrecks: stock `/sysjunkclear` misses some. They show as `PRESENT` on the first grid. Killmails,
+  the wallet, standings, skills and whatever a plugin keeps stay too. So run the final version
+  without `--reuse`, from a fresh boot.
+- A server is reused only when a `--reuse` run left it up, on the scenario's recipe world, with
+  the same `up` options and a world that is current with its recipe. Otherwise the run stops it
+  and boots. A server you started yourself is never reset. `e2e down` stops a reused server.
+
+Boot time itself is the server's own work. On stock, about 5 s of it validates the content
+packs' hashes and 2.5 s builds the dungeon cache. Node's compile cache (`NODE_COMPILE_CACHE`)
+didn't shorten it.
 
 `_local/e2e/runs/<id>/` then holds:
 

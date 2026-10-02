@@ -10,7 +10,8 @@
 // fixtures again and compares them with the committed ones, and runs the
 // tests that need a real tree. On stock with the three patches applied it
 // also refuses a loadout the character hasn't the skills for, builds the
-// starter world and runs the five core scenarios on it, and drives e2e gui
+// starter world and runs the five core scenarios on it (one twice, the
+// second time with --reuse on the server the first left up), and drives e2e gui
 // through its API against the tree. Writes
 // compat-report.md and exits 1 on any failure.
 //
@@ -487,7 +488,23 @@ async function stockPatchRoundTrip(lane, tree) {
       if (!boarded) throw new CompatError(`no Tristan boarded:\n${out.split(/\r?\n/).slice(-12).join("\n")}`);
       return `${lastLine(out)}; ${boarded}`;
     })) {
-      for (const name of CORE_SCENARIOS) await check(lane, `run ${name} (patched)`, () => runScenario(tree, [], name));
+      // The last one boots with --reuse, as the others boot, and leaves the
+      // server up; a second --reuse run then resets that server instead of booting.
+      const reused = CORE_SCENARIOS[CORE_SCENARIOS.length - 1];
+      for (const name of CORE_SCENARIOS) {
+        await check(lane, `run ${name} (patched)`, () => runScenario(tree, name === reused ? ["--reuse"] : [], name));
+      }
+      try {
+        await check(lane, `run ${reused} again, reusing the server (patched)`, () => {
+          const lines = cliIn(tree, ["run", reused, "--reuse"]).split(/\r?\n/);
+          const reset = lines.find((line) => /^reuse: reset in/.test(line));
+          const verdict = lines.find((line) => /^(passed|FAILED|did not complete):/.test(line));
+          if (!reset || !verdict || !verdict.startsWith("passed")) throw new CompatError(lines.slice(-12).join("\n"));
+          return `${reset}; ${verdict}`;
+        });
+      } finally {
+        await check(lane, "down after --reuse (patched)", () => lastLine(cliIn(tree, ["down"])));
+      }
       await check(lane, "run selftest-unmet (patched)", () => runSelftest(tree));
     }
   } finally {

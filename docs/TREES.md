@@ -128,7 +128,7 @@ this checkout's HEAD into each tree. Then it runs `init`, `doctor`, `login`, `un
 saved world `lowsec-docked`. On stock in auto mode it runs `smoke-undock` with no server up, then
 with a server started by hand, which `down` must refuse to stop and the run must leave up. On stock with the three patches applied it also checks that a
 fresh character's loadout is refused with its missing skills, builds `starter`, and runs the five
-core scenarios on it. It drives `e2e gui` through its API against the stock tree: the tree's
+core scenarios on it, the last one with `--reuse` and then again on the server it left up. It drives `e2e gui` through its API against the stock tree: the tree's
 summary, its patches, a run's report and frame, and one patch applied and reverted by preview. It
 records the fixtures again and fails if they no longer match the
 committed ones: the encodings exactly, the session and grid by shape. It runs the tests that need a

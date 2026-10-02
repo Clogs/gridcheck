@@ -66,7 +66,7 @@ To verify a feature, write a scenario and run it (e2e_run_scenario). A scenario 
 - up: ${upKeys}.
 - setup steps: "login" (implicit), "undock", "dock", { "slash": "/heal" }, { "teleport": "Amamake" }, { "loadout": { "ship": "Tristan", "modules": ["Light Neutron Blaster II x2"], "drones": ["Hobgoblin II x5"], "charges": ["Antimatter Charge S"] } }, { "wait": 30 }, { "waitFor": "<condition>", "timeout": 300 }${pluginSteps.length ? `, and the plugins' ${pluginSteps.join(", ")}` : ""}.
 - player actions are steps too, in setup and in "during" (a second list that runs after setup, beside the stop conditions, and stops when the run stops): { "lock": "<target>", "as": "mark", "timeout": 30 }, { "activate": "weapons", "target": "$mark", "once": false }, { "deactivate": "weapons" }, { "orbit": "<target>", "range": 5000 }, { "approach": "<target>" }, { "keepAtRange": "<target>", "range": 10000 }, { "warpTo": "<target>", "range": 0 }, "stop", { "unlock": "<target>" }, { "loadAmmo": "weapons", "charge": "EMP S" }, { "launchDrones": "all", "count": 5 }, { "engageDrones": "<target>" }; each also takes "retry". A target is the nearest ball passing every term: "nearest npc", "name~Scout", "type~Rifter", "kind=station", "within=30km", "player", "$mark", an itemID. "as" on a lock binds the ball. Shots show as TARGET sourceLabel=self, FX self (needs "watch": { "client": "fx" }) and DAMAGE itemID=$mark.
-- until: any (stop conditions), timeout (s after setup, required), grace (s more after a stop), from ("setup" default: only events after setup count; "start": setup's own events count, e.g. the GRID an undock causes).
+- until: any (stop conditions), timeout (s after setup, required), grace (up to this many s more after a stop; it ends early once every expectation is met and graceMin, default 5, has passed), from ("setup" default: only events after setup count; "start": setup's own events count, e.g. the GRID an undock causes).
 - expect: conditions that should be seen; "no <condition>" expects none. A missing one fails the run (exit 1) but the run keeps watching.
 - Conditions: KIND then field tests. Kinds: ${kinds}, and CLIENT (needs "watch": { "client": "all" }), FX (needs "client": "fx" or "all") and DIVERGE. Tests: field=value, field!=value, field~regex, field>=N (also > < <=), bare field (set), !field (unset). Units: 30km, 90s, 5min. "self" = about your ship. $name = IDs a step bound with "as". A field is looked up on the event, then one level down. Field names are the ones e2e_watch with json:true prints; a check lists a kind's fields when you name a wrong one.
 Write the file with e2e_run_scenario { name, scenario, check: true } first: that validates without booting. save:true writes it to ${relativePath(TREE_SCENARIO_DIR)}/ to commit with the feature; otherwise it goes to ${relativePath(DRAFT_DIR)}/.
@@ -732,6 +732,7 @@ const TOOLS = [
       check: bool("Only load and check the scenario; boot nothing."),
       run: str("Run ID (default: start time and scenario name). Must be new."),
       keepUp: bool("Leave the server running after the run, to look around with the other tools."),
+      reuse: bool("For a scenario that names a recipe, while iterating on it: skip the boot by resetting the server the last reuse run left up (NPCs, gate rats, debris and crimewatch cleared, the recipe run again), and leave it up. What else a run changed stays, so check the final version without it."),
       world: str("When the run boots its own world (managed mode, or auto with no server up): this saved world (or fresh) instead of the scenario's."),
       wait: bool("Wait for the run to finish (default true). false: start it in the background and return its run ID."),
     }),
@@ -756,7 +757,7 @@ const TOOLS = [
       const scenarioName = (params.scenario && params.scenario.name) || path.basename(target, ".json");
       const runID = params.run ? safeRunID(params.run) : `${runStamp(Date.now())}-${scenarioName}`;
       if (fs.existsSync(path.join(RUNS_DIR, runID))) throw new ToolError(`run ${runID} already exists; pass another run`);
-      const args = ["run", `--run=${runID}`, ...(params.keepUp ? ["--keep-up"] : []),
+      const args = ["run", `--run=${runID}`, ...(params.keepUp ? ["--keep-up"] : []), ...(params.reuse ? ["--reuse"] : []),
         ...(params.world ? [`--world=${params.world}`] : []), "--", target];
 
       if (params.wait === false) {
