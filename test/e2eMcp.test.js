@@ -121,7 +121,9 @@ test("a bare scenario name is the tree's file, the core's or a plugin's; a path 
   assert.strictEqual(mcp.resolveScenario("tools/gridcheck/scenarios/x.json"),
     path.join(DEFAULT_TREE_ROOT, "tools", "gridcheck", "scenarios", "x.json"), "a path is from the tree's root");
   assert.ok(mcp.committedScenario("tools/gridcheck/plugins/lu/scenarios/fleet-to-grid.json"));
-  assert.ok(mcp.committedScenario("tools/gridcheck-scenarios/fleet-arrives.json"), "the tree's own scenarios");
+  // The tree's configured folder: tools/gridcheck-scenarios by default, tools/e2e-scenarios in trees set up before the rename.
+  const treeScenarios = path.relative(DEFAULT_TREE_ROOT, require("../core/scenario").TREE_SCENARIO_DIR).split(path.sep).join("/");
+  assert.ok(mcp.committedScenario(`${treeScenarios}/fleet-arrives.json`), "the tree's own scenarios");
   assert.ok(!mcp.committedScenario("_local/gridcheck/scenarios/fleet-to-grid.json"));
 });
 
