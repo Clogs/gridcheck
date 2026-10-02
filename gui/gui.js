@@ -267,7 +267,7 @@
   // the tree, its EveJS version (server/package.json), whether e2e is
   // installed, and its scenario runs.
 
-  const pill = (cls, text, title) => h("span", { className: `pill ${cls}`, text, title });
+  const pill = (cls, text, title) => h("span", { className: `tpill ${cls}`, text, title });
 
   // The commonest EveJS version gets the first colour, the next the second...
   function versionClasses() {
@@ -496,21 +496,32 @@
     const dot = !tree.isTree ? "bad" : !tree.copy ? "off" : tree.up ? "warn" : "ok";
     const forget = tree.source === "added" ? h("button", { type: "button", className: "btn sm ghost forget", text: "Forget",
       title: "Take it off this list", onclick: (event) => { event.stopPropagation(); forgetTree(tree.id); } }) : null;
-    const hasRuns = tree.runs && tree.runs.total > 0;
+    // Two lines: name, mode and version; path and runs. The group and the dot
+    // already say whether e2e is installed.
     return h("li", { className: `${tree.id === state.treeID ? "sel" : ""}${tree.copy ? "" : " off"}`,
       title: SOURCES[tree.source] || tree.source, onclick: () => { state.tab = "install"; selectTree(tree.id); } },
       h("div", { className: "top" },
         h("i", { className: `tdot ${dot}`, title: !tree.isTree ? "not an EveJS tree" : !tree.copy ? "e2e isn't installed" : tree.up ? "server up" : "e2e installed" }),
         h("b", { text: tree.name }),
+        tree.mode ? h("span", { className: "mode", text: tree.mode, title: "e2e.config.json mode" }) : null,
+        tree.up ? pill("warn", "up", "The tree's server is up") : null,
         evejsPill(tree, vclass)),
-      h("div", { className: "path", text: tree.root }),
-      h("div", { className: "facts" },
-        e2ePill(tree),
-        tree.mode ? pill("mute", tree.mode, "e2e.config.json mode") : null,
-        tree.up ? pill("warn", "server up") : null,
-        hasRuns ? null : pill("mute", "no runs"),
-        forget),
-      hasRuns ? h("div", { className: "facts" }, runsCell(tree)) : null);
+      h("div", { className: "sub" },
+        h("span", { className: "path", text: tree.root, title: tree.root }),
+        runsMini(tree),
+        forget));
+  }
+
+  // "13 [bar] 10 · 3": total, pass bar, passed in green, failed in red.
+  function runsMini(tree) {
+    const runs = tree.runs || { total: 0, passed: 0, failed: 0 };
+    if (!runs.total) return h("span", { className: "runs-mini norun", text: "no runs" });
+    const bar = h("span", { className: "passbar" }, h("i"));
+    bar.firstChild.style.width = `${(runs.passed / runs.total) * 100}%`;
+    return h("span", { className: "runs-mini", title: `${runs.total} scenario runs: ${runs.passed} passed, ${runs.failed} failed` },
+      h("b", { text: String(runs.total) }), bar,
+      h("span", { className: "ok", text: String(runs.passed) }),
+      h("span", { className: `bad${runs.failed ? "" : " zero"}`, text: String(runs.failed) }));
   }
 
   function renderTreeCards() {
