@@ -44,18 +44,20 @@ Three panes:
   DIVERGE rings. Click a ship to select it. Below the map are the play controls (step by event,
   next DIVERGE, speed, follow live) and a track with one lane per event kind. Click or drag the
   track to seek. The event list under it has a chip per kind to show or hide it, and a regex
-  filter. CLIENT lines start hidden.
-- **The inspector** has five tabs:
+  filter. CLIENT, PERF and PROFILE lines start hidden.
+- **The inspector** has six tabs:
   - **Summary**: the totals, the expectations, the selected ship and the frames. The selected
     ship's shield, armour and hull come from its DAMAGE events; a layer the run never reports
-    shows `?`.
+    shows `?`. A run with `PERF` lines also gets a line with its worst ticks, which opens Perf.
   - **Expectations**: each condition, its note, its count and when it was first met.
+  - **Perf**: the server's ticks ([below](#perf)).
   - **Frames**: the run's frames.
   - **Report**: the run's `report.md`.
   - **Facts**: the scenario file, world, commit, stop reason, bindings and steps.
 
   Clicking an expectation, a frame, a step or an event seeks the replay to it. **Viewer ↗** opens
-  the standalone [viewer](GUIDE.md#viewer) on the run.
+  the standalone [viewer](GUIDE.md#viewer) on the run. `&tab=perf` (or `expect`, `frames`,
+  `report`, `facts`) in the URL opens that tab.
 
 Keys: space plays and pauses, left and right step by event, D jumps to the next DIVERGE, and Home
 and End go to the ends.
@@ -67,6 +69,8 @@ One timeline for the whole run, like a profiler trace:
 - **Expectations** are numbered flags where each was first met. A missing one is a red flag at the
   right edge.
 - **Frames** form a filmstrip, with a pin at each frame's time.
+- **Server tick**, for a run with `PERF` lines: the worst tick in each column, green under half
+  the 100 ms budget, amber above half and red over it.
 - **Each ball has a lane**, up to 40 lanes. Self comes first, then the other ships, then each swarm
   of same-named drones or fighters as one lane.
   - A lane's spans are its modes, with the target when it moves relative to one. They come from
@@ -85,6 +89,28 @@ The panes below follow the cursor:
 
 Click or drag anywhere on the timeline to move the cursor. The − / fit / + buttons zoom, and so do
 Ctrl + wheel and the + and − keys. Shift + wheel pans a zoomed timeline.
+
+### Perf
+
+A run has the server's ticks when its scenario has `"up": { "profile": true }` or
+`"watch": { "perf": true }`, or when `e2e watch --perf` wrote it
+([GUIDE.md](GUIDE.md#performance-testing)). The tab computes its figures with the same code as the
+report's "Server performance" section (`core/perf.js`, served as `/gui/perf.js`), so the two agree.
+
+- **Totals.** Ticks, average, p95, p99, max and ticks over budget. A figure is green under half the
+  100 ms budget, amber above half and red over it.
+- **Tick time.** Every tick of the run on the run's clock. The band is the worst tick in each pixel
+  column and the line is the average. The budget is a dashed red line, and a red mark sits above any
+  column that went over it. Dashed blue lines mark where steps ended, numbered as in the phase
+  table. The scale fits the run's own ticks, so a quiet run isn't a flat line under the budget.
+  Click to seek. The white line is the replay's time.
+- **Phases.** One row per step that ended, with ticks, average, p95, max and ticks over budget. The
+  phase the replay is in is marked. Click a row to seek to its start.
+- **Process.** The worst window's event-loop delay (p99), CPU and heap, the most entities at once,
+  the lowest time dilation, and the number of profiler windows.
+- **Subsystems.** The tick profiler's sections over the whole run, costliest first, in ms per tick
+  and share of the tick. Nested rows are indented and lighter, because their time is already in the
+  row above. Without the profiler the tab says how to turn it on.
 
 ## Install
 

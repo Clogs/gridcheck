@@ -1206,6 +1206,31 @@
         box.append(trRow("film", h("b", { text: "Frames" }), `${frames.length} SVG`, film));
       }
 
+      // Server tick time: the worst tick per column, red over the budget.
+      const { record: perfRecord, ticks: perfTicks } = perf();
+      if (perfRecord && perfTicks.length) {
+        const bins = 160;
+        const worst = new Array(bins).fill(null);
+        for (const tick of perfTicks) {
+          const p = pct(tick.atMs);
+          if (p < 0 || p > 100) continue;
+          const index = Math.min(bins - 1, Math.floor((p / 100) * bins));
+          worst[index] = worst[index] === null ? tick.ms : Math.max(worst[index], tick.ms);
+        }
+        const o = perfRecord.overall;
+        const scale = niceCeil(Math.max(o.tickP99Ms * 1.6, o.tickAvgMs * 3, 1));
+        const bars = h("div", { className: "bars" });
+        const binMs = (v1 - v0) / bins;
+        worst.forEach((value, index) => {
+          const bar = h("i", { className: value === null ? "" : budgetClass(value, perfRecord.budgetMs),
+            title: value === null ? "" : `${R.offset(rel(v0 + index * binMs))}  worst tick ${fmtMs(value)}` });
+          bar.style.height = `${value === null ? 0 : Math.max(4, Math.min(100, (value / scale) * 100))}%`;
+          bars.append(bar);
+        });
+        const area = h("div", { className: "tr-area" }, bars);
+        box.append(trRow("dens srvtick", h("b", { text: "Server tick" }), `p99 ${fmtMs(o.tickP99Ms)} · max ${fmtMs(o.tickMaxMs)} · scale ${scale} ms`, area));
+      }
+
       // One lane per ball.
       const { lanes, hidden } = state.model.lanes({ maxLanes: 40 });
       for (const lane of lanes) {
@@ -1272,30 +1297,6 @@
         }
         const area = h("div", { className: "tr-area" }, bars);
         box.append(trRow("dens", h("b", { text: "Log lines" }), `${logs.length} · per ${R.seconds((v1 - v0) / bins)}`, area));
-      }
-      // Server tick time: the worst tick per column, red over the budget.
-      const { record: perfRecord, ticks: perfTicks } = perf();
-      if (perfRecord && perfTicks.length) {
-        const bins = 160;
-        const worst = new Array(bins).fill(null);
-        for (const tick of perfTicks) {
-          const p = pct(tick.atMs);
-          if (p < 0 || p > 100) continue;
-          const index = Math.min(bins - 1, Math.floor((p / 100) * bins));
-          worst[index] = worst[index] === null ? tick.ms : Math.max(worst[index], tick.ms);
-        }
-        const o = perfRecord.overall;
-        const scale = niceCeil(Math.max(o.tickP99Ms * 1.6, o.tickAvgMs * 3, 1));
-        const bars = h("div", { className: "bars" });
-        const binMs = (v1 - v0) / bins;
-        worst.forEach((value, index) => {
-          const bar = h("i", { className: value === null ? "" : budgetClass(value, perfRecord.budgetMs),
-            title: value === null ? "" : `${R.offset(rel(v0 + index * binMs))}  worst tick ${fmtMs(value)}` });
-          bar.style.height = `${value === null ? 0 : Math.max(4, Math.min(100, (value / scale) * 100))}%`;
-          bars.append(bar);
-        });
-        const area = h("div", { className: "tr-area" }, bars);
-        box.append(trRow("dens srvtick", h("b", { text: "Server tick" }), `p99 ${fmtMs(o.tickP99Ms)} · max ${fmtMs(o.tickMaxMs)} · scale ${scale} ms`, area));
       }
       const overlay = h("div", { className: "tr-overlay" }, h("div", { className: "tcursor", id: "tr-cursor" }, h("b", { id: "tr-cursor-t" })));
       box.append(overlay);

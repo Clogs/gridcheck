@@ -67,6 +67,7 @@ by hand. When an entry already runs this tree's `mcp.js`, setup leaves it as it 
 | `e2e_watch` | `watch` | `seconds` defaults to 60, not the CLI's 600, because the call blocks for the whole watch. Call `e2e_act` in the same turn to watch its effect. |
 | `e2e_act` | `act` | A player action, with the names a scenario's action step uses: `action`, `target`, `modules`, `drones`, `range`, `once`, `charge`, `count`, `timeout`. |
 | `e2e_log` | `log` | |
+| `e2e_perf` | `perf` | `seconds` (default 10) to sample, or `now`. See [Performance testing](#performance-testing). `e2e_up` takes `profile` and `profileEvery`, and `e2e_watch` takes `perf` and `perfEvery`. |
 | `e2e_run_scenario` | `run` | Writes a scenario it is handed, checks it, runs it. See below. |
 | `e2e_report` | none | Reads a run's `report.md` and `result.json`; waits for a background run. |
 
@@ -314,6 +315,7 @@ From the ships, drones, wrecks, containers and structures the session can see:
 | `DESTROYED`, `KILLMAIL` | A ship replaced by a wreck within 20 km. The killmail ID follows when the killmail worker writes it, within 20 s. |
 | `SELF`, `DOCKED`, `SYSTEM`, `MOVED` | Your own ship, dock state or system changed, or you jumped more than 1,000 km inside a system (warp, `/tr me <celestial>`). The last two start a new baseline. |
 | `LOG` | A server log line tagged `NpcController`, or with a tag a plugin lists, that names a ball the watch has seen. `--grep <regex>` keeps every line matching it instead; `--no-log` drops them. |
+| `PERF`, `PROFILE` | With `--perf`: the server's ticks every 5 s, and each tick profiler window. See [Performance testing](#performance-testing). |
 
 Plugins add kinds of their own, often from an off-grid scan of the system you are in. In
 `timeline.jsonl` each core event about a ball carries its `groupKey` and the plugins' data at
@@ -478,10 +480,10 @@ node tools/evejs-e2e/bin/e2e.js run loadout-npc-fight             # [--run <id>]
 | Key | What it holds |
 | --- | --- |
 | `world` or `recipe` | A saved world (`e2e world list`), `"fresh"`, or `"recipe": "<name>"` for a world the tool builds ([WORLDS.md](WORLDS.md)). One is required. |
-| `up` | `market` (default `true`), `timeout` (boot, seconds), and the plugins' `up` flags. |
+| `up` | `market` (default `true`), `timeout` (boot, seconds), `profile` (boot with the tick profiler; turns `watch.perf` on), `profileEvery` (ticks per profiler window, default 50), and the plugins' `up` flags. |
 | `setup` | Steps, in order. A login runs first if the list doesn't start with one. |
 | `during` | Steps that run after setup, beside the stop conditions; see [During](#during). Optional. |
-| `watch` | `every` (2 s), `offgridEvery` (5 s), `client` (`diverge` by default; `FX` lines need `"fx"` or `"all"`, `CLIENT` lines `"all"`), `divergeMeters`, `log` (`true`), `grep`. |
+| `watch` | `every` (2 s), `offgridEvery` (5 s), `client` (`diverge` by default; `FX` lines need `"fx"` or `"all"`, `CLIENT` lines `"all"`), `divergeMeters`, `log` (`true`), `grep`, `perf` (`true` for a `PERF` window every 5 s, or seconds). |
 | `until` | `any`: stop conditions; the first one met stops the run. `timeout`: seconds after setup, required. `grace`: seconds to keep watching after a stop condition, e.g. for the `KILLMAIL` after a `DESTROYED`. `from`: `"setup"` (default) matches only events after setup ends; `"start"` matches every event since the watch began, for a stop condition that setup itself causes, such as the `GRID` after an undock. |
 | `expect` | Expected observations, as conditions. `"no <condition>"` or `{ "match": ..., "absent": true }` expects none. `{ "match": ..., "note": ... }` adds a note to the report. |
 | `name`, `description` | Default name: the file name. |
@@ -634,6 +636,7 @@ They start from `fresh` or the `starter` recipe, so they run in any tree.
 | `gate-rats` | Stock gate rats (`/gaterats`) | `teleport Siseide` (lands on a gate), `/gaterats on` | `DESTROYED self` |
 | `concord-highsec` | CONCORD in high sec | `teleport Rens`, `/naughty` | `DESTROYED self` |
 | `loadout-npc-fight` | A fitted ship's drones and guns | `/npc 2` Blood Raider frigates; launch and engage drones, lock, orbit, fire | the locked rat destroyed, then 10 s |
+| `perf-npc-load` | How the tick copes with a fight, with the profiler on | `undock`, 15 s of baseline, `/npctest2 20` | 60 s of the fight |
 
 On the unpacked stock zip with the three patches applied, `starter` built in 18 s and
 `loadout-npc-fight` passed 8 of 8 in 55 s, boot and shutdown included.
@@ -683,6 +686,115 @@ committed, so don't link into it; attach the SVGs, or PNGs rendered from them wi
 Chrome: `chrome --headless=new --screenshot=frame.png --window-size=1100,760 file:///<path>.svg`.
 When the scenario isn't in a folder a reviewer has, the citation warns that it can't be rerun. A
 failed run is cited the same way: its MISSING rows and timeline are the finding.
+
+## Performance testing
+
+How the server copes with a load. Take a baseline, add the load, and compare the server's ticks
+before and after. The space runtime ticks every 100 ms, so a tick has 100 ms of budget.
+
+```bash
+node tools/evejs-e2e/bin/e2e.js up --world starter --profile   # boot with the tick profiler
+node tools/evejs-e2e/bin/e2e.js login
+node tools/evejs-e2e/bin/e2e.js undock
+node tools/evejs-e2e/bin/e2e.js perf --for 10                  # the baseline
+node tools/evejs-e2e/bin/e2e.js slash "/npctest2 20"           # 20 NPCs fighting each other
+node tools/evejs-e2e/bin/e2e.js perf --for 30                  # the load
+node tools/evejs-e2e/bin/e2e.js run perf-npc-load              # all of that, with a report
+```
+
+`/npctest2 20` spawns 20 NPCs that fight each other and leave your ship alone. `/npc 20` spawns 20
+that attack you. From Git Bash, set `MSYS_NO_PATHCONV=1`, or Git Bash turns `/npctest2` into a
+Windows path before the CLI sees it.
+
+```
+over 30 s: 273 ticks, budget 100 ms a tick
+  tick       avg 16.3  p50 14.7  p95 31.5  p99 37.1  max 39.3 ms; 0 over budget
+  late       avg 9.67  max 12.7 ms after the tick was due
+  event loop p50 11.3  p99 28.4  max 48.7 ms delay
+  process    cpu 21% of a core, heap 2062 MB, rss 2348 MB
+  world      1 scene(s) ticking, 21 entities
+
+  busiest scenes  avg ms  max ms  entities  sessions
+  Amamake           16.9    36.8        21         1
+
+tick profiler: 5 window(s), 250 ticks, 15.6 ms/tick in all
+  section                  ms/tick  share  calls
+  mv.visibility               7.07  45.4%    250
+  mv.entityLoop               3.21  20.7%    250
+  npc                         2.80  18.0%    250
+  ...
+```
+
+### Where the figures come from
+
+- **Ticks need no flag.** The space runtime keeps a ring of its last 120 tick summaries: each
+  tick's duration, how late it started, and the interval since the last one. The bridge reads that
+  ring (`bridge/perf.js`), so the figures cost the server nothing it doesn't already spend. Stock
+  EveJS keeps the ring on a runtime object it doesn't export. The bridge finds it with a one-shot
+  wrapper on the runtime's `tick()`, which the first tick removes.
+- **The breakdown needs the tick profiler.** `e2e up --profile` sets `EVEJS_TICK_PROFILE=1` and
+  `EVEJS_TICK_PROFILE_EVERY` (`--profile-every`, default 50 ticks, 5 s). The tree's own profiler
+  (`space/tickProfiler.js`) then logs a `[TickProfile]` block each window. The bridge parses each
+  one as it is logged, and the line still reaches the log. A `↳` row is inside the row above it, so
+  it doesn't add to the total. `other(...)` is tick work outside any named section. A row marked
+  `(after tick)` ran after the tick's measured end. Stock marks no nesting, so the bridge treats a
+  row as nested when another row's label is a dot-prefix of its own (`npc.think` is inside `npc`).
+- **The process.** CPU as a share of one core, heap and RSS, and event-loop delay from a
+  `perf_hooks` histogram that runs only while something samples. Windows rounds timers up to its
+  15.6 ms clock tick, so an idle server shows about 11 ms of loop delay there.
+- **The world.** How many scenes ticked, their entities, the lowest time dilation, and the three
+  busiest scenes by work per tick.
+
+`e2e status` says whether the running server has the profiler. In auto or attach mode, a server you
+started has it only if you set `EVEJS_TICK_PROFILE=1`. Without it you still get every tick figure.
+
+### Commands
+
+| Command | Does |
+| --- | --- |
+| `e2e perf [--for 10] [--json]` | Samples that many seconds (1 to 600), then prints the ticks, the process, the busiest scenes and the profiler's sections merged over the windows that ended in the sample. Needs a server up, not a character. |
+| `e2e perf --now` | The ticks the runtime holds now, about the last 12 s, at once. No CPU or loop delay, which need a window to measure over. |
+| `e2e up --profile [--profile-every 50]` | Boots with the tick profiler. |
+| `e2e watch --perf [--perf-every 5]` | Adds a `PERF` line per window and a `PROFILE` line per profiler window to the timeline. |
+
+The bridge routes are `GET /perf` and `POST /perf { seconds }`, and `perfEverySeconds` on
+`POST /watch`. At most four samples run at once.
+
+### In a scenario
+
+`"up": { "profile": true }` boots with the profiler and turns `watch.perf` on. `"watch": { "perf":
+true }` alone records ticks without the breakdown. Both kinds can be matched:
+
+| Kind | Fields |
+| --- | --- |
+| `PERF` | `windowMs`, `ticks`, `missedTicks`, `budgetMs`, `tickAvgMs`, `tickP50Ms`, `tickP95Ms`, `tickP99Ms`, `tickMaxMs`, `overBudget` (ticks over 100 ms), `lateAvgMs`, `lateMaxMs`, `loopP50Ms`, `loopP99Ms`, `loopMaxMs`, `cpuPct`, `rssMB`, `heapMB`, `scenes`, `entities`, `tidiMin`, and `busiest` (`systemName`, `workAvgMs`, `workMaxMs`, `entities`, `sessions`). Each event also carries `series`, every tick's time and duration, for the report and the GUI. |
+| `PROFILE` | `ticks`, `totalMsPerTick`, `totalLabel`, and `sections` (`label`, `msPerTick`, `pct`, `calls`, `msPerCall`, `nested`, `afterTick`). |
+
+```json
+"expect": [
+  { "match": "no PERF overBudget>=5", "note": "no 5 s window has 5 of its 50 ticks over budget" },
+  { "match": "no PERF tickP99Ms>=100ms" },
+  "PROFILE sections.label=npc"
+]
+```
+
+A condition on a list matches when any element passes each term, and each term can pass on a
+different element. So `PROFILE sections.label=npc sections.msPerTick>5` doesn't mean npc took
+5 ms. A `PERF` condition needs `watch.perf`, and a `PROFILE` one needs `up.profile`; the check says
+so before anything boots.
+
+The report gets a "Server performance" section. It gives the whole run's figures, then a table of
+phases. Each phase starts where a setup or `during` step ended and is named for that step, so the
+time before a spawn is the baseline for the time after it. Ticks go to a phase by their own time,
+so a window that spans a step splits at it. Then come the profiler's sections, merged over the
+whole run. `result.json` has the same figures under `perf`. The GUI's Perf tab draws them
+([GUI.md](GUI.md#perf)).
+
+`perf-npc-load` runs on stock: 15 s of one ship on grid, then 20 NPCs for 60 s. On 2026-10-02 on
+the unpacked 0.12.9 zip, the baseline tick averaged 2.4 ms (p99 6.5 ms). With the fight it averaged
+20.2 ms (p99 48.6 ms, max 65.6 ms). `mv.visibility` cost 8.1 ms of the 15.8 ms the profiler
+named. A second run's fight went to 38.8 ms on average, with 3 ticks over budget, so judge a change
+against several runs.
 
 ## Viewer
 
