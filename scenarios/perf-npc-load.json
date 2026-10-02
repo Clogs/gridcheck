@@ -13,6 +13,6 @@
     { "match": "DAMAGE label!=self", "note": "and fight" },
     { "match": "PERF ticks>=40", "note": "the watch read the server's ticks" },
     { "match": "PROFILE totalMsPerTick>0", "note": "the tick profiler broke them down by subsystem" },
-    { "match": "no PERF tickP99Ms>=100", "note": "in every 5 s window, 99% of ticks fit the 100 ms a tick has" }
+    { "match": "no PERF overBudget>=5", "note": "no 5 s window has 5 of its 50 ticks over the 100 ms a tick has; on stock the fight puts the odd one over" }
   ]
 }

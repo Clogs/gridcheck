@@ -75,7 +75,7 @@
       at: null, playing: false, speed: 4, follow: true, zoom: "auto",
       off: new Set(["CLIENT", "PERF", "PROFILE"]), grep: null,
       view: ["workbench", "trace"].includes(shell.params.get("view")) ? shell.params.get("view") : (localStorage.getItem("e2eGuiView") || "workbench"),
-      itab: "summary", selBall: null, selEvent: -1, win: null,
+      itab: ITABS.some(([id]) => id === shell.params.get("tab")) ? shell.params.get("tab") : "summary", selBall: null, selEvent: -1, win: null,
       openGroups: new Set(), closedGroups: new Set(), only: "all", filter: "",
       colourRules: [], palette: new Map(), current: -1, rows: [], frameURLs: new Map(),
       visible: false, treeKey: null, startT: Number(shell.params.get("t")),
@@ -874,9 +874,6 @@
         label.textContent = value >= 10 || value === 0 ? String(Math.round(value)) : value.toFixed(1);
         svg.append(label);
       }
-      const unit = el("text", { x: 2, y: pad.t - 2, className: "pf-yl" });
-      unit.textContent = "ms";
-      svg.append(unit);
       const bins = Math.max(1, Math.floor(pw / 2));
       const cols = Array.from({ length: bins }, () => ({ max: null, sum: 0, n: 0 }));
       for (const tick of ticks) {
@@ -907,16 +904,23 @@
         label.textContent = `budget ${budget} ms is off the top`;
         svg.append(label);
       }
-      // Each setup and during step, numbered as in the phase table.
+      // Each setup and during step, numbered as in the phase table. Steps that
+      // end within a few pixels of each other share one label, "2,3".
+      let lastLabel = null;
       record.phases.forEach((phase, index) => {
         if (!phase.step) return;
         const px = x(phase.fromMs);
         if (px < pad.l || px > W - pad.r) return;
         const mark = el("g", { className: "pf-step" });
         mark.append(el("line", { x1: px, x2: px, y1: pad.t, y2: pad.t + ph }), svgTitle(`${phase.label} at ${R.offset(rel(phase.fromMs))}`));
-        const label = el("text", { x: px + 2, y: H - 5 });
-        label.textContent = String(index);
-        mark.append(label);
+        if (lastLabel && px - lastLabel.px < 12) {
+          lastLabel.node.textContent += `,${index}`;
+        } else {
+          const label = el("text", { x: px + 2, y: H - 5 });
+          label.textContent = String(index);
+          mark.append(label);
+          lastLabel = { px, node: label };
+        }
         svg.append(mark);
       });
       svg.append(el("line", { id: "pf-cur", className: "pf-cur", x1: pad.l, x2: pad.l, y1: pad.t, y2: pad.t + ph }));
@@ -951,7 +955,7 @@
       cell("Over budget", String(o.overBudget), o.overBudget ? "bad" : "ok", `ticks that took longer than the ${budget} ms a tick has`);
       wrap.append(tot);
 
-      wrap.append(h("div", {}, h("div", { className: "shead" }, h("h2", { text: "Tick time" }),
+      wrap.append(h("div", {}, h("div", { className: "shead" }, h("h2", { text: "Tick time, ms" }),
         h("span", { className: "count", text: "worst per column, average line; click to seek" })), perfChart(record, ticks)));
 
       if (record.phases.length) {
@@ -1016,7 +1020,8 @@
       const o = record.overall;
       return h("button", { type: "button", className: `pf-strip ${budgetClass(o.tickP99Ms, record.budgetMs)}`, onclick: () => { state.itab = "perf"; renderInspector(); } },
         h("span", { className: "k", text: "Server tick" }),
-        h("span", { text: `p99 ${fmtMs(o.tickP99Ms)} · max ${fmtMs(o.tickMaxMs)} · ${o.overBudget} over ${record.budgetMs} ms` }),
+        h("span", { className: "pf-sv", title: `${o.overBudget} ticks over the ${record.budgetMs} ms budget`,
+          text: `p99 ${fmtMs(o.tickP99Ms)} · max ${fmtMs(o.tickMaxMs)} · ${o.overBudget} over` }),
         h("span", { className: "spacer" }), h("span", { className: "muted", text: "Perf ›" }));
     }
 
@@ -1290,7 +1295,7 @@
           bars.append(bar);
         });
         const area = h("div", { className: "tr-area" }, bars);
-        box.append(trRow("dens tick", h("b", { text: "Server tick" }), `p99 ${fmtMs(o.tickP99Ms)} · max ${fmtMs(o.tickMaxMs)} · scale ${scale} ms`, area));
+        box.append(trRow("dens srvtick", h("b", { text: "Server tick" }), `p99 ${fmtMs(o.tickP99Ms)} · max ${fmtMs(o.tickMaxMs)} · scale ${scale} ms`, area));
       }
       const overlay = h("div", { className: "tr-overlay" }, h("div", { className: "tcursor", id: "tr-cursor" }, h("b", { id: "tr-cursor-t" })));
       box.append(overlay);

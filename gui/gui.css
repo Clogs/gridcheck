@@ -518,12 +518,14 @@ dialog.wide img { width: 100%; display: block; background: var(--map-bg); }
 .pf-strip { display: flex; align-items: center; gap: 10px; width: 100%; padding: 7px 10px; border: 1px solid var(--line); border-radius: 6px;
   background: var(--panel2); color: var(--text); font: inherit; font-size: 12px; text-align: left; cursor: pointer; font-variant-numeric: tabular-nums; }
 .pf-strip:hover { border-color: #33414f; }
-.pf-strip .k { font-size: 10px; text-transform: uppercase; letter-spacing: 0.07em; color: var(--dim); }
+.pf-strip .k { font-size: 10px; text-transform: uppercase; letter-spacing: 0.07em; color: var(--dim); white-space: nowrap; }
+.pf-strip .pf-sv { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pf-strip .muted { white-space: nowrap; }
 .pf-strip.ok { box-shadow: inset 3px 0 0 var(--ok); } .pf-strip.warn { box-shadow: inset 3px 0 0 var(--warn); } .pf-strip.bad { box-shadow: inset 3px 0 0 var(--bad); }
-.dens.tick .bars i { background: color-mix(in srgb, var(--accent) 55%, transparent); }
-.dens.tick .bars i.ok { background: color-mix(in srgb, var(--ok) 60%, transparent); }
-.dens.tick .bars i.warn { background: var(--warn); }
-.dens.tick .bars i.bad { background: var(--bad); }
+.dens.srvtick .bars i { background: color-mix(in srgb, var(--accent) 55%, transparent); }
+.dens.srvtick .bars i.ok { background: color-mix(in srgb, var(--ok) 60%, transparent); }
+.dens.srvtick .bars i.warn { background: var(--warn); }
+.dens.srvtick .bars i.bad { background: var(--bad); }
 
 @media (max-width: 1180px) {
   .wb { grid-template-columns: 230px minmax(0, 1fr) 320px; }

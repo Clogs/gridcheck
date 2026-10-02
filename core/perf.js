@@ -363,7 +363,8 @@
     lines.push(`${o.ticks} ticks in ${record.windows} window(s), budget ${record.budgetMs} ms a tick` +
       `${record.missedTicks ? `, ${record.missedTicks} ticks missed between samples` : ""}. ` +
       `Tick ${ms(o.tickAvgMs)} ms on average, p95 ${ms(o.tickP95Ms)}, p99 ${ms(o.tickP99Ms)}, max ${ms(o.tickMaxMs)}; ` +
-      `${o.overBudget} over budget. Event loop delay p99 up to ${ms(o.loopP99Ms)} ms, CPU up to ` +
+      `${o.overBudget} over budget. Event loop delay p99 up to ${ms(o.loopP99Ms)} ms` +
+      `${o.loopMaxMs !== null && o.loopMaxMs > o.loopP99Ms ? ` and once ${ms(o.loopMaxMs)} ms` : ""}, CPU up to ` +
       `${o.cpuPctMax === null ? "-" : Math.round(o.cpuPctMax)}% of a core, heap up to ${o.heapMBMax === null ? "-" : Math.round(o.heapMBMax)} MB` +
       `${o.tidiMin !== null && o.tidiMin < 1 ? `, time dilation down to ${o.tidiMin}` : ""}.`, "");
     if (record.phases.length) {
