@@ -67,6 +67,8 @@ input::placeholder { color: var(--dim); }
 .badge .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; box-shadow: 0 0 6px currentColor; }
 .badge.ok { --c: var(--ok); } .badge.bad { --c: var(--bad); } .badge.warn { --c: var(--warn); }
 .badge.info { --c: var(--accent); } .badge.mute { --c: var(--muted); } .badge.div { --c: var(--k-div); }
+button.badge { background: transparent; cursor: pointer; }
+button.badge:hover, button.badge:focus-visible { background: color-mix(in srgb, var(--c) 18%, transparent); }
 .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--muted); }
 .dot.ok { background: var(--ok); box-shadow: 0 0 6px var(--ok); } .dot.warn { background: var(--warn); } .dot.bad { background: var(--bad); }
 
@@ -88,7 +90,7 @@ input::placeholder { color: var(--dim); }
 .logo polygon { fill: none; stroke: var(--accent); stroke-width: 1.6; }
 .logo circle { fill: var(--accent); }
 .tree { display: flex; align-items: center; gap: 6px; }
-.tree select { max-width: 52ch; }
+.tree select { max-width: 72ch; }
 #message { font-size: 12px; color: var(--bad); }
 #message.ok { color: var(--ok); }
 

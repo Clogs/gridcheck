@@ -107,6 +107,22 @@ test("from a checkout it offers trees beside it, adds a typed one and remembers 
   assert.match((await own.handle("POST", "/gui/api/trees", {}, { path: s.other })).body.error, /manages its own tree only/);
 });
 
+test("the tree list gives each tree's EveJS version and its scenario runs, passed and failed", async (t) => {
+  const s = setup(t);
+  write(s.tree, "server/package.json", JSON.stringify({ name: "eve.js", version: "0.12.9" }));
+  write(s.other, "package.json", JSON.stringify({ name: "evejs-repo", version: "0.12.6" }));
+  const runs = path.join(s.tree, "_local", "e2e", "runs");
+  write(runs, "20261001-130000-demo/result.json", JSON.stringify({ name: "demo", passed: false, exitCode: 1 }));
+  write(runs, "20261001-130000-watch/timeline.jsonl", "\n");
+  const app = gui.createGui({ context: s.context, stateFile: s.stateFile, run: fakeRun().run });
+  const listed = body(await app.handle("GET", "/gui/api/trees")).trees;
+  const byName = Object.fromEntries(listed.map((tree) => [tree.name, tree]));
+  assert.strictEqual(byName.tree.evejs, "0.12.9");
+  assert.deepStrictEqual(byName.tree.runs, { total: 2, passed: 1, failed: 1 });
+  assert.strictEqual(byName.other.evejs, "0.12.6");
+  assert.deepStrictEqual(byName.other.runs, { total: 0, passed: 0, failed: 0 });
+});
+
 test("a tree's summary names the copy, the shim, the config and what the tree still needs", async (t) => {
   const s = setup(t);
   const app = gui.createGui({ context: s.context, stateFile: s.stateFile, run: fakeRun().run });

@@ -263,6 +263,39 @@ function prerequisites(root, config) {
   return rows;
 }
 
+// A finished run's verdict never changes, so the tree list, polled every 30 s,
+// reads each result.json once.
+const verdicts = new Map();
+const MAX_VERDICTS = 20_000;
+
+// Scenario runs (the ones with a result.json) in a runs directory. Watch-only
+// runs and runs still going have none and aren't counted.
+function runCounts(runsDir) {
+  const counts = { total: 0, passed: 0, failed: 0 };
+  let entries;
+  try {
+    entries = fs.readdirSync(runsDir, { withFileTypes: true });
+  } catch (_error) {
+    return counts;
+  }
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    const dir = path.join(runsDir, entry.name);
+    let passed = verdicts.get(dir);
+    if (passed === undefined) {
+      const result = readJSON(path.join(dir, "result.json"));
+      if (!result) continue;
+      passed = result.passed === true;
+      if (verdicts.size >= MAX_VERDICTS) verdicts.clear();
+      verdicts.set(dir, passed);
+    }
+    counts.total += 1;
+    if (passed) counts.passed += 1;
+    else counts.failed += 1;
+  }
+  return counts;
+}
+
 // One line per tree for the list; summarizeTree has the rest.
 function listEntry(root, trees) {
   const manifest = readJSON(path.join(root, vendor.VENDOR_DIR, vendor.MANIFEST_NAME));
@@ -277,6 +310,7 @@ function listEntry(root, trees) {
     copy: manifest ? { version: manifest.version || null, commit: manifest.commit || null } : null,
     mode: config && config.exists ? config.mode : null,
     up: config ? Boolean(serverUpReason(root, config)) : false,
+    runs: config ? runCounts(config.runsDir) : { total: 0, passed: 0, failed: 0 },
   };
 }
 

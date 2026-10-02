@@ -27,6 +27,10 @@ committed `HEAD`. Its tree list holds:
 - trees added on the Install tab by typing a path, remembered in the checkout's `_local/gui.json`;
 - the checkout's sibling folders that are EveJS trees (they have `server/src`).
 
+The **Tree** picker in the header names each tree's EveJS version (from `server/package.json`),
+its e2e copy and its scenario runs, passed and failed, and lists the trees with the most runs
+first. Hover an entry for its path. The badge beside the picker opens the Install tab.
+
 Run from a tree's vendored copy, it manages that tree only. It can still update the copy, from a
 checkout path you type.
 
@@ -210,7 +214,7 @@ The page uses a small JSON API, and a script or an agent can call it the same wa
 | Call | Does |
 | --- | --- |
 | `GET /gui/api/context` | Checkout or vendored copy, its version and commit. |
-| `GET /gui/api/trees` | The tree list: `id`, `root`, copy version, mode, server up. |
+| `GET /gui/api/trees` | The tree list: `id`, `root`, EveJS version (`evejs`), copy version, mode, server up, and `runs` (`total`, `passed`, `failed` scenario runs). |
 | `POST /gui/api/trees` `{ "path": "F:/EveJS-0.12.9" }` | Add a tree. |
 | `GET /gui/api/tree?tree=<id>` | The Install tab's summary: `copy`, `shim`, `config`, `prerequisites` (each `{ name, ok, fix }`), `serverUp`, `plugins`, `agents` (each `{ id, name, installed, evidence, file, registered, serverName, problem }`). |
 | `GET /gui/api/doctor?tree=<id>` | `e2e doctor --json`, parsed. |

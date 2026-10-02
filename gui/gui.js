@@ -249,17 +249,30 @@
 
   async function loadTrees() {
     const body = await api("/gui/api/trees");
-    state.trees = body.trees || [];
+    // Most-tested trees first.
+    const total = (tree) => (tree.runs ? tree.runs.total : 0);
+    state.trees = (body.trees || []).slice().sort((a, b) => total(b) - total(a) || a.name.localeCompare(b.name));
     if (!state.trees.some((tree) => tree.id === state.treeID)) {
       state.treeID = (state.trees.find((tree) => tree.copy) || state.trees[0] || {}).id || null;
     }
     const select = $("tree");
     select.textContent = "";
-    for (const tree of state.trees) select.append(h("option", { value: tree.id, text: `${tree.name} — ${tree.root}` }));
+    for (const tree of state.trees) select.append(h("option", { value: tree.id, text: treeLabel(tree), title: tree.root }));
     if (state.treeID) select.value = state.treeID;
     renderTreeBadges();
     renderTreeCards();
     renderContext();
+  }
+
+  // "dev · EveJS 0.12.9 · e2e 0.1.0 · 12 runs: 10 pass, 2 fail"
+  function treeLabel(tree) {
+    const runs = tree.runs || { total: 0 };
+    return [
+      tree.name,
+      `EveJS ${tree.evejs || "?"}`,
+      tree.copy ? `e2e ${tree.copy.version || "?"}` : tree.isTree ? "e2e not installed" : "not a tree",
+      runs.total ? `${runs.total} run${runs.total === 1 ? "" : "s"}: ${runs.passed} pass, ${runs.failed} fail` : "no runs",
+    ].join("  ·  ");
   }
 
   function currentTree() {
@@ -271,7 +284,10 @@
     box.textContent = "";
     const tree = currentTree();
     if (!tree) return;
-    box.append(tree.copy ? badge("ok", `e2e ${tree.copy.version || "?"} · ${short(tree.copy.commit)}`, true) : badge("warn", tree.isTree ? "not installed" : "not a tree"));
+    box.append(h("button", { type: "button", className: `badge ${tree.copy ? "ok" : "warn"}`, title: "Open the Install tab for this tree",
+      onclick: () => showTab("install") },
+      tree.copy ? h("i", { className: "dot" }) : null,
+      tree.copy ? `e2e ${tree.copy.version || "?"} · ${short(tree.copy.commit)}` : tree.isTree ? "not installed" : "not a tree"));
     if (tree.mode) box.append(badge("mute", tree.mode));
     if (tree.up) box.append(badge("warn", "server up", true));
   }
