@@ -178,3 +178,33 @@ test("trigger arguments become bridge bodies; a fleet goes to your grid unless -
   assert.throws(() => body(["fleet"]), /needs a family/);
   assert.throws(() => body(["spawn"]), /unknown trigger spawn/);
 });
+
+test("help --json: every core command has a summary, and every docs entry names a usage line", () => {
+  const { DOCS, GROUPS, buildCatalog, usageParts } = require("../core/commandDocs");
+  const catalog = buildCatalog({ core: CORE_COMMANDS });
+  assert.deepStrictEqual(catalog.commands.filter((command) => command.undocumented || !command.summary).map((command) => command.name), [],
+    "a command without an entry in core/commandDocs.js");
+  assert.deepStrictEqual(Object.keys(DOCS).filter((key) => !catalog.commands.some((command) => command.name === key)), [],
+    "a docs entry for a usage line the command table doesn't have");
+  const groups = new Set(GROUPS.map((group) => group.id));
+  for (const command of catalog.commands) assert.ok(groups.has(command.group), `${command.name}: group ${command.group}`);
+  const names = (prefix) => catalog.commands.filter((command) => command.name.split(" ")[0] === prefix).map((command) => command.name);
+  assert.deepStrictEqual(names("world").sort(), ["world build", "world copy", "world list", "world recipes", "world save"]);
+  assert.deepStrictEqual(names("patch"), ["patch"], "patch's parts have no entries of their own, so they stay one command");
+  assert.deepStrictEqual(usageParts("loadout", ["loadout <ship> [--json]", "loadout --file <x> | --spec '<json>'"]),
+    ["loadout <ship> [--json]", "loadout --file <x> | --spec '<json>'"], "a part that doesn't start with the name stays with the one before");
+  assert.deepStrictEqual(usageParts("watch", ["watch [--for 600]", "      [--perf]"]), ["watch [--for 600] [--perf]"]);
+  const up = catalog.commands.find((command) => command.name === "up");
+  assert.strictEqual(up.managed, true);
+  assert.strictEqual(up.mcp, "e2e_up");
+  assert.ok(up.flags.some((flag) => flag.flag === "--timeout" && flag.default === "600 s"));
+
+  const withPlugin = buildCatalog({ core: { help: CORE_COMMANDS.help },
+    plugins: { scouts: { usage: ["scouts [--all]"], summary: "Lists them.", needs: "up", plugin: "lu" } },
+    handlers: { teleport: [{ flags: ["flight"], usage: ["teleport <system> --flight <id>"], summary: "Pins a flight.", plugin: "lu" }] },
+    mcpTools: [{ name: "e2e_status", description: "Where things stand. Call this first." }] });
+  assert.deepStrictEqual(withPlugin.groups.map((group) => group.id), ["tool", "plugin:lu"]);
+  assert.deepStrictEqual(withPlugin.commands.filter((command) => command.plugin).map((command) => [command.name, command.needs || null]),
+    [["scouts", "up"], ["teleport --flight", null]]);
+  assert.deepStrictEqual(withPlugin.mcpTools, [{ name: "e2e_status", description: "Where things stand." }]);
+});

@@ -1053,9 +1053,35 @@ function systemsSeen(events) {
   return [...ids].filter((id) => Number.isInteger(id) && id > 0);
 }
 
+// run --json: what the GUI's Run a test card shows for each scenario.
+function describeScenarioRow(row) {
+  let raw = {};
+  try {
+    raw = JSON.parse(fs.readFileSync(row.file, "utf8"));
+  } catch (_error) {
+    raw = {};
+  }
+  const expect = (Array.isArray(raw.expect) ? raw.expect : []).map((entry) => (typeof entry === "string"
+    ? { text: entry, note: null, absent: /^no\s+/i.test(entry.trim()) }
+    : { text: String((entry && entry.match) || ""), note: entry && entry.note ? String(entry.note) : null, absent: Boolean(entry && entry.absent) }));
+  let problem = null;
+  try {
+    loadScenarioOrFail(row.file, { anyWorld: true });
+  } catch (error) {
+    problem = error.message;
+  }
+  return { name: row.name, file: relativePath(row.file), plugin: row.plugin, description: row.description,
+    world: raw.recipe || raw.world || null, recipe: raw.recipe || null,
+    timeout: raw.until && typeof raw.until.timeout === "number" ? raw.until.timeout : null, expect, problem };
+}
+
 async function cmdRun(positionals, flags) {
   if (!positionals[0]) {
     const rows = scenarioTools.listScenarios({ registry: REGISTRY });
+    if (flags.json) {
+      console.log(JSON.stringify(rows.map(describeScenarioRow), null, 2));
+      return;
+    }
     for (const row of rows) {
       console.log(`${row.name.padEnd(28)} ${String(row.world || "?").padEnd(16)} ${row.plugin ? `[${row.plugin}] ` : ""}${row.description}`);
     }
@@ -1731,17 +1757,32 @@ async function ensureRecipeWorld(name) {
   await buildRecipeWorld(recipe, { why });
 }
 
-function listRecipeWorlds() {
-  const rows = recipeTools.listRecipes();
-  for (const row of rows) {
-    let status;
+function listRecipeWorlds({ json = false } = {}) {
+  const rows = recipeTools.listRecipes().map((row) => {
     try {
       const recipe = recipeTools.loadRecipe(row.file, { resolveSystemID, registry: REGISTRY });
-      const why = recipeTools.recipeStale(worlds.savedWorldInfo(REPO_ROOT, recipe.name), currentFingerprint(recipe));
-      status = why ? `to build: ${why}` : "built, current";
+      const saved = worlds.savedWorldInfo(REPO_ROOT, recipe.name);
+      const why = recipeTools.recipeStale(saved, currentFingerprint(recipe));
+      return { ...row, state: why ? "to build" : "built", why: why || null, savedAt: saved ? saved.savedAt || null : null };
     } catch (error) {
-      status = `broken: ${error.message.split("\n").slice(1).join("; ").trim() || error.message}`;
+      return { ...row, state: "broken", why: error.message.split("\n").slice(1).join("; ").trim() || error.message, savedAt: null };
     }
+  });
+  if (json) {
+    console.log(JSON.stringify(rows.map((row) => {
+      let steps = [];
+      try {
+        steps = JSON.parse(fs.readFileSync(row.file, "utf8")).steps || [];
+      } catch (_error) {
+        steps = [];
+      }
+      return { name: row.name, file: relativePath(row.file), description: row.description, state: row.state, why: row.why,
+        savedAt: row.savedAt, steps };
+    }), null, 2));
+    return;
+  }
+  for (const row of rows) {
+    const status = row.state === "built" ? "built, current" : `${row.state === "broken" ? "broken" : "to build"}: ${row.why}`;
     console.log(`${row.name.padEnd(20)} ${status}\n${"".padEnd(20)} ${row.description}`);
   }
   if (!rows.length) console.log(`no recipes in ${relativePath(recipeTools.RECIPE_DIR)}`);
@@ -1754,7 +1795,7 @@ async function cmdWorld(positionals, flags) {
     if (action === "build" && positionals[1]) {
       await buildRecipeWorld(loadRecipeOrFail(positionals[1]), { force: Boolean(flags.force) });
     } else if (action === "recipes") {
-      listRecipeWorlds();
+      listRecipeWorlds({ json: Boolean(flags.json) });
     } else if (action === "copy" && flags.from) {
       requireManaged("world copy");
       requireWorldIdle();
@@ -2149,7 +2190,7 @@ const CORE_COMMANDS = {
   },
   world: {
     usage: ["world copy --from ../dev [--force]", "world save <name> [--note \"...\"] [--force] | world list",
-      "world build <recipe> [--force] | world recipes"],
+      "world build <recipe> [--force] | world recipes [--json]"],
     run: cmdWorld,
   },
   vendor: {
@@ -2202,10 +2243,10 @@ const CORE_COMMANDS = {
     run: (positionals, flags) => require("../core/gui").main([...positionals,
       ...Object.entries(flags).flatMap(([key, value]) => (value === true ? [`--${key}`] : [`--${key}`, String(value)]))]),
   },
-  run: { usage: ["run [<scenario>] [--check] [--run <id>] [--world <name>|fresh] [--keep-up | --reuse]"], run: cmdRun },
+  run: { usage: ["run [<scenario>] [--check] [--run <id>] [--world <name>|fresh] [--keep-up | --reuse] | run --json"], run: cmdRun },
   log: { usage: ["log [--grep NpcController] [--lines 40] [--any-pid]"], run: (_positionals, flags) => cmdLog(flags) },
   perf: { usage: ["perf [--for 10] [--now] [--json]"], run: (_positionals, flags) => cmdPerf(flags) },
-  help: { usage: ["help"], run: () => { console.log(helpText()); } },
+  help: { usage: ["help [--json]"], run: (_positionals, flags) => { console.log(flags.json ? JSON.stringify(commandCatalog(), null, 2) : helpText()); } },
 };
 
 function pluginCommands() {
@@ -2223,6 +2264,14 @@ function helpText() {
   }
   for (const [name, command] of Object.entries(pluginCommands())) push(name, command);
   return `node tools/evejs-e2e/bin/e2e.js <command>\n${lines.join("\n")}\n${describePlugins()}`;
+}
+
+// help --json: every command with its usage, summary and tags (core/commandDocs.js),
+// and the agents' MCP tools, for the GUI's Commands tab.
+function commandCatalog() {
+  const { TOOLS } = require("./mcp");
+  return require("../core/commandDocs").buildCatalog({ core: CORE_COMMANDS, plugins: pluginCommands(), handlers: REGISTRY.handlers,
+    mcpTools: TOOLS });
 }
 
 // Commands that run even when e2e.config.json is broken: they fix or report it.

@@ -63,6 +63,7 @@ const PAGES = Object.freeze({
   // The run's tick figures, as the report computes them (core/perf.js).
   "/gui/perf.js": [__dirname, "perf.js", "text/javascript; charset=utf-8"],
   "/gui/runs.js": [PAGE_DIR, "runs.js", "text/javascript; charset=utf-8"],
+  "/gui/commands.js": [PAGE_DIR, "commands.js", "text/javascript; charset=utf-8"],
   "/gui/gui.css": [PAGE_DIR, "gui.css", "text/css; charset=utf-8"],
   "/viewer": [VIEWER_DIR, "index.html", "text/html; charset=utf-8"],
   "/viewer/viewer.js": [VIEWER_DIR, "viewer.js", "text/javascript; charset=utf-8"],
@@ -230,16 +231,18 @@ function createTreeList({ context, stateFile = null, extra = [] }) {
 }
 
 // The tree's server, if it's up: a live bridge handshake, or a live `e2e up` run.
-function serverUpReason(root, config = treeConfig.loadTreeConfig(root)) {
+function serverUpInfo(root, config = treeConfig.loadTreeConfig(root)) {
   const handshake = readJSON(config.handshake);
-  if (handshake && handshake.port && pidAlive(Math.trunc(Number(handshake.pid) || 0))) {
-    return `the tree's server is up (pid ${handshake.pid})`;
-  }
+  if (handshake && handshake.port && pidAlive(Math.trunc(Number(handshake.pid) || 0))) return { pid: Number(handshake.pid), byE2e: false };
   const run = readJSON(path.join(config.e2eDir, "run.json"));
-  if (run && !run.stoppedAtMs && pidAlive(Math.trunc(Number(run.pid) || 0))) {
-    return `the tree's server is up (pid ${run.pid}, started by e2e up)`;
-  }
+  if (run && !run.stoppedAtMs && pidAlive(Math.trunc(Number(run.pid) || 0))) return { pid: Number(run.pid), byE2e: true };
   return null;
+}
+
+function serverUpReason(root, config = treeConfig.loadTreeConfig(root)) {
+  const up = serverUpInfo(root, config);
+  if (!up) return null;
+  return `the tree's server is up (pid ${up.pid}${up.byE2e ? ", started by e2e up" : ""})`;
 }
 
 function prerequisites(root, config) {
@@ -250,17 +253,52 @@ function prerequisites(root, config) {
     const where = slashed(path.relative(root, dir)) || ".";
     rows.push({
       name: where === "." ? "the tree's dependencies" : `${where} dependencies`,
+      path: where === "." ? "node_modules/" : `${where}/node_modules/`,
       ok: exists(path.join(dir, "node_modules")),
       fix: `npm ci in ${where === "." ? "the tree's root" : where}`,
     });
   }
   rows.push({
     name: "reference data",
+    path: `${slashed(path.relative(root, config.dataDir))}/`,
     ok: exists(path.join(config.dataDir, "solarSystems", "data.json")),
     fix: `build ${slashed(path.relative(root, config.dataDir))}: stock EveJS runs tools/DatabaseCreator/CreateDatabase.bat ` +
       "(README, Quick start)",
   });
   return rows;
+}
+
+// A finished run's verdict never changes, so the tree list, polled every 30 s,
+// reads each result.json once.
+const verdicts = new Map();
+const MAX_VERDICTS = 20_000;
+
+// Scenario runs (the ones with a result.json) in a runs directory. Watch-only
+// runs and runs still going have none and aren't counted.
+function runCounts(runsDir) {
+  const counts = { total: 0, passed: 0, failed: 0 };
+  let entries;
+  try {
+    entries = fs.readdirSync(runsDir, { withFileTypes: true });
+  } catch (_error) {
+    return counts;
+  }
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    const dir = path.join(runsDir, entry.name);
+    let passed = verdicts.get(dir);
+    if (passed === undefined) {
+      const result = readJSON(path.join(dir, "result.json"));
+      if (!result) continue;
+      passed = result.passed === true;
+      if (verdicts.size >= MAX_VERDICTS) verdicts.clear();
+      verdicts.set(dir, passed);
+    }
+    counts.total += 1;
+    if (passed) counts.passed += 1;
+    else counts.failed += 1;
+  }
+  return counts;
 }
 
 // One line per tree for the list; summarizeTree has the rest.
@@ -277,6 +315,7 @@ function listEntry(root, trees) {
     copy: manifest ? { version: manifest.version || null, commit: manifest.commit || null } : null,
     mode: config && config.exists ? config.mode : null,
     up: config ? Boolean(serverUpReason(root, config)) : false,
+    runs: config ? runCounts(config.runsDir) : { total: 0, passed: 0, failed: 0 },
   };
 }
 
@@ -324,9 +363,11 @@ function summarizeTree(root, { context, trees }) {
       mode: config.mode,
       problems: config.problems,
       runsDir: slashed(path.relative(root, config.runsDir)),
+      worldsDir: slashed(path.relative(root, config.worldsDir)),
     },
     prerequisites: prerequisites(root, config),
     serverUp: serverUpReason(root, config),
+    serverPid: (serverUpInfo(root, config) || {}).pid || null,
     // What this checkout's plugins make of the tree; doctor asks the tree's own copy.
     plugins: { active: loaded.active.map((row) => row.name), skipped: loaded.skipped },
     // The agents on this machine, and whether each already runs this tree's MCP server.
@@ -614,6 +655,36 @@ function createGui({ context = ownContext(), stateFile = null, extraTrees = [], 
     return { statusCode: 200, raw: { contentType: "image/svg+xml", body: fs.readFileSync(full) } };
   }
 
+  // The Commands tab: the tree's copy's own `help --json`. A copy too old for it,
+  // or no copy, gets this copy of e2e's list, read for that tree's plugins.
+  async function commands(root) {
+    let read = null;
+    try {
+      read = await cliRead(root, ["help", "--json"], "{");
+    } catch (_error) {
+      read = null;
+    }
+    if (read && read.json && Array.isArray(read.json.commands)) return { ...read.json, source: "tree", command: read.command };
+    const own = await run({ cwd: OWN_ROOT, args: [path.join(OWN_ROOT, "bin", "e2e.js"), "help", "--json"], env: { EVEJS_E2E_TREE: root } },
+      { timeoutMs: READ_TIMEOUT_MS });
+    let json = null;
+    try {
+      json = JSON.parse(own.output.slice(own.output.indexOf("{")));
+    } catch (_error) {
+      throw new GuiError(`couldn't read the command list: ${own.output.slice(0, 300)}`, 500);
+    }
+    return { ...json, source: "tool", note: read
+      ? "This tree's copy of e2e is older than this list, so it shows the commands of the e2e running this page. Update the copy for its own."
+      : "e2e isn't installed in this tree, so this is the list of the e2e running this page." };
+  }
+
+  // The Run a test card: the tree's scenarios and world recipes, from its copy.
+  // A copy without `run --json` gives null, and the card falls back to fixed commands.
+  async function scenarioList(root) {
+    const [list, recipes] = await Promise.all([cliRead(root, ["run", "--json"], "["), cliRead(root, ["world", "recipes", "--json"], "[")]);
+    return { scenarios: Array.isArray(list.json) ? list.json : null, recipes: Array.isArray(recipes.json) ? recipes.json : null };
+  }
+
   const json = (body, statusCode = 200) => ({ statusCode, body: { ok: true, ...body } });
 
   async function route(method, pathname, query, body) {
@@ -635,6 +706,8 @@ function createGui({ context = ownContext(), stateFile = null, extraTrees = [], 
     if (method === "GET" && pathname === "/gui/api/patches") {
       return json({ patches: await cliRead(trees.find(query.tree), ["patch", "status", "--json"], "[") });
     }
+    if (method === "GET" && pathname === "/gui/api/commands") return json({ commands: await commands(trees.find(query.tree)) });
+    if (method === "GET" && pathname === "/gui/api/scenarios") return json(await scenarioList(trees.find(query.tree)));
     if (method === "POST" && pathname === "/gui/api/preview") return json({ preview: await preview(body) });
     if (method === "POST" && pathname === "/gui/api/run") return json({ result: await runPreview(body) });
     if (method === "GET" && pathname === "/gui/api/runs") return viewerFor(trees.find(query.tree)).viewer.handle("GET", "/viewer/runs", {});

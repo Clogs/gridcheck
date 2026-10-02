@@ -27,8 +27,22 @@ committed `HEAD`. Its tree list holds:
 - trees added on the Install tab by typing a path, remembered in the checkout's `_local/gui.json`;
 - the checkout's sibling folders that are EveJS trees (they have `server/src`).
 
+The **Tree** picker in the header lists, in columns, each tree with its path, its EveJS version (from
+`server/package.json`; each version gets its own colour), whether e2e is installed, and its scenario
+runs with a pass bar and passed and failed counts. Trees with the most runs come first. Arrow keys,
+Enter and Escape work in the list. The tag beside the picker (installed or not installed) opens the
+Install tab.
+
 Run from a tree's vendored copy, it manages that tree only. It can still update the copy, from a
 checkout path you type.
+
+Under the tabs, the context bar describes the chosen tree. The server has the block on the left:
+whether it's up (with its pid), and what a run does about that in the tree's mode, for example
+"Managed mode starts it for each run" or, with a server up in managed mode, that a run needs it
+stopped first. To its right are the mode, the EveJS version, the copy, the active plugins and the
+tree's folder; on the Runs tab also the run's world and client view. Hover or focus a fact for
+more: the copy's card has its installed and checked-out versions, whether its files still match,
+and **Update…** when there's a newer commit. Click the folder to copy it.
 
 ## Runs
 
@@ -125,9 +139,14 @@ tree shows its path and its EveJS version, read from the tree's `server/package.
 filter box appears once there are six trees or more.
 
 For the chosen tree, a banner at the top says whether it can run tests: "Ready to run tests", how
-many things are left to do, or "Not set up yet" with an Install button. Below it is a checklist.
-Each row has a mark (done, needed, optional, a problem, or information), one line on its state and
-at most one button. Click a row to open its details. Rows that need you start open.
+many things are left to do, or "Not set up yet" with an Install button. A bar under its text has
+one segment per row. Below it is a checklist. Each row has an icon for its topic with a badge for
+its state (done, needed, optional, a problem, or information), one line on its state and at most
+one button. Click a row to open its details. Rows that need you start open. The Install tab's
+count is the number of rows that keep the tree from running tests.
+
+Paths, commands, commits, versions and environment variables on this tab are coloured chips, one
+colour and icon per kind; the legend above the banner shows them. Click a chip to copy it.
 
 1. **e2e is installed.** Not installed, or its version and commit, and whether it still matches
    its `VENDOR.json` (the drift check, with every edited, added or missing file in the details).
@@ -154,8 +173,46 @@ at most one button. Click a row to open its details. Rows that need you start op
 6. **The game server.** Whether it's up, and what that means in the tree's mode. It never blocks
    the banner.
 
-Under the checklist, **Run a test** has the commands to run once the tree is ready, each with a
-Copy button, and a second tab on asking a connected agent instead.
+Under the checklist, **Run a test** shows how to run one once the tree is ready, in two steps:
+
+1. **The world.** For a scenario that names a recipe, `e2e world build <recipe>` with a label under
+   each part, whether that world is built and current, what each recipe step does, where it's
+   saved, and that it needs the server down. The step is optional, since a run builds a missing or
+   stale recipe world itself. A scenario on a fresh or saved world has nothing to build. In attach
+   mode this step is `e2e login` on the server you started.
+2. **The scenario.** Pick one of the tree's scenarios (its own, the core's, each plugin's; a chip's
+   colour is its last run's verdict, and one that doesn't load is struck through). The card shows
+   the command, the scenario's description, what it checks, where it starts and when it stops, its
+   last run and the scenario file. `--check`, `--keep-up` and `--reuse` change the command.
+
+A note under the steps says how many of the Patches tab's patches are on. The scenarios and
+recipes come from the tree's own copy (`e2e run --json`, `e2e world recipes --json`). A copy too
+old for them gets the two fixed commands instead, with a note to update it.
+
+The second tab, **Ask your agent**, names the connected agents, offers requests to copy and lists
+the MCP tools they have.
+
+## Commands
+
+Every command the tree's copy has, from its `e2e help --json`, in groups: set up, worlds, server,
+character and ship, watch and read, scenarios, this tool, and one group per active plugin. Each row
+has the command, a one-line summary, its usage and tags:
+
+| Tag | Means |
+| --- | --- |
+| server up | It needs a running server. |
+| server down | It needs the server stopped. |
+| auto · managed | Attach mode refuses it. |
+| writes files | It changes files in the tree. |
+| MCP | Agents have a tool for the same thing. |
+
+Open a row for every usage line, its flags with their defaults, its choices (such as `act`'s
+actions), examples and notes. The search box matches names, summaries, usage and flags; **Works
+now** keeps the commands the tree can run with its server as it is. The copy button on each row
+copies `node tools/evejs-e2e/bin/e2e.js <command>`. A copy older than `help --json`, or a tree
+without one, shows the list of the e2e running the page, and says so. The summaries live in
+`core/commandDocs.js` beside the command table's usage lines; a test fails when a command has
+none.
 
 ## Patches
 
@@ -210,9 +267,11 @@ The page uses a small JSON API, and a script or an agent can call it the same wa
 | Call | Does |
 | --- | --- |
 | `GET /gui/api/context` | Checkout or vendored copy, its version and commit. |
-| `GET /gui/api/trees` | The tree list: `id`, `root`, copy version, mode, server up. |
+| `GET /gui/api/trees` | The tree list: `id`, `root`, EveJS version (`evejs`), copy version, mode, server up, and `runs` (`total`, `passed`, `failed` scenario runs). |
 | `POST /gui/api/trees` `{ "path": "F:/EveJS-0.12.9" }` | Add a tree. |
-| `GET /gui/api/tree?tree=<id>` | The Install tab's summary: `copy`, `shim`, `config`, `prerequisites` (each `{ name, ok, fix }`), `serverUp`, `plugins`, `agents` (each `{ id, name, installed, evidence, file, registered, serverName, problem }`). |
+| `GET /gui/api/tree?tree=<id>` | The Install tab's summary: `copy`, `shim`, `config`, `prerequisites` (each `{ name, path, ok, fix }`), `serverUp`, `serverPid`, `plugins`, `agents` (each `{ id, name, installed, evidence, file, registered, serverName, problem }`). |
+| `GET /gui/api/scenarios?tree=<id>` | `scenarios` (the copy's `run --json`: each `{ name, file, plugin, description, world, recipe, timeout, expect, problem }`) and `recipes` (`world recipes --json`: each `{ name, description, state, why, savedAt, steps }`); `null` for a copy without them. |
+| `GET /gui/api/commands?tree=<id>` | The copy's `help --json`: `prefix`, `groups`, `commands` (each `{ name, group, summary, usage, needs, managed, writes, mcp, flags, examples, note, plugin }`) and `mcpTools`, with `source` `tree`, or `tool` and a `note` when it's this copy's list. |
 | `GET /gui/api/doctor?tree=<id>` | `e2e doctor --json`, parsed. |
 | `GET /gui/api/patches?tree=<id>` | `e2e patch status --json`, parsed. |
 | `POST /gui/api/preview` `{ "tree": "<id>", "action": "vendor" \| "init" \| "agents" \| "patch-apply" \| "patch-revert", "mode": "auto", "agents": ["claude", "codex"], "id": "xmpp-port", "force": false }` | The preview: `ok`, `refused`, each step's command and dry-run output, and a `previewID` when `ok`. |

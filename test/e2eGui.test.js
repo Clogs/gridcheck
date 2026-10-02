@@ -107,6 +107,22 @@ test("from a checkout it offers trees beside it, adds a typed one and remembers 
   assert.match((await own.handle("POST", "/gui/api/trees", {}, { path: s.other })).body.error, /manages its own tree only/);
 });
 
+test("the tree list gives each tree's EveJS version and its scenario runs, passed and failed", async (t) => {
+  const s = setup(t);
+  write(s.tree, "server/package.json", JSON.stringify({ name: "eve.js", version: "0.12.9" }));
+  write(s.other, "package.json", JSON.stringify({ name: "evejs-repo", version: "0.12.6" }));
+  const runs = path.join(s.tree, "_local", "e2e", "runs");
+  write(runs, "20261001-130000-demo/result.json", JSON.stringify({ name: "demo", passed: false, exitCode: 1 }));
+  write(runs, "20261001-130000-watch/timeline.jsonl", "\n");
+  const app = gui.createGui({ context: s.context, stateFile: s.stateFile, run: fakeRun().run });
+  const listed = body(await app.handle("GET", "/gui/api/trees")).trees;
+  const byName = Object.fromEntries(listed.map((tree) => [tree.name, tree]));
+  assert.strictEqual(byName.tree.evejs, "0.12.9");
+  assert.deepStrictEqual(byName.tree.runs, { total: 2, passed: 1, failed: 1 });
+  assert.strictEqual(byName.other.evejs, "0.12.6");
+  assert.deepStrictEqual(byName.other.runs, { total: 0, passed: 0, failed: 0 });
+});
+
 test("a tree's summary names the copy, the shim, the config and what the tree still needs", async (t) => {
   const s = setup(t);
   const app = gui.createGui({ context: s.context, stateFile: s.stateFile, run: fakeRun().run });
@@ -291,4 +307,43 @@ test("the page needs no token and carries no data; every data route needs it", a
   assert.deepStrictEqual(gui.parseGuiArgs(["--port", "5", "--tree", "x", "--open"]), { port: 5, trees: [path.resolve("x")], open: true });
   assert.throws(() => gui.parseGuiArgs(["--port", "nope"]), /--port takes a port number/);
   assert.throws(() => gui.parseGuiArgs(["--bogus"]), /unknown argument/);
+});
+
+test("the Run a test card and the Commands tab read the tree's copy; an older copy gets this one's command list", async (t) => {
+  const s = setup(t);
+  const catalog = { prefix: "node tools/evejs-e2e/bin/e2e.js", groups: [{ id: "tool", title: "This tool" }],
+    commands: [{ name: "help", group: "tool", summary: "Prints every command.", usage: ["help [--json]"], flags: [], examples: [] }], mcpTools: [] };
+  let treeKnowsJson = true;
+  const calls = [];
+  const run = async (step) => {
+    const inTree = step.cwd === s.tree;
+    const args = step.args.slice(1);
+    calls.push([inTree ? "tree" : "own", ...args]);
+    if (args[0] === "run") return { exitCode: 0, output: `${JSON.stringify([{ name: "demo", world: "starter", recipe: "starter", expect: [] }])}\n`, ms: 1 };
+    if (args[0] === "world") return { exitCode: 0, output: `${JSON.stringify([{ name: "starter", state: "built", steps: ["fresh"] }])}\n`, ms: 1 };
+    if (args[0] === "help") {
+      return { exitCode: 0, output: inTree && !treeKnowsJson ? "node tools/evejs-e2e/bin/e2e.js <command>\n  e2e help\n" : JSON.stringify(catalog), ms: 1 };
+    }
+    return { exitCode: 1, output: "unexpected\n", ms: 1 };
+  };
+  const app = gui.createGui({ context: s.context, stateFile: s.stateFile, run });
+  const id = body(await app.handle("GET", "/gui/api/trees")).trees.find((tree) => tree.name === "tree").id;
+
+  const scenarios = body(await app.handle("GET", "/gui/api/scenarios", { tree: id }));
+  assert.deepStrictEqual(scenarios.scenarios.map((row) => row.name), ["demo"]);
+  assert.deepStrictEqual(scenarios.recipes.map((row) => [row.name, row.state]), [["starter", "built"]]);
+  assert.deepStrictEqual(calls.slice(0, 2).sort(), [["tree", "run", "--json"], ["tree", "world", "recipes", "--json"]]);
+
+  const fromTree = body(await app.handle("GET", "/gui/api/commands", { tree: id })).commands;
+  assert.strictEqual(fromTree.source, "tree");
+  assert.deepStrictEqual(fromTree.commands.map((command) => command.name), ["help"]);
+  treeKnowsJson = false;
+  const fromTool = body(await app.handle("GET", "/gui/api/commands", { tree: id })).commands;
+  assert.strictEqual(fromTool.source, "tool");
+  assert.match(fromTool.note, /older than this list/);
+  assert.deepStrictEqual(calls.at(-1), ["own", "help", "--json"], "the fallback is this copy's own help --json");
+
+  const summary = body(await app.handle("GET", "/gui/api/tree", { tree: id })).tree;
+  assert.strictEqual(summary.serverPid, null);
+  assert.ok(summary.prerequisites.every((row) => typeof row.path === "string"), "each prerequisite names its folder");
 });
