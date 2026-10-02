@@ -43,19 +43,19 @@ const SAMPLE_CODEX = [
   "",
   "[mcp_servers.node_repl]",
   "args = []",
-  "command = 'C:\\Users\\me\\node_repl.exe'",
+  "command = 'tools\\bin\\node_repl.exe'",
   "",
   "[mcp_servers.node_repl.env]",
   "SOME_VAR = \"1\"",
   "",
   "[mcp_servers.serena]",
-  "command = 'C:\\Users\\me\\serena.exe'",
+  "command = 'tools\\bin\\serena.exe'",
   "args = [",
   "    \"start-mcp-server\",",
   "    \"--context=codex\",",
   "]",
   "",
-  "[projects.'f:\\lu\\dev']",
+  "[projects.'work\\game']",
   "trust_level = \"trusted\"",
   "",
 ].join("\n");
@@ -155,7 +155,7 @@ test("Codex: an inline mcp_servers isn't edited, and the reply carries the entry
 
 test("table headers read as key paths, quoted keys included", () => {
   assert.deepStrictEqual(agents.headerKeys("[mcp_servers.node_repl.env]"), ["mcp_servers", "node_repl", "env"]);
-  assert.deepStrictEqual(agents.headerKeys("[projects.'f:\\lu\\dev']  # trusted"), ["projects", "f:\\lu\\dev"]);
+  assert.deepStrictEqual(agents.headerKeys("[projects.'work\\game']  # trusted"), ["projects", "work\\game"]);
   assert.deepStrictEqual(agents.headerKeys(" [ plugins . \"a@b\" ]"), ["plugins", "a@b"]);
   for (const line of ["[[array]]", "key = [1]", "[a b]", "[]"]) assert.strictEqual(agents.headerKeys(line), null, line);
 });

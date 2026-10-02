@@ -716,7 +716,7 @@
   function copyRow(tree) {
     const copy = tree.copy || {};
     const vendoredGui = state.context.mode === "vendored";
-    const from = vendoredGui ? h("input", { type: "text", placeholder: "F:/gridcheck", autocomplete: "off", spellcheck: "false" }) : null;
+    const from = vendoredGui ? h("input", { type: "text", placeholder: "Path to a Gridcheck checkout", autocomplete: "off", spellcheck: "false" }) : null;
     const vendorRun = (force) => () => preview({ action: "vendor", force, from: from ? from.value : "" });
     const update = copy.vendored && copy.ok && !vendoredGui && !copy.upToDate;
     const version = (v, commit) => [ref("ver", v || "?"), commit ? ref("commit", short(commit)) : null];

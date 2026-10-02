@@ -15,8 +15,8 @@
 // through its API against the tree. Writes
 // compat-report.md and exits 1 on any failure.
 //
-// stock  the zip is unpacked once into --scratch (F:/LU/_compat by default,
-//        outside every repo) and reused while the zip is unchanged. Its
+// stock  the zip is unpacked once into --scratch (~/gridcheck-compat by
+//        default, outside every repo) and reused while the zip is unchanged. Its
 //        reference data is built by the zip's own database creator from an
 //        extracted SDE: --sde, GRIDCHECK_SDE_DIR, or the one the LU tree's
 //        data comes from. Managed mode boots a fresh world; attach mode
@@ -40,7 +40,7 @@ const { captureDestiny, captureLive, committedFixtures, compareCaptures } = requ
 
 const REPO_ROOT = path.join(__dirname, "..");
 const REPO_CLI = path.join(REPO_ROOT, "bin", "gridcheck.js");
-const DEFAULT_SCRATCH = process.platform === "win32" ? "F:/LU/_compat" : path.join(os.homedir(), "evejs-compat");
+const DEFAULT_SCRATCH = path.join(os.homedir(), "gridcheck-compat");
 const LU_WORLD = "lowsec-docked";
 // The LU tree's copy and config, with their names from before the rename: a
 // vendor update into a tree that still has those moves them, so the restore
