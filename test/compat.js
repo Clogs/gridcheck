@@ -42,7 +42,11 @@ const REPO_ROOT = path.join(__dirname, "..");
 const REPO_CLI = path.join(REPO_ROOT, "bin", "gridcheck.js");
 const DEFAULT_SCRATCH = process.platform === "win32" ? "F:/LU/_compat" : path.join(os.homedir(), "evejs-compat");
 const LU_WORLD = "lowsec-docked";
-const VENDORED_PATHS = ["tools/gridcheck", "server/src/_secondary/agentBridge/server.js"];
+// The LU tree's copy and config, with their names from before the rename: a
+// vendor update into a tree that still has those moves them, so the restore
+// puts back whichever the tree has committed.
+const VENDORED_PATHS = ["tools/gridcheck", "tools/evejs-e2e", "server/src/_secondary/agentBridge/server.js"];
+const CONFIG_FILES = ["gridcheck.config.json", "e2e.config.json"];
 
 class CompatError extends Error {}
 
@@ -677,7 +681,7 @@ async function stockLane(flags, context) {
 }
 
 function luVendoredClean(tree) {
-  const status = git(tree, ["status", "--porcelain", "--", ...VENDORED_PATHS, "gridcheck.config.json"]);
+  const status = git(tree, ["status", "--porcelain", "--", ...VENDORED_PATHS, ...CONFIG_FILES]);
   if (status.code !== 0) throw new CompatError(`git status failed in ${tree}: ${status.out}`);
   return status.out.trim();
 }
@@ -694,7 +698,7 @@ async function luLane(flags, context) {
     return;
   }
   const configFile = path.join(tree, "gridcheck.config.json");
-  const hadConfig = fs.existsSync(configFile);
+  const hadConfig = CONFIG_FILES.some((name) => fs.existsSync(path.join(tree, name)));
   try {
     if (!await check(lane, "vendor this checkout", () => vendorInto(tree))) return;
     if (!hadConfig) await check(lane, "init (managed)", () => lastLine(cliIn(tree, ["init", "--mode", "managed"])));
@@ -726,9 +730,10 @@ async function luLane(flags, context) {
     if (flags.keepLu) {
       notes.push(`--keep-lu: ${tree} keeps this checkout's vendored copy${hadConfig ? "" : " and the gridcheck.config.json compat wrote"}`);
     } else {
-      git(tree, ["checkout", "--", ...VENDORED_PATHS]);
-      git(tree, ["clean", "-fdq", "--", "tools/gridcheck"]);
-      if (!hadConfig) fs.rmSync(configFile, { force: true });
+      // Put back what the tree has committed, and remove what the run added.
+      const tracked = git(tree, ["ls-files", "--", ...VENDORED_PATHS, ...CONFIG_FILES]).out.split("\n").filter(Boolean);
+      if (tracked.length) git(tree, ["checkout", "HEAD", "--", ...tracked]);
+      git(tree, ["clean", "-fdq", "--", ...VENDORED_PATHS, ...CONFIG_FILES]);
       const left = luVendoredClean(tree);
       if (left) notes.push(`restoring ${tree} left changes: ${left}`);
       else notes.push(`${tree}'s vendored copy is back as committed`);
