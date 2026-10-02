@@ -96,6 +96,32 @@ const BOOLEAN_FLAGS = new Set(["all", "json", "any-pid", "force", "fresh", "no-m
 
 class CliError extends Error {}
 
+// Up to `limit` candidates closest to word: those it starts or contains
+// first, then those a few edits away.
+function closest(word, candidates, limit = 3) {
+  const wanted = String(word || "").toLowerCase();
+  if (!wanted) return [];
+  const distance = (a, b) => {
+    let row = Array.from({ length: b.length + 1 }, (_value, index) => index);
+    for (let i = 1; i <= a.length; i += 1) {
+      const next = [i];
+      for (let j = 1; j <= b.length; j += 1) next.push(Math.min(row[j] + 1, next[j - 1] + 1, row[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1)));
+      row = next;
+    }
+    return row[b.length];
+  };
+  const scored = [];
+  for (const candidate of new Set(candidates)) {
+    const text = String(candidate).toLowerCase();
+    const score = text.startsWith(wanted) ? 0 : text.includes(wanted) ? 1 : distance(wanted, text) + 1;
+    if (score <= Math.max(2, Math.floor(wanted.length / 3) + 1)) scored.push({ candidate, score });
+  }
+  return scored.sort((a, b) => a.score - b.score || String(a.candidate).localeCompare(String(b.candidate))).slice(0, limit)
+    .map((row) => row.candidate);
+}
+
+const didYouMean = (names) => (names.length ? ` Did you mean ${names.map((name) => `\`${name}\``).join(", ")}?` : "");
+
 function parseArgs(argv) {
   const positionals = [];
   const flags = {};
@@ -235,7 +261,12 @@ async function requestJSON(url, { method = "GET", headers = {}, body, timeoutMs 
     });
   } catch (error) {
     const cause = error && error.cause && error.cause.code ? error.cause.code : error.message;
-    throw new CliError(`${method} ${url} failed: ${cause}`);
+    const next = cause === "ECONNREFUSED" || cause === "ECONNRESET"
+      ? "Nothing answered there, so the server may have stopped or still be booting. `e2e status` says whether it's up."
+      : error && error.name === "TimeoutError"
+        ? `It didn't answer within ${Math.round(timeoutMs / 1000)} s. \`e2e log\` shows what the server is doing.`
+        : "`e2e status` says whether the server is up.";
+    throw new CliError(`${method} ${url} failed: ${cause}. ${next}`);
   }
   const text = await response.text();
   let json;
@@ -258,7 +289,9 @@ async function gateway(method, route, body) {
     // Gateway errors are { ok: false, error: "<CODE>", message }.
     const code = typeof json.error === "string" ? json.error : `HTTP ${status}`;
     const message = json.message || json.raw || "";
-    throw new CliError(`gateway ${route}: ${code} ${message}`.trim());
+    const next = status === 401 || status === 403
+      ? " The gateway refused this session; if the server restarted since you logged in, `e2e login` again." : "";
+    throw new CliError(`gateway ${route}: ${code} ${message}`.trim() + next);
   }
   return json;
 }
@@ -287,9 +320,19 @@ async function callBridge(handshake, method, route, body) {
     headers: { authorization: `Bearer ${handshake.token}` },
   });
   if (status >= 400 || json.ok === false) {
-    throw new CliError(`bridge ${route}: ${json.error || json.message || `HTTP ${status}`}`);
+    throw new CliError(`bridge ${route}: ${json.error || json.message || `HTTP ${status}`}${bridgeNext(status, route)}`);
   }
   return json;
+}
+
+// The next step for a bridge refusal the bridge doesn't explain itself.
+function bridgeNext(status, route) {
+  if (status === 404) {
+    return `. This server's bridge has no ${route}: it loaded an older copy of the tool. Restart the server (\`e2e down\`, ` +
+      "then `e2e up`, or restart the one you started) so it loads this copy.";
+  }
+  if (status === 401) return ". The bridge refused the token: the handshake is from another server. `e2e status` says which is up.";
+  return "";
 }
 
 function requireLogin(state) {
@@ -690,7 +733,8 @@ function solarSystemTable() {
   if (!solarSystems) {
     const table = readJSON(SOLAR_SYSTEMS_PATH);
     if (!table || !Array.isArray(table.solarSystems)) {
-      throw new CliError(`no static solar system table at ${relativePath(SOLAR_SYSTEMS_PATH)}`);
+      throw new CliError(`no static solar system table at ${relativePath(SOLAR_SYSTEMS_PATH)}: the tree's reference data ` +
+        "is missing or elsewhere. `e2e doctor` checks the data dir, and the README's Quick start builds it.");
     }
     solarSystems = new Map(table.solarSystems.map((row) => [row.solarSystemID, row]));
   }
@@ -704,7 +748,8 @@ function resolveSystemID(text) {
   for (const row of solarSystemTable().values()) {
     if (String(row.solarSystemName).toLowerCase() === wanted) return row.solarSystemID;
   }
-  throw new CliError(`no solar system named ${text}`);
+  const names = [...solarSystemTable().values()].map((row) => String(row.solarSystemName));
+  throw new CliError(`no solar system named ${text}.${didYouMean(closest(text, names))} A system ID works too.`);
 }
 
 // The first plugin handler of a core command whose flags this call passes, if any.
@@ -764,7 +809,7 @@ async function runLoadout(loadout, { json = false } = {}) {
     headers: { authorization: `Bearer ${handshake.token}` },
     body: { characterID: state.characterID, ...loadoutTools.loadoutBody(loadout) },
   });
-  if (status === 404) throw new CliError("this tree's agent bridge has no /loadout; its server runs an older evejs-e2e copy");
+  if (status === 404) throw new CliError(`bridge /loadout: HTTP 404${bridgeNext(404, "/loadout")}`);
   const text = json ? JSON.stringify(reply, null, 2) : loadoutTools.formatLoadoutReply(reply);
   console.log(text);
   if (!reply.ok) process.exitCode = 2;
@@ -851,7 +896,7 @@ function viewerURL(port, token, runID) {
 async function cmdView(positionals, flags) {
   const runID = positionals[0] ? String(positionals[0]).replace(/[^A-Za-z0-9._-]/g, "_") : null;
   if (runID && !fs.existsSync(path.join(RUNS_DIR, runID, "timeline.jsonl"))) {
-    throw new CliError(`no timeline for run ${runID} in ${relativePath(RUNS_DIR)}`);
+    throw new CliError(`no timeline for run ${runID} in ${relativePath(RUNS_DIR)}. \`e2e report\` lists the runs.`);
   }
   const handshake = flags.serve ? null : readHandshake();
   if (handshake && await httpOK(`http://${handshake.host}:${handshake.port}/viewer`)) {
@@ -931,7 +976,10 @@ function loadScenarioOrFail(name, { anyWorld = false } = {}) {
     return scenarioTools.loadScenario(name, { worldExists: anyWorld ? () => true : savedWorldExists, resolveSystemID,
       recipeExists: (recipe) => recipeTools.recipeExists(recipe), registry: REGISTRY });
   } catch (error) {
-    throw new CliError(error.message);
+    if (!/no such scenario file/.test(error.message)) throw new CliError(error.message);
+    const names = scenarioTools.listScenarios({ registry: REGISTRY }).map((row) => row.name);
+    throw new CliError(`${error.message}.${didYouMean(closest(path.basename(String(name), ".json"), names))} ` +
+      "`e2e run` lists the scenarios, and `e2e scenario new <name>` writes one.");
   }
 }
 
@@ -1361,7 +1409,11 @@ function selectLogLines(text, { grep, pid, lines }) {
 function cmdLog(flags) {
   const handshake = readHandshake();
   const logPath = serverLogPath(handshake);
-  if (!fs.existsSync(logPath)) throw new CliError(`no server log at ${logPath}`);
+  if (!fs.existsSync(logPath)) {
+    throw new CliError(`no server log at ${logPath}: the server hasn't run in this tree yet, or logs elsewhere ` +
+      `(EVEJS_DATA_ROOT). ${MODE === "attach" ? "Start it with EVEJS_AGENT_BRIDGE=1 set" : "`e2e up` starts it"}; ` +
+      "`e2e status` shows the log path it uses.");
+  }
   const lines = Math.max(1, Math.trunc(Number(flags.lines) || 40));
   const pid = flags["any-pid"] ? null : handshake && handshake.pid;
   const size = fs.statSync(logPath).size;
@@ -1692,7 +1744,8 @@ async function cmdUp(flags) {
       const leases = worlds.liveLeases(WORLD_PATH)
         .filter((lease) => lease.pid !== child.pid && (!lease.pid || pidAlive(lease.pid)));
       throw new CliError(
-        `server exited during boot${leases.length ? `; ${describeLeases(leases)}` : ""}.\n` +
+        `server exited during boot${leases.length ? `; ${describeLeases(leases)}` : ""}. The end of its console ` +
+        `(${relativePath(SERVER_OUT_PATH)}) says why; \`e2e doctor\` checks the tree:\n` +
         tailFile(SERVER_OUT_PATH, 40),
       );
     }
@@ -1754,7 +1807,9 @@ async function cmdDown(flags) {
     } else {
       throw new CliError(`server pid ${serverPid} has no agent bridge yet (still booting?). Wait, or \`e2e down --force\` to kill it.`);
     }
-    if (!await waitForExit(serverPid, timeoutMs)) throw new CliError(`pid ${serverPid} still running after ${timeoutMs / 1000}s`);
+    if (!await waitForExit(serverPid, timeoutMs)) {
+      throw new CliError(`pid ${serverPid} still running after ${timeoutMs / 1000}s. \`e2e down --force\` kills it.`);
+    }
     const state = readState();
     if (state.bridgeSessionID) writeState({ ...state, bridgeSessionID: null });
     console.log(`stopped in ${((Date.now() - startedAt) / 1000).toFixed(1)}s`);
@@ -1822,7 +1877,10 @@ async function buildRecipeWorld(recipe, { force = false, why = null } = {}) {
   } finally {
     await cmdDown({});
   }
-  if (failed) throw new CliError(`recipe ${recipe.name} failed at ${failed}; the world was not saved`);
+  if (failed) {
+    throw new CliError(`recipe ${recipe.name} failed at ${failed}; the world was not saved. \`e2e log --lines 80\` shows what the ` +
+      `server did, and \`e2e world build ${recipe.name}\` tries again.`);
+  }
   const result = worlds.saveWorld(REPO_ROOT, recipe.name, { force: true, note: `built from recipe ${recipe.name}`,
     hooks: REGISTRY.worldHooks, recipe: fingerprint });
   console.log(`built ${result.name} in ${Math.round((Date.now() - startedAtMs) / 1000)} s ` +
@@ -2388,7 +2446,9 @@ async function main(argv) {
   if (core) return core.run(positionals, flags);
   const plugin = pluginCommands()[command];
   if (plugin) return plugin.run(positionals, flags, pluginIO());
-  throw new CliError(`unknown command: ${command}\n${helpText()}`);
+  const names = [...Object.keys(CORE_COMMANDS), ...Object.keys(pluginCommands())];
+  throw new CliError(`unknown command: ${command}.${didYouMean(closest(command, names).map((name) => `e2e ${name}`))} ` +
+    "`e2e help` lists them all.");
 }
 
 if (require.main === module) {

@@ -208,3 +208,14 @@ test("help --json: every core command has a summary, and every docs entry names 
     [["scouts", "up"], ["teleport --flight", null]]);
   assert.deepStrictEqual(withPlugin.mcpTools, [{ name: "e2e_status", description: "Where things stand." }]);
 });
+
+test("an unknown command or scenario names the closest ones and how to list them", () => {
+  const { spawnSync } = require("node:child_process");
+  const path = require("node:path");
+  const cli = path.join(__dirname, "..", "bin", "e2e.js");
+  const typo = spawnSync(process.execPath, [cli, "stauts"], { encoding: "utf8" });
+  assert.strictEqual(typo.status, 1);
+  assert.match(typo.stderr, /unknown command: stauts\. Did you mean .*`e2e status`.*`e2e help` lists them all/);
+  const scenario = spawnSync(process.execPath, [cli, "run", "smoke-undok", "--check"], { encoding: "utf8" });
+  assert.match(scenario.stderr, /no such scenario file\. Did you mean `smoke-undock`\? `e2e run` lists the scenarios/);
+});

@@ -234,7 +234,7 @@ test("over stdio, a tool runs the CLI and returns what it printed", async () => 
     assert.strictEqual(init.result.serverInfo.name, "e2e");
     const checked = await call(2, "tools/call", { name: "e2e_run_scenario", arguments: { name: "no-such-scenario-here", check: true } });
     assert.strictEqual(checked.result.isError, true);
-    assert.match(checked.result.content[0].text, /no-such-scenario-here\.json:\n {2}no such scenario file\n\(exit 1\)/,
+    assert.match(checked.result.content[0].text, /no-such-scenario-here\.json:\n {2}no such scenario file\. `e2e run` lists the scenarios.*\n\(exit 1\)/,
       "the CLI's own refusal and exit code");
   } finally {
     child.stdin.end();
