@@ -487,7 +487,8 @@ function planAction(action, root, params, context) {
     const unknown = chosen.filter((id) => !agents.AGENT_IDS.includes(id));
     if (unknown.length) throw new GuiError(`no agent ${unknown.join(", ")}; the agents are ${agents.AGENT_IDS.join(" and ")}`);
     // An agent's config doesn't touch the server, so this may run while it's up.
-    return { steps: [treeStep(root, ["agents", "setup", ...chosen])], dirtyTargets: chosen.includes("claude") ? [".mcp.json"] : [],
+    return { steps: [treeStep(root, ["agents", "setup", ...chosen])],
+      dirtyTargets: [...(chosen.includes("claude") ? [".mcp.json"] : []), ...(chosen.includes("cli") ? ["AGENTS.md", "CLAUDE.md"] : [])],
       serverMayRun: true };
   }
   throw new GuiError(`unknown action ${action}`);

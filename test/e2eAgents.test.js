@@ -182,7 +182,22 @@ test("setup writes for the agents found, plans both before writing either, and a
   assert.throws(() => agents.setupAgents(s.tree, ["cursor"], { io: s.io }), /no agent cursor/);
   const rows = agents.agentStatus(s.tree, s.io);
   assert.deepStrictEqual(rows.map((row) => [row.id, row.installed, row.registered, row.serverName]),
-    [["claude", true, true, "e2e"], ["codex", true, true, "e2e"]]);
+    [["claude", true, true, "e2e"], ["codex", true, true, "e2e"], ["cli", false, false, "a pointer to tools/evejs-e2e/docs/CLI.md"]]);
+});
+
+test("setup cli adds a pointer to AGENTS.md once, or to an existing CLAUDE.md, keeping its line endings", (t) => {
+  const s = setup(t);
+  write(path.join(s.tree, "CLAUDE.md"), "# Rules\r\nBe kind.");
+  const [row] = agents.setupAgents(s.tree, ["cli"], { io: s.io });
+  assert.strictEqual(row.wrote, true);
+  const text = fs.readFileSync(path.join(s.tree, "CLAUDE.md"), "utf8");
+  assert.strictEqual(text, `# Rules\r\nBe kind.\r\n\r\n${agents.CLI_POINTER.join("\r\n")}\r\n`);
+  assert.deepStrictEqual(agents.setupAgents(s.tree, ["cli"], { io: s.io }).map((one) => one.plan.change), ["none"]);
+  assert.ok(!fs.existsSync(path.join(s.tree, "AGENTS.md")));
+  write(path.join(s.tree, "AGENTS.md"), "# Agents\n");
+  agents.setupAgents(s.tree, ["cli"], { io: s.io });
+  assert.match(fs.readFileSync(path.join(s.tree, "AGENTS.md"), "utf8"), /^# Agents\n\n<!-- evejs-e2e:cli -->\n\*\*In-game checks:\*\*/);
+  assert.deepStrictEqual(agents.setupAgents(s.tree, null, { io: s.io }).map((one) => one.id), [], "never set up unasked");
 });
 
 test("e2e agents: status, a dry run that shows the lines, and setup", (t) => {

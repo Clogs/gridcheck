@@ -47,6 +47,7 @@ GUI's Install tab runs the same command, with the agents it found ticked.
 | --- | --- | --- |
 | Claude Code | `claude` on `PATH`, `~/.claude` or `~/.claude.json` | `.mcp.json` at the tree's root: server `e2e`, `node tools/evejs-e2e/bin/mcp.js`. Start Claude Code in the tree; it asks once to approve the project's server. |
 | Codex | `codex` on `PATH`, or `~/.codex` (`CODEX_HOME` moves it) | `[mcp_servers.e2e]` at the end of `config.toml`, with the copy's absolute path and `tool_timeout_sec = 600`. |
+| `cli`, any other agent | only when named: `e2e agents setup cli` | A marked pointer to [CLI.md](CLI.md) at the end of the tree's `AGENTS.md`, or of its `CLAUDE.md` when it has no `AGENTS.md`. For agents without MCP. |
 
 A setup only adds. It merges into an existing `.mcp.json` and keeps its other servers, and it
 appends to `config.toml`, keeping every byte before its own table. Codex reads one file for every

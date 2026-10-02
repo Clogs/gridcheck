@@ -198,7 +198,7 @@ test("agent setup is previewed like any change, may run while the server is up, 
   const app = gui.createGui({ context: s.context, stateFile: s.stateFile, run: fake.run });
   const id = gui.treeID(s.tree);
   const summary = body(await app.handle("GET", "/gui/api/tree", { tree: id })).tree;
-  assert.deepStrictEqual(summary.agents.map((row) => row.id), ["claude", "codex"]);
+  assert.deepStrictEqual(summary.agents.map((row) => row.id), ["claude", "codex", "cli"]);
   assert.ok(summary.agents.every((row) => typeof row.installed === "boolean" && Array.isArray(row.evidence)), JSON.stringify(summary.agents));
 
   write(s.tree, "_local/agentBridge/bridge.json", JSON.stringify({ port: 1, token: "t", pid: process.pid }));

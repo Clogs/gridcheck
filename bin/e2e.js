@@ -2062,15 +2062,20 @@ function cmdAgents(positionals, flags) {
     }
     return rows;
   }
-  if (action !== "setup") throw new CliError("agents takes status [--json] or setup [claude] [codex] [--dry-run]");
+  if (action !== "setup") throw new CliError("agents takes status [--json] or setup [claude] [codex] [cli] [--dry-run]");
   const dryRun = Boolean(flags["dry-run"]);
   const results = call(() => agentTools.setupAgents(REPO_ROOT, ids.length ? ids : null, { dryRun }));
   if (!results.length) {
-    throw new CliError("found neither Claude Code nor Codex on this machine; name one to set it up anyway, e.g. " +
-      "`e2e agents setup claude`");
+    throw new CliError("found neither Claude Code nor Codex on this machine. Name one to set it up anyway " +
+      "(`e2e agents setup claude`), or `e2e agents setup cli` to point any other agent at the CLI guide.");
   }
   for (const { name, installed, plan } of results) {
     const file = relativePath(plan.file).startsWith("..") ? plan.file.split(path.sep).join("/") : relativePath(plan.file);
+    if (plan.agent === "cli") {
+      console.log(`${name}: ${plan.change === "none" ? "already has" : dryRun ? "would add" : "added"} ${plan.serverName} in ${file}`);
+      for (const line of plan.change === "none" ? [] : plan.added) console.log(`  + ${line}`);
+      continue;
+    }
     if (plan.change === "none") {
       console.log(`${name}: already runs this tree's server as ${plan.serverName} (${file})`);
       continue;
@@ -2085,6 +2090,9 @@ function cmdAgents(positionals, flags) {
   if (dryRun) console.log(changed.length ? "nothing was written (--dry-run)" : "nothing to write");
   if (changed.some((row) => row.id === "claude")) {
     console.log("next, Claude Code: start it in this tree's folder; it asks once to approve the project's MCP server");
+  }
+  if (changed.some((row) => row.id === "cli")) {
+    console.log("next, any other agent: start it in this tree; it reads the pointer and follows the CLI guide");
   }
   if (changed.some((row) => row.id === "codex")) {
     console.log("next, Codex: start a new session; the server is in every Codex session, and names this tree by path");
@@ -2258,7 +2266,7 @@ const CORE_COMMANDS = {
     run: (_positionals, flags) => cmdInit(flags),
   },
   agents: {
-    usage: ["agents [status] [--json] | agents setup [claude] [codex] [--dry-run]"],
+    usage: ["agents [status] [--json] | agents setup [claude] [codex] [cli] [--dry-run]"],
     run: cmdAgents,
   },
   doctor: {

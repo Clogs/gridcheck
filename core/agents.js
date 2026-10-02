@@ -15,8 +15,19 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 
-const AGENT_IDS = Object.freeze(["claude", "codex"]);
-const AGENT_NAMES = Object.freeze({ claude: "Claude Code", codex: "Codex" });
+// cli is any other agent: it gets a pointer to docs/CLI.md in the tree's
+// AGENTS.md (or CLAUDE.md), not an MCP server, and is never set up unasked.
+const AGENT_IDS = Object.freeze(["claude", "codex", "cli"]);
+const AGENT_NAMES = Object.freeze({ claude: "Claude Code", codex: "Codex", cli: "Other agents (CLI)" });
+const CLI_GUIDE = "tools/evejs-e2e/docs/CLI.md";
+const CLI_MARKER = "evejs-e2e:cli";
+const CLI_POINTER = Object.freeze([
+  `<!-- ${CLI_MARKER} -->`,
+  "**In-game checks:** to verify or debug anything a player would see on grid (ships, NPCs, combat, slash",
+  `commands) without the EVE client, follow \`${CLI_GUIDE}\`.`,
+  `<!-- /${CLI_MARKER} -->`,
+]);
+const agentList = () => `${AGENT_IDS.slice(0, -1).join(", ")} and ${AGENT_IDS.at(-1)}`;
 const MCP_IN_TREE = Object.freeze(["tools", "evejs-e2e", "bin", "mcp.js"]);
 const SERVER_NAME = "e2e";
 const CLAUDE_FALLBACK_NAME = "evejs-e2e";
@@ -89,7 +100,8 @@ function detectAgents(given) {
     codexBin && `codex on PATH (${slashed(codexBin)})`,
     io.exists(home) && (String(io.env.CODEX_HOME || "").trim() ? `CODEX_HOME (${slashed(home)})` : "~/.codex"),
   ].filter(Boolean);
-  return { claude: { installed: claude.length > 0, evidence: claude }, codex: { installed: codex.length > 0, evidence: codex } };
+  return { claude: { installed: claude.length > 0, evidence: claude }, codex: { installed: codex.length > 0, evidence: codex },
+    cli: { installed: false, evidence: [] } };
 }
 
 // ---------- Claude Code: the tree's .mcp.json ----------
@@ -243,10 +255,28 @@ function planCodex(treeRoot, given) {
   return { agent: "codex", file, change: "add", serverName, before: text, after, added: block };
 }
 
+// ---------- other agents: a pointer in AGENTS.md or CLAUDE.md ----------
+
+// AGENTS.md when the tree has one, else an existing CLAUDE.md, else a new AGENTS.md.
+function planCli(treeRoot, given) {
+  const io = ioFrom(given);
+  const agentsFile = path.join(treeRoot, "AGENTS.md");
+  const claudeFile = path.join(treeRoot, "CLAUDE.md");
+  const file = !io.exists(agentsFile) && io.exists(claudeFile) ? claudeFile : agentsFile;
+  const text = io.exists(file) ? io.readFile(file) : null;
+  const serverName = `a pointer to ${CLI_GUIDE}`;
+  if (text !== null && text.includes(CLI_MARKER)) return { agent: "cli", file, change: "none", serverName };
+  const before = text || "";
+  const eol = before.includes("\r\n") ? "\r\n" : "\n";
+  const after = `${before}${before && !before.endsWith("\n") ? eol : ""}${before.trim() ? eol : ""}${CLI_POINTER.join(eol)}${eol}`;
+  return { agent: "cli", file, change: "add", serverName, before: text, after, added: [...CLI_POINTER] };
+}
+
 function planFor(id, treeRoot, io) {
   if (id === "claude") return planClaude(treeRoot, io);
   if (id === "codex") return planCodex(treeRoot, io);
-  throw new AgentsError(`no agent ${id}; the agents are ${AGENT_IDS.join(" and ")}`);
+  if (id === "cli") return planCli(treeRoot, io);
+  throw new AgentsError(`no agent ${id}; the agents are ${agentList()}`);
 }
 
 // One row per agent: is it installed, and does it already run this tree's server?
@@ -283,7 +313,7 @@ function writeAtomic(file, text) {
 function setupAgents(treeRoot, ids = null, { dryRun = false, io: given } = {}) {
   const io = ioFrom(given);
   const found = detectAgents(io);
-  for (const id of ids || []) if (!AGENT_IDS.includes(id)) throw new AgentsError(`no agent ${id}; the agents are ${AGENT_IDS.join(" and ")}`);
+  for (const id of ids || []) if (!AGENT_IDS.includes(id)) throw new AgentsError(`no agent ${id}; the agents are ${agentList()}`);
   const chosen = ids && ids.length ? [...new Set(ids)] : AGENT_IDS.filter((id) => found[id].installed);
   // Plan everything before writing anything, so one agent's problem changes nothing.
   const plans = chosen.map((id) => ({ id, name: AGENT_NAMES[id], installed: found[id].installed, plan: planFor(id, treeRoot, io) }));
@@ -298,12 +328,15 @@ module.exports = {
   AGENT_IDS,
   AGENT_NAMES,
   AgentsError,
+  CLI_GUIDE,
+  CLI_POINTER,
   CODEX_TOOL_TIMEOUT_SEC,
   SERVER_NAME,
   agentStatus,
   detectAgents,
   headerKeys,
   planClaude,
+  planCli,
   planCodex,
   setupAgents,
 };

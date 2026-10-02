@@ -151,6 +151,13 @@ tool_timeout_sec = 600
 Start with `e2e_status` and `e2e_doctor`. To check a feature, have the agent write a scenario and
 run it with `e2e_run_scenario`. [docs/GUIDE.md](docs/GUIDE.md#agent-mcp-tools) lists the tools.
 
+### The CLI, for agents without MCP
+
+Any agent that can run a shell can use the CLI instead. `e2e agents setup cli` adds a short pointer
+to the tree's `AGENTS.md` (or `CLAUDE.md`) that sends the agent to [docs/CLI.md](docs/CLI.md), the
+whole workflow in one page. `e2e primer` prints the scenario format for it, and
+`e2e run <scenario> --detach` with `e2e report <run> --wait 600` keeps each call short.
+
 ### The CLI
 
 `node tools/evejs-e2e/bin/e2e.js help` lists every command, and the GUI's **Commands** tab says what
@@ -171,6 +178,7 @@ e2e view | gui
 
 | Page | Covers |
 | --- | --- |
+| [docs/CLI.md](docs/CLI.md) | The workflow for an agent that drives the tool from a shell, with no MCP. |
 | [docs/GUIDE.md](docs/GUIDE.md) | Everything the tool does: grids, watches, the client view, player actions, scenarios, frames, the viewer, plugins. |
 | [docs/TREES.md](docs/TREES.md) | A tree's `e2e.config.json`, attach and managed mode, `e2e doctor`, and how the tool is tested. |
 | [docs/WORLDS.md](docs/WORLDS.md) | Loadouts by item name, and world recipes such as `starter`. |

@@ -35,6 +35,7 @@ const DOCS = {
     summary: "Shows the Claude Code and Codex on this machine and whether each has this tree's e2e tools; setup adds them.",
     flags: [["status", null, "The default: what was found and what each agent already has."],
       ["setup [claude] [codex]", "both found", "Add the e2e MCP server to those agents. Only adds entries."],
+      ["setup cli", null, "For any other agent: add a pointer to docs/CLI.md to the tree's AGENTS.md (or CLAUDE.md)."],
       ["--dry-run", null, "Show the lines setup would add."], ["--json", null, "Print the status as JSON."]],
   },
   doctor: {

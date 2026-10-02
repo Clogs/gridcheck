@@ -802,7 +802,7 @@
   }
 
   // An agent's logo tile: its mark on its own colour.
-  const AGENT_LOGOS = { claude: ["claude", "\u2733"], codex: ["codex", ">_"] };
+  const AGENT_LOGOS = { claude: ["claude", "\u2733"], codex: ["codex", ">_"], cli: ["other", "$"] };
   function agentLogo(row) {
     const [cls, text] = AGENT_LOGOS[row.id] || ["other", String(row.name || "?").charAt(0)];
     return h("span", { className: `alogo ${cls}`, text, "aria-hidden": "true" });
@@ -819,12 +819,16 @@
       h("p", {}, "Claude Code reads this tree's ", ref("path", ".mcp.json"), ". Codex reads one ", ref("path", "config.toml"),
         " for every folder, so its entry names this tree's copy by path. Connecting only adds an entry; your other servers are left alone."),
       ...rows.map((row) => {
+        const pointer = row.id === "cli";
         const what = row.problem ? [h("span", { className: "badc", text: row.problem })]
+          : pointer ? [row.registered ? "Agents without MCP find the CLI guide through" : "For agents without MCP: adds a pointer to the CLI guide to",
+            ref("path", row.file)]
           : row.registered ? ["Runs this tree's server as", ref("cmd", row.serverName), "from", ref("path", row.file)]
             : [row.installed ? "Found on this machine. Adds" : "Not found on this machine. Adds", ref("cmd", row.serverName), "to", ref("path", row.file)];
         const end = row.problem ? h("span", { className: "no", text: "Problem" })
-          : row.registered ? h("span", { className: "yes" }, icon("check", "sm"), "Connected")
-            : h("button", { type: "button", className: `btn sm${row.installed ? " primary" : ""}`, text: row.installed ? `Connect ${row.name}\u2026` : "Set up anyway\u2026",
+          : row.registered ? h("span", { className: "yes" }, icon("check", "sm"), pointer ? "Added" : "Connected")
+            : h("button", { type: "button", className: `btn sm${row.installed ? " primary" : ""}`,
+              text: pointer ? "Add pointer\u2026" : row.installed ? `Connect ${row.name}\u2026` : "Set up anyway\u2026",
               onclick: () => preview({ action: "agents", agents: [row.id] }) });
         return h("div", { className: "agent-card", title: row.evidence && row.evidence.length ? `found: ${row.evidence.join(", ")}` : "" },
           agentLogo(row), h("div", {}, h("b", { text: row.name }), h("div", { className: "s" }, what)), end);
