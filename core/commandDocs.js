@@ -175,7 +175,9 @@ const DOCS = {
   grid: {
     group: "watch", needs: "up", mcp: "grid",
     summary: "Lists what's on grid, nearest first, with mode, target and shield, armour and hull.",
-    flags: [["--range", "10,000 km", "The cut-off."], ["--all", null, "Everything the session can see."], ["--json", null, "The bridge's full reply."]],
+    flags: [["--range", "10,000 km", "The cut-off."], ["--all", null, "Everything the session can see."],
+      ["--kind <kind>", null, "Only rows of this kind (planet, stargate, asteroid...). Without it, more than 10 of a kind that isn't a ship collapse to a count."],
+      ["--json", null, "The bridge's full reply."]],
   },
   watch: {
     group: "watch", needs: "up", mcp: "watch",
@@ -229,8 +231,10 @@ const DOCS = {
   },
   primer: {
     group: "tool",
-    summary: "Prints what an agent needs to drive the CLI: the workflow, the scenario format and the condition syntax, with the active plugins' notes.",
-    flags: [["--mcp", null, "The MCP server's version, naming its tools instead of commands."]],
+    summary: "Prints what an agent needs to drive the CLI: the workflow, the scenario format, the condition syntax, every event's fields and performance runs, with the active plugins' notes. A topic prints one part.",
+    flags: [["<topic>", "all of them", "start, scenarios, conditions, events, perf or plugins."],
+      ["--mcp", null, "The MCP server's version, naming its tools instead of commands."]],
+    examples: [["gridcheck primer", null], ["gridcheck primer events", "each event kind's fields"]],
   },
   gui: {
     group: "tool",

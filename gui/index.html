@@ -69,7 +69,7 @@
     </div>
   </div>
   <span id="tree-badges" class="row"></span>
-  <span class="spacer"></span>
+  <div id="ctxbar" class="ctxbar"></div>
   <span id="message" role="status"></span>
 </header>
 <nav id="tabs" class="tabs" role="tablist">
@@ -85,7 +85,6 @@
     </div>
   </div>
 </nav>
-<div id="ctxbar" class="ctxbar"></div>
 
 <main>
   <!-- Runs -->
@@ -131,6 +130,7 @@
           <div id="wb-track" class="track"></div>
         </div>
         <div class="events">
+          <div id="wb-ev-resize" class="ev-resize" role="separator" aria-orientation="horizontal" aria-label="Resize the event log" title="Drag to resize the event log, double-click to reset"></div>
           <div class="ev-filters">
             <span id="wb-chips" class="row"></span>
             <input id="wb-grep" class="grep" type="search" placeholder="regex, e.g. TARGET|DAMAGE" autocomplete="off" spellcheck="false">

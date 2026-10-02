@@ -288,8 +288,7 @@
     state.context = body.context;
     const c = state.context;
     const node = $("context");
-    // An unpacked zip has no commit; show just the version then.
-    node.textContent = [c.version, c.commit ? short(c.commit) : null].filter(Boolean).join(" · ");
+    node.textContent = c.version || "";
     const at = c.commit ? ` at ${c.commit}` : "";
     node.title = c.mode === "vendored"
       ? `vendored copy ${c.version || "?"}${at}, managing ${c.tree}`
@@ -450,7 +449,6 @@
       onclick: () => showTab("install") },
       tree.copy ? h("i", { className: "dot" }) : null,
       tree.copy ? "gridcheck installed" : tree.isTree ? "not installed" : "not an Eve.js instance"));
-    if (tree.mode) box.append(badge("mute", tree.mode));
     if (tree.up) box.append(badge("warn", "server up", true));
   }
 
@@ -497,9 +495,6 @@
           skipped.map((row) => h("p", {}, h("b", { text: row.name }), ` skipped: ${row.reason}`))) : null);
     }
     if (state.tab === "runs" && run.client) fact("client", "eye", "Client view", v(run.client));
-    const where = state.tab === "runs" && run.runsDir ? run.runsDir : tree.root;
-    facts.append(h("span", { className: "fact where", title: `${where} (click to copy)`, "data-copy": where },
-      icon("folder", "sm ic"), h("span", { className: "v", text: where }), icon("copy", "sm cp")));
     bar.append(facts);
   }
 
@@ -821,7 +816,7 @@
   //     action: { text, primary, disabled, title, open, run }, open, detail: () => nodes }
   // A row that blocks keeps the tree from running tests.
   function setupRows(tree) {
-    return [copyRow(tree), modeRow(tree), agentsRow(tree), prereqRow(tree), pluginsRow(tree), serverRow(tree)];
+    return [copyRow(tree), modeRow(tree), agentsRow(tree), patchesRow(tree), prereqRow(tree), pluginsRow(tree), serverRow(tree)];
   }
 
   const VENDOR_FILE = "tools/gridcheck/VENDOR.json";
@@ -1022,6 +1017,29 @@
       desc: "Claude Code and Codex aren't on this machine. You can still set one up, or run tests from the terminal.", detail };
   }
 
+  // The patch states come with the run card's data (loadRunData), so the row waits for it.
+  function patchesRow(tree) {
+    const base = { key: "patches", icon: "patch", title: "Patches" };
+    if (!tree.copy || !tree.copy.present) return { ...base, state: "wait", desc: "Install gridcheck first." };
+    const data = state.runData.get(tree.id);
+    if (!data || data.loading) return { ...base, state: "wait", desc: "Reading the patches…" };
+    const patches = data.patches || [];
+    if (!patches.length) return { ...base, state: "info", desc: "This Eve.js instance's copy lists none." };
+    const on = patches.filter((row) => row.state === "applied" || row.state === "detected").length;
+    const action = { text: "Patches", icon: "arrow", run: () => showTab("patches") };
+    const detail = () => [
+      h("p", { text: "Edits to the server that add what stock EveJS doesn't report, such as NPC decisions and whether a slash command worked. Tests run without them." }),
+      h("ul", { className: "checks" }, patches.map((row) => {
+        const isOn = row.state === "applied" || row.state === "detected";
+        return checkItem(isOn || (row.state === "absent" ? null : false), row.headline || row.title || row.id, (PATCH_STATES[row.state] || [null, row.state])[1]);
+      }))];
+    if (on === patches.length) {
+      return { ...base, state: "ok", title: "Patches applied", desc: patches.length === 1 ? "The one patch is on." : `All ${patches.length} are on.`, action, detail };
+    }
+    return { ...base, state: "optional", pill: ["accent", "Optional"], open: true,
+      desc: `${on} of ${patches.length} are on in this Eve.js instance. Apply them from the Patches tab.`, action, detail };
+  }
+
   function prereqRow(tree) {
     const rows = tree.prerequisites || [];
     const missing = rows.filter((row) => !row.ok);
@@ -1185,7 +1203,7 @@
     ]);
     state.runData.set(id, { loading: false, error: list.error || null, scenarios: list.scenarios ?? null, recipes: list.recipes ?? null,
       runs: runList.runs || [], patches: patches && Array.isArray(patches.patches.json) ? patches.patches.json : null });
-    if (state.tree && state.tree.id === id && state.tab === "install") renderRunCard(state.tree, setupRows(state.tree));
+    if (state.tree && state.tree.id === id && state.tab === "install") renderInstall(state.tree);
   }
 
   const seconds = (ms) => {
@@ -1325,7 +1343,7 @@
         h("div", {}, h("h4", { text: "Run a scenario" }), h("p", { text: attach ? "Runs the scenario on the server you started, and checks what happened."
           : "Boots the server, plays the scenario, stops the server, and checks what happened." }))),
       sec("list", "Scenario", picker),
-      sec("term", "Command", plainTerm([[CLI, "bin"], ["run", "sub"], [scenario.name, "arg"], ...flags.map((flag) => [flag, "flag"])], command)),
+      sec("term", "Command", plainTerm([[CLI, "bin"], ["run", "sub"], [scenario.name, "arg"], ...flags.map((flag) => [flag, "tflag"])], command)),
       scenario.problem ? sec("alert", "Problem", h("div", { className: "sproblem", text: scenario.problem })) : null,
       sec("target", "What it does", h("p", { className: "desc", text: scenario.description || "(no description)" })),
       scenario.expect.length ? sec("flag", "It checks", h("ul", { className: "xs-list" }, scenario.expect.map((row) => h("li", { className: row.absent ? "absent" : "",
@@ -1349,15 +1367,6 @@
         h("span", { className: "muted", text: "printed with the path to" }), ref("path", `${tree.config.runsDir || "_local/gridcheck/runs"}/<run>/report.md`, { copy: false }),
         h("span", { className: "spacer" }),
         h("button", { type: "button", className: "btn sm", onclick: () => showTab("runs") }, icon("runs"), "Open the Runs tab"))));
-  }
-
-  function patchesNote(data) {
-    if (!data.patches || !data.patches.length) return null;
-    const on = data.patches.filter((row) => row.state === "applied" || row.state === "detected").length;
-    return h("div", { className: "before" }, icon("patch"),
-      h("span", {}, h("b", { text: "Optional, before step 2: " }), "the Patches tab's edits add what stock EveJS doesn't report, such as NPC decisions and ",
-        "whether a slash command worked. ", h("b", { text: `${on} of ${data.patches.length}` }), " are on in this Eve.js instance."),
-      h("button", { type: "button", className: "btn sm", onclick: () => showTab("patches") }, "Patches", icon("arrow")));
   }
 
   // The fixed commands, for a copy without `run --json`.
@@ -1434,8 +1443,6 @@
       " Run both from", ref("path", tree.root, { dir: true })));
     pane.append(stepCard("s1", 1, false, worldStep(tree, data, scenario)));
     pane.append(stepCard("s2", 2, true, runStep(tree, data, scenario, data.scenarios)));
-    const note = patchesNote(data);
-    if (note) pane.append(note);
   }
 
   function renderInstall(tree) {
@@ -1450,6 +1457,7 @@
     root.textContent = "";
     root.append(...[ref("path", tree.root, { dir: true }), tree.evejs ? ref("ver", `EveJS ${tree.evejs}`, { copy: false }) : null,
       tree.git === false ? h("span", { text: "not a git checkout, so uncommitted changes can't be checked" }) : null].filter(Boolean));
+    if (!tree.problem && tree.copy && tree.copy.present && !state.runData.has(tree.id)) loadRunData(tree).catch((error) => message(error.message));
     const rows = tree.problem ? [] : setupRows(tree);
     renderHero(tree, rows);
     // The tree's own dependencies come first, on their own: a precheck, not a setup step.
@@ -1882,11 +1890,21 @@
   function nextSteps(summary, root) {
     const folder = () => ref("path", root || "this Eve.js instance's folder", { dir: true });
     return summary.next.map(({ who, text }) => {
-      if (who === "Claude Code") return ["Open Claude Code in ", folder(), ". It asks once whether to use the project's MCP server: approve it."];
+      if (who === "Claude Code") return ["Open Claude Code in ", folder(), ". It asks once whether to use the project's MCP server: approve it.",
+        root ? launchCommand(`cd ${shellQuote(root)}; claude`) : null];
       if (who === "Codex") return ["Start a new Codex session. The server is in every Codex session, and names this Eve.js instance by its path."];
       if (who === "any other agent") return ["Start the agent in ", folder(), ". It reads the pointer and follows the CLI guide."];
       return [`${who}: ${text}`];
     });
+  }
+
+  // Single quotes keep PowerShell and POSIX shells from expanding `$` in the path.
+  function shellQuote(path) {
+    return path.includes("'") ? `"${path}"` : `'${path}'`;
+  }
+
+  function launchCommand(command) {
+    return h("div", { className: "pv-cmd" }, h("code", { text: command }), copyButton(command));
   }
 
   function nextList(items) {
@@ -2031,11 +2049,8 @@
     return successText(request)[0];
   }
 
-  function doneNext(request, p, result) {
-    const output = result.steps.map((step) => step.output || "").join("\n");
+  function doneNext(request, p) {
     if (request.action === "agents") return nextSteps(summaryOf(p), p.root);
-    const next = /^next: (.+)$/m.exec(output);
-    if (request.action === "init" && next) return [[capital(next[1])]];
     return [];
   }
 
@@ -2129,7 +2144,7 @@
       if (result.ok) {
         if (request.action === "vendor" && state.treeID) markInstalledByHand(state.treeID);
         previewHead({ ...words, icon: "check", title: words.done }, p.root, { kind: "ok" });
-        const next = doneNext(request, p, result);
+        const next = doneNext(request, p);
         const tryIt = request.action === "agents" && (request.agents || []).some((agent) => agent !== "cli");
         // replaceChildren would write a null out as the text "null".
         $("preview-steps").replaceChildren(...[
@@ -2139,7 +2154,7 @@
           next.length ? h("div", { className: "pv-handoff" },
             h("div", { className: "pv-sec-h", text: next.length === 1 ? "One more step" : "Next" }), nextList(next),
             tryIt ? h("p", { className: "pv-try" }, "Then ask it something like ",
-              h("q", { text: "Run the loadout-npc-fight scenario and tell me what happened." })) : null) : null,
+              h("q", { text: "Spawn in a rat and see if it shoots the player." })) : null) : null,
           techDetails(result.steps, { ran: true })].filter(Boolean));
         previewFooter({ close: "Done", done: true });
         $("preview-note").textContent = undoHint(request, p);

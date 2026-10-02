@@ -146,6 +146,79 @@ test("the grid at a moment glides between samples and knows each ball's speed", 
   assert.strictEqual(R.createModel().frameAt(0), null);
 });
 
+test("the grid at a moment is worked out once per moment, and again after new samples", () => {
+  const m = model();
+  const first = m.frameAt(2000);
+  assert.strictEqual(m.frameAt(2000), first, "the map and the inspector share one frame");
+  m.ingest(`${JSON.stringify({ kind: "POS", atMs: 1500, systemID: 1, selfID: SELF, balls: [ball(SELF, "ship", "self", { x: 999 })] })}\n`, []);
+  assert.notStrictEqual(m.frameAt(2000), first);
+  assert.strictEqual(m.frameAt(2000).pos.atMs, 1500);
+});
+
+test("a live view plays behind the newest data by about one sample gap", () => {
+  const sampled = (gaps, systemID = () => 1) => {
+    const m = R.createModel();
+    let at = 1000;
+    const lines = [{ kind: "POS", atMs: at, systemID: systemID(0), selfID: SELF, balls: [] }];
+    gaps.forEach((gap, i) => {
+      at += gap;
+      lines.push({ kind: "POS", atMs: at, systemID: systemID(i + 1), selfID: SELF, balls: [] });
+    });
+    m.ingest(`${lines.map((line) => JSON.stringify(line)).join("\n")}\n`, []);
+    return m;
+  };
+  assert.strictEqual(R.createModel().liveDelayMs(), R.LIVE_DELAY.defaultMs, "no samples yet");
+  assert.strictEqual(sampled([2000, 2000, 2000]).liveDelayMs(), 2000 + R.LIVE_DELAY.slackMs);
+  assert.strictEqual(sampled([10_000, 10_000, 2000, 2000, 2000, 2000, 10_000]).liveDelayMs(), 2000 + R.LIVE_DELAY.slackMs,
+    "the median of the last five gaps, so one quiet stretch doesn't push it back");
+  assert.strictEqual(sampled([10_000, 10_000, 10_000]).liveDelayMs(), 10_000 + R.LIVE_DELAY.slackMs, "a quiet grid samples every 10 s");
+  assert.strictEqual(sampled([500, 500]).liveDelayMs(), R.LIVE_DELAY.minMs);
+  assert.strictEqual(sampled([60_000]).liveDelayMs(), R.LIVE_DELAY.maxMs);
+  assert.strictEqual(sampled([2000, 9000], (i) => (i < 2 ? 1 : 2)).liveDelayMs(), 2000 + R.LIVE_DELAY.slackMs,
+    "a jump to another system isn't a gap between samples");
+});
+
+test("a live view plays at least as far behind as data arrives late, so it doesn't catch up and stall", () => {
+  const m = R.createModel();
+  let at = 1000;
+  const batch = (gaps) => `${gaps.map((gap) => JSON.stringify({ kind: "POS", atMs: (at += gap), systemID: 1, selfID: SELF, balls: [] })).join("\n")}\n`;
+  m.noteArrival(5000);
+  m.ingest(batch([0, 1000, 1000]), []);
+  assert.strictEqual(m.liveDelayMs(), R.LIVE_DELAY.minMs, "the first batch says nothing about arrivals");
+  m.noteArrival(at + 4200);
+  m.ingest(batch([1000, 1000, 1000, 1000]), []);
+  assert.strictEqual(m.liveDelayMs(), 4200 + R.LIVE_DELAY.slackMs, "1 s samples arriving in 4 s batches");
+  m.noteArrival(at + 3000);
+  assert.strictEqual(m.liveDelayMs(), 4200 + R.LIVE_DELAY.slackMs, "the worst of the last few arrivals sets it");
+  m.noteArrival(at + 60_000);
+  assert.strictEqual(m.liveDelayMs(), R.LIVE_DELAY.maxMs);
+  m.ingest(batch([65_000]), []);
+  m.noteArrival(at + 2000);
+  assert.strictEqual(m.liveDelayMs(), R.LIVE_DELAY.maxMs, "a late batch holds the delay up for a while, so it doesn't bob");
+  m.ingest(batch([R.LIVE_DELAY.arrivalWindowMs]), []);
+  m.noteArrival(at + 2000);
+  assert.strictEqual(m.liveDelayMs(), 2000 + R.LIVE_DELAY.slackMs, "then drops out");
+});
+
+test("following live eases toward the live point instead of freezing or skipping", () => {
+  assert.strictEqual(R.liveRate(0), 1, "on the live point: real time");
+  assert.ok(R.liveRate(-1500) < 1 && R.liveRate(-1500) >= R.LIVE_DELAY.minRate, "ahead of it: slower, never stopped");
+  assert.ok(R.liveRate(1500) > 1 && R.liveRate(1500) <= R.LIVE_DELAY.maxRate, "behind it: faster");
+  assert.strictEqual(R.liveRate(-60_000), R.LIVE_DELAY.minRate);
+  assert.strictEqual(R.liveRate(60_000), R.LIVE_DELAY.maxRate);
+});
+
+test("auto zoom moves in steps, up at once and down only with room to spare", () => {
+  assert.strictEqual(R.autoHalf(0), 5000);
+  assert.strictEqual(R.autoHalf(26_000), 30_000);
+  assert.strictEqual(R.autoHalf(31_000, 30_000), 40_000, "up as soon as a ship needs it");
+  assert.strictEqual(R.autoHalf(29_000, 40_000), 40_000, "not down for a ship hovering at the edge");
+  assert.strictEqual(R.autoHalf(25_000, 40_000), 30_000, "down once the step below has room");
+  assert.strictEqual(R.autoHalf(1200, 40_000), 5000, "straight down to what fits");
+  assert.strictEqual(R.autoHalf(9e9), R.AUTO_HALVES[R.AUTO_HALVES.length - 1]);
+  assert.strictEqual(R.autoHalf(26_000, 12_345), 30_000, "a zoom that isn't a step is ignored");
+});
+
 test("text helpers", () => {
   assert.strictEqual(R.offset(3_725_000), "t+01:02:05");
   assert.strictEqual(R.offsetFine(7120), "t+00:00:07.120");

@@ -476,7 +476,7 @@ async function stockPatchRoundTrip(lane, tree) {
           const refused = cliIn(tree, ["slash", "/fit me No Such Module Anywhere"], { expect: 2 });
           if (!/-> refused/.test(refused)) throw new CompatError(`/fit didn't report refused:\n${refused}`);
           const unknown = cliIn(tree, ["slash", "/where"]);
-          if (!/doesn't say whether it refused/.test(unknown)) throw new CompatError(`/where should be unreported:\n${unknown}`);
+          if (!/-> done \(unconfirmed\)/.test(unknown)) throw new CompatError(`/where should be unreported:\n${unknown}`);
           return "/dock ok, /fit of a missing module refused, /where unreported";
         });
         await check(lane, "loadout without the skills refused (patched)", () => loadoutRefused(tree));

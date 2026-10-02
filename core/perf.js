@@ -210,8 +210,12 @@
     const start = list.find((event) => event && event.kind === "START");
     const firstAt = Math.min(...[start && start.atMs, ticks[0] && ticks[0].atMs].filter(Number.isFinite));
     const bounds = [{ atMs: firstAt, label: "watch start", phase: "setup", step: null }];
-    for (const step of steps) {
-      bounds.push({ atMs: step.atMs, label: `after ${step.step}`, phase: step.phase || "setup", step: step.step, ok: step.ok });
+    // Steps with "perf": "<name>" mark where they began, and when a run has
+    // any, only they open phases, named for them.
+    const named = steps.filter((step) => step.started && step.perf);
+    for (const step of named.length ? named : steps.filter((step) => !step.started)) {
+      bounds.push({ atMs: step.atMs, label: step.perf || `after ${step.step}`, phase: step.phase || "setup", step: step.step,
+        ok: step.ok, ...(step.perf ? { perf: step.perf } : {}) });
     }
     const stopEvent = list.find((event) => event && event.kind === "STOP" && event.source === "runner");
     const endAt = Math.max(...[stopEvent && stopEvent.atMs, ...perf.map((event) => event.atMs)].filter(Number.isFinite));
@@ -227,6 +231,7 @@
       const windows = perf.filter((event) => event.atMs > from && (last || event.atMs <= to));
       phases.push({
         label: bounds[index].label,
+        ...(bounds[index].perf ? { perf: bounds[index].perf } : {}),
         step: bounds[index].step,
         phase: bounds[index].phase,
         fromMs: from,
@@ -251,6 +256,11 @@
     const start = list.find((event) => event && event.kind === "START" && event.perf);
     const profiles = list.filter((event) => event && event.kind === "PROFILE");
     const missed = perf.reduce((sum, event) => sum + (Number(event.missedTicks) || 0), 0);
+    // When the worst moments were: the slowest tick by its own time, the
+    // longest event-loop stall by the window it fell in.
+    const worstTick = perf.flatMap(ticksOf).reduce((top, tick) => (!top || tick.ms > top.ms ? tick : top), null);
+    const worstLoop = perf.filter((event) => Number.isFinite(event.loopMaxMs))
+      .reduce((top, event) => (!top || event.loopMaxMs > top.loopMaxMs ? event : top), null);
     return {
       profiler: Boolean(start && start.perf && start.perf.profiler) || profiles.length > 0,
       budgetMs,
@@ -268,6 +278,9 @@
           const values = perf.map((event) => event.tidiMin).filter(Number.isFinite);
           return values.length ? Math.min(...values) : null;
         })(),
+        worstTick: worstTick ? { ms: round(worstTick.ms), atMs: worstTick.atMs } : null,
+        worstLoop: worstLoop ? { ms: round(worstLoop.loopMaxMs), atMs: worstLoop.atMs,
+          windowMs: Number.isFinite(worstLoop.windowMs) ? worstLoop.windowMs : null } : null,
       },
       phases: perfPhases(list, { budgetMs }),
       profile: mergeProfiles(profiles),
@@ -356,7 +369,7 @@
 
   // The "Server performance" section of report.md, from perfRecord(). `offset`
   // formats a time on the watch's clock (t+00:00:12).
-  function renderPerfSection(record, { offset = (ms) => `${Math.round(ms / 1000)} s`, watchStartedAtMs = null } = {}) {
+  function renderPerfSection(record, { offset = (ms) => `${Math.round(ms / 1000)} s`, watchStartedAtMs = null, profileAsked = false } = {}) {
     if (!record) return null;
     const lines = ["## Server performance", ""];
     const o = record.overall;
@@ -367,8 +380,23 @@
       `${o.loopMaxMs !== null && o.loopMaxMs > o.loopP99Ms ? ` and once ${ms(o.loopMaxMs)} ms` : ""}, CPU up to ` +
       `${o.cpuPctMax === null ? "-" : Math.round(o.cpuPctMax)}% of a core, heap up to ${o.heapMBMax === null ? "-" : Math.round(o.heapMBMax)} MB` +
       `${o.tidiMin !== null && o.tidiMin < 1 ? `, time dilation down to ${o.tidiMin}` : ""}.`, "");
+    const when = (atMs) => {
+      const phases = record.phases || [];
+      const phase = phases.find((row, index) => atMs >= row.fromMs && (index === phases.length - 1 || atMs < row.toMs));
+      const at = watchStartedAtMs ? `at ${offset(Math.max(0, atMs - watchStartedAtMs))}` : "";
+      return [at, phase ? `in phase "${phase.label}"` : ""].filter(Boolean).join(", ");
+    };
+    const worst = [];
+    if (o.worstTick && Number.isFinite(o.worstTick.atMs)) worst.push(`the slowest tick, ${ms(o.worstTick.ms)} ms, ran ${when(o.worstTick.atMs)}`);
+    if (o.worstLoop && Number.isFinite(o.worstLoop.atMs) && o.worstLoop.ms > 0) {
+      worst.push(`the longest event-loop stall, ${ms(o.worstLoop.ms)} ms, came in the window that ended ${when(o.worstLoop.atMs)}`);
+    }
+    if (worst.length) lines.push(`Worst moments: ${worst.join("; ")}.`, "");
     if (record.phases.length) {
-      lines.push("Each phase starts where a step ended, so the time before a spawn is the baseline for the time after it.", "");
+      lines.push(record.phases.some((phase) => phase.perf)
+        ? "Each phase starts where a step with \"perf\" began, and is named for it; the first is the baseline before them."
+        : "Each phase starts where a step ended, so the time before a spawn is the baseline for the time after it. " +
+          "\"perf\": \"<name>\" on a step makes only the steps that have it open a phase.", "");
       lines.push("| Phase | From | Ticks | Avg ms | p95 | p99 | Max | Over budget | Loop p99 | CPU % | Heap MB | Entities |",
         "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |");
       for (const phase of record.phases) {
@@ -388,6 +416,10 @@
       lines.push("| Section | ms/tick | Share | Calls |", "| --- | --- | --- | --- |");
       for (const row of sectionRows(record.profile, 15)) lines.push(`| ${row.map(cell).join(" | ")} |`);
       lines.push("");
+    } else if (!record.profiler && profileAsked) {
+      lines.push("**No per-subsystem breakdown: the scenario asks for the tick profiler, but the server it ran on was started " +
+        "without it.** A run on a server that is already up uses it as it is. Stop that server (`down`) and run again, so " +
+        "the run boots its own with the profiler.", "");
     } else if (!record.profiler) {
       lines.push("No per-subsystem breakdown: the server ran without the tick profiler. Add `\"up\": { \"profile\": true }`.", "");
     }

@@ -32,8 +32,10 @@ Work through these in order. Each step ends on its own criterion.
    no problem for what you need. In attach mode with no server up, ask the user to start one
    (`npm start` or `StartServer.bat`); nothing else will start it.
 2. **Learn the format.** `gridcheck primer` prints the scenario format, the setup steps and player
-   actions, the condition syntax and each plugin's notes. Done when you have read it in this
-   session: it is the only reference for those, and it matches this tree's plugins.
+   actions, the condition syntax, every event kind's fields, performance runs and each plugin's
+   notes; `gridcheck primer <topic>` prints one part (`start`, `scenarios`, `conditions`, `events`,
+   `perf`, `plugins`). Done when you have read it in this session: it is the only reference for
+   those, and it matches this tree's plugins.
 3. **Draft the scenario.** `gridcheck scenario new <name>` writes a draft to `_local/gridcheck/scenarios/` that
    checks out as it stands; `--from <scenario>` copies one closer to your case (`gridcheck run` lists
    them). Edit it so setup starts your feature the way the game would, `until` stops on the

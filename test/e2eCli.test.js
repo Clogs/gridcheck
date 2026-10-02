@@ -145,6 +145,20 @@ test("--all lists celestials, --range narrows, docked shows where", () => {
   );
 });
 
+test("a belt's asteroids collapse to the nearest three and a count; --kind lists them", () => {
+  const rocks = Array.from({ length: 14 }, (_, index) => ({ itemID: 900 + index, kind: "asteroid", name: `Veldspar ${index}`,
+    typeName: "Veldspar", distanceMeters: 20_000 + index * 1000 }));
+  const belt = { ...grid, entities: [...grid.entities, ...rocks].sort((a, b) => a.distanceMeters - b.distanceMeters) };
+  const text = formatGrid(belt);
+  assert.strictEqual((text.match(/Veldspar \d/g) || []).length, 3);
+  assert.match(text, /^\+11 more asteroid within 10,000 km \(--kind asteroid to list them\)$/m);
+  assert.match(text, /Guristas Scout/, "ships are never collapsed");
+  assert.strictEqual((formatGrid(belt, { kind: "asteroid" }).match(/Veldspar \d/g) || []).length, 14);
+  assert.doesNotMatch(formatGrid(belt, { kind: "asteroid" }), /Guristas Scout/);
+  assert.strictEqual((formatGrid(belt, { all: true }).match(/Veldspar \d/g) || []).length, 14);
+  assert.match(formatGrid(belt, { kind: "wormhole" }), /nothing of kind wormhole; the kinds the session sees: asteroid, /);
+});
+
 const { triggerRequest } = require("../plugins/lu/tool/triggers");
 
 test("a plugin's up flags become the server's variables and the world restore's options", LU, () => {

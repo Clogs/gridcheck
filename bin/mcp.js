@@ -18,8 +18,8 @@ const { DEFAULT_TREE_ROOT, defaultRegistry } = require("../core/plugins");
 const { kindsOf } = require("../core/conditions");
 const { DRAFT_SCENARIO_DIR, TREE_SCENARIO_DIR, scenarioPath } = require("../core/scenario");
 const { defaultTreeConfig } = require("../core/treeConfig");
-const { primer } = require("../core/primer");
-const { createRuns, clip, readText, reportSections, reportSummary, runStamp, safeRunID, sleep, tailLines } = require("../core/runs");
+const { TOPICS, brief } = require("../core/primer");
+const { createRuns, clip, compactSummary, consoleSummary, readText, reportSections, runStamp, safeRunID, sleep, tailLines } = require("../core/runs");
 
 const REPO_ROOT = DEFAULT_TREE_ROOT;
 const REGISTRY = defaultRegistry();
@@ -40,10 +40,10 @@ const WATCH_DEFAULT_SECONDS = 60;
 const MAX_WAIT_SECONDS = 600;
 const NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/;
 
-// The core's instructions, then each plugin's primer (core/primer.js).
+// A short brief (core/primer.js): clients cut long instructions off, so the
+// scenario format and the plugins' primers are the guide tool's topics.
 function instructions(registry = REGISTRY) {
-  return primer({ registry, mode: MODE, surface: "mcp",
-    scenarioDirs: { tree: relativePath(TREE_SCENARIO_DIR), drafts: relativePath(DRAFT_DIR) } });
+  return brief({ registry, mode: MODE });
 }
 
 const INSTRUCTIONS = instructions();
@@ -164,12 +164,14 @@ const CLI_ARGS = {
     flag("name", p.name);
     return args;
   },
+  guide: (p) => ["primer", "--mcp", ...(p.topic ? ["--", p.topic] : [])],
   undock: () => ["undock"],
   teleport: (p) => ["teleport", "--", String(p.system)],
   grid(p) {
     const { args, flag } = argList("grid");
     flag("range", p.range);
     flag("all", p.all);
+    flag("kind", p.kind);
     flag("json", p.json);
     return args;
   },
@@ -305,6 +307,15 @@ const TOOLS = [
     },
   },
   {
+    name: "guide",
+    description: "How to drive this tool, by topic; this server's instructions are only an outline. Read \"scenarios\" " +
+      "before writing a scenario, and \"events\" for the fields a condition can test. No topic returns every topic.",
+    inputSchema: schema({
+      topic: str(Object.entries(TOPICS).map(([key, what]) => `${key}: ${what}`).join("; "), { enum: Object.keys(TOPICS) }),
+    }),
+    run: simple("guide"),
+  },
+  {
     name: "up",
     description: "Managed and auto mode. Start this tree's server (and market daemon) in the background and wait until a character can log in, " +
       "about 25 s warm. For grid checks pass world (a saved world status lists). Without world or fresh it keeps " +
@@ -372,10 +383,12 @@ const TOOLS = [
   {
     name: "grid",
     description: "The ship's grid now, as a table: distance, name, type, NPC kind, mode, target and shield/armour/hull, " +
-      "nearest first, with the ship's protection countdown.",
+      "nearest first, with the ship's protection countdown. More than 10 of one kind that isn't a ship (a belt's " +
+      "asteroids) collapse to the nearest 3 and a count; kind lists them.",
     inputSchema: schema({
       range: num("Cut-off in km (default 10,000).", { exclusiveMinimum: 0 }),
-      all: bool("Everything the session can see."),
+      all: bool("Everything the session can see, nothing collapsed."),
+      kind: str("Only rows of this kind, e.g. planet, stargate, station, asteroid; a kind no row has lists the kinds there are."),
       json: bool("The bridge's full reply as JSON (field names match scenario conditions)."),
     }),
     run: simple("grid"),
@@ -429,8 +442,10 @@ const TOOLS = [
     name: "act",
     description: "Act as the player, through the calls the web gateway allows a client: fly, lock, switch modules on and " +
       "off, load ammo and use drones. The server applies every rule (range, lock time, capacitor, ammo) and a refusal " +
-      "is in its own words. A target is the nearest ball on grid that passes every term: \"nearest npc\", " +
-      "\"name~Scout\", \"type~Rifter\", \"kind=station\", \"within=30km\", \"player\" or an itemID" +
+      "is in its own words. A target is the nearest ball the session sees (on grid, or a celestial anywhere in the " +
+      "system, so warpTo reaches planets and belts) that passes every term: \"nearest npc\", " +
+      "\"name~Scout\", \"name~\\\"Asteroid Belt\\\"\" (terms split at spaces, so quote a value that has one), \"type~Rifter\", " +
+      "\"kind=station\", \"within=30km\", \"player\" or an itemID" +
       `${Object.keys(REGISTRY.targetFields).length ? `, and the plugins' ${Object.keys(REGISTRY.targetFields).map((term) => `${term}=`).join(", ")}` : ""}. ` +
       "Modules: weapons (default), high, mid, low, all, name~..., group~..., " +
       "an itemID. Watch the effect with watch in the same turn (client: \"fx\" shows the guns firing).",
@@ -483,7 +498,7 @@ const TOOLS = [
       "(the JSON object) to write one first. check: true only validates it, which boots nothing; do that first. " +
       (MANAGED ? "The server must be down (down). " : "") +
       "A run takes minutes; wait: false returns at once and report waits. " +
-      "The scenario format is in this server's instructions and docs/GUIDE.md \"Scenarios\".",
+      "The scenario format: guide { topic: \"scenarios\" }.",
     inputSchema: schema({
       name: str("A scenario in tools/gridcheck-scenarios, tools/gridcheck/scenarios, a plugin's scenarios or _local/gridcheck/scenarios (without .json), or a path. With scenario: the file name to write."),
       scenario: { type: "object", description: "The scenario JSON to write as <name>.json before checking or running it." },
@@ -535,10 +550,11 @@ const TOOLS = [
       }
       const state = runState(runID);
       if (!state.result) return textResult(`${prefix}${clip(reply.output)}\n(exit ${reply.code}; no report written)`, true);
-      const report = readText(path.join(state.dir, "report.md")) || "";
-      const console_ = clip(reply.output, 4000, path.join(state.dir, "timeline.jsonl"));
-      return textResult(`${prefix}${console_}\n\n${clip(reportSummary(report), OUTPUT_LIMIT - 6000)}\n\n${filesBlock(state)}`,
-        state.result.exitCode === 2);
+      const reportPath = path.join(state.dir, "report.md");
+      const report = readText(reportPath) || "";
+      const console_ = consoleSummary(reply.output);
+      const summary = compactSummary(report, OUTPUT_LIMIT - console_.length - prefix.length - 1500, reportPath);
+      return textResult(`${prefix}${console_}\n\n${summary}\n\n${filesBlock(state)}`, state.result.exitCode === 2);
     },
   },
   {

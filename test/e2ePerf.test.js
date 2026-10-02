@@ -342,6 +342,24 @@ test("a run's ticks split at its steps: the baseline before the spawn, the load 
   assert.strictEqual(perfTools.perfRecord([{ kind: "GRID" }]), null);
 });
 
+test("steps with perf name the phases and are the only cuts; the report says when the worst tick ran", () => {
+  // The spawn step carries "perf": "fight" and began 2.5 s before it ended.
+  const events = perfTimeline().flatMap((event) => (event.kind === "STEP"
+    ? [{ ...event, atMs: 102_500, t: 2500, started: true, perf: "fight", text: 'perf phase "fight" starts' }, event] : [event]));
+  const record = perfTools.perfRecord(events);
+  assert.deepStrictEqual(record.phases.map((phase) => [phase.label, phase.ticks]), [["watch start", 25], ["fight", 125]]);
+  assert.deepStrictEqual(record.overall.worstTick, { ms: 140, atMs: 114_950 });
+  const text = perfTools.renderPerfSection(record, { offset: (ms) => `${Math.floor(ms / 1000)} s`, watchStartedAtMs: 100_000 });
+  assert.match(text, /Worst moments: the slowest tick, 140 ms, ran at 14 s, in phase "fight"/);
+  assert.match(text, /Each phase starts where a step with "perf" began/);
+  assert.match(text, /\| fight \| 2 s \| 125 \|/);
+
+  const unprofiled = perfTools.perfRecord(perfTimeline().filter((event) => event.kind !== "PROFILE" && event.kind !== "START"));
+  assert.match(perfTools.renderPerfSection(unprofiled, { profileAsked: true }),
+    /the scenario asks for the tick profiler, but the server it ran on was started without it/);
+  assert.match(perfTools.renderPerfSection(unprofiled), /ran without the tick profiler\. Add/);
+});
+
 test("the report gets a Server performance section, and result.json the same figures", () => {
   const events = perfTimeline();
   const result = { name: "perf-npc-load", world: "starter", startedAtMs: 99_000, stoppedAtMs: 116_000, watchStartedAtMs: 100_000,
@@ -393,5 +411,6 @@ test("the MCP tools map perf and profile onto the CLI", () => {
   assert.ok(!mcp.cliArgs("up", { profileEvery: 20 }).some((arg) => arg.startsWith("--profile")), "profileEvery only with profile");
   assert.deepStrictEqual(mcp.cliArgs("watch", { perf: true }).slice(1), ["--for=60", "--perf"]);
   assert.deepStrictEqual(mcp.cliArgs("watch", { perf: true, perfEvery: 10 }).slice(1), ["--for=60", "--perf-every=10"]);
-  assert.match(mcp.instructions(), /`perf` \{ seconds: 30 \}/);
+  const { primer } = require("../core/primer");
+  assert.match(primer({ registry: require("../core/plugins").defaultRegistry(), surface: "mcp", topic: "perf" }), /`perf` \{ seconds: 30 \}/);
 });

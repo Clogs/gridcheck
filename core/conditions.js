@@ -254,6 +254,32 @@ function fieldNames(kind, registry = defaultRegistry()) {
   return names;
 }
 
+// Every kind's fields as a condition names them, typed: the guide's events
+// topic. -> [{ kind, plugin, fields: ["name", "security:num", ...], ext: [[plugin, fields]] }].
+// str and id fields go unmarked; the rest carry :num, :m, :ms or :bool.
+function describeFields(registry = defaultRegistry()) {
+  const tables = tablesFor(registry);
+  const typed = (name, spec) => {
+    if (isNested(spec) && spec.map) return `${name}.<key>`;
+    const type = scalarType(spec);
+    return type && type !== "str" && type !== "id" ? `${name}:${type}` : name;
+  };
+  const flatten = (fields, prefix = "") => {
+    const names = [];
+    for (const [key, spec] of Object.entries(fields || {})) {
+      const inner = nestedFields(spec);
+      if (inner) names.push(...flatten(inner, `${prefix}${key}.`));
+      else names.push(typed(`${prefix}${key}`, spec));
+    }
+    return names;
+  };
+  return tables.kinds.map((kind) => {
+    const { ext: _ext, ...own } = tables.fields[kind];
+    return { kind, plugin: tables.owners[kind] || null, fields: flatten(own),
+      ext: extFieldsOf(tables.fields[kind]).map(([plugin, fields]) => [plugin, flatten(fields)]) };
+  });
+}
+
 // Every value at `path`, walking into lists: a list matches when any element does.
 function valuesAt(event, path) {
   let values = [event];
@@ -397,6 +423,7 @@ module.exports = {
   EVENT_FIELDS,
   EXT_KINDS,
   KINDS,
+  describeFields,
   eventFields,
   fieldNames,
   kindsOf,

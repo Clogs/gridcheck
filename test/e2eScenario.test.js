@@ -691,6 +691,78 @@ test("a during step that fails ends the run as not completed", async () => {
   assert.match(renderReport(result, { runID: "r", scenario }), /\*\*during failed\*\* at `lock nearest npc as \$mark`/);
 });
 
+test("a repeat runs its steps a round every `every` seconds, `times` rounds, as one step", async () => {
+  const scenario = scenarioOf({
+    setup: ["undock", { repeat: [{ slash: "/heal" }], every: 0.05, times: 3 }],
+    until: { timeout: 0.1 },
+    expect: ["GRID"],
+  });
+  assert.strictEqual(describeStep(scenario.setup[2]), "repeat every 0.05s 3 times: slash /heal");
+  const ops = fakeOps([]);
+  const result = await runScenario(scenario, ops);
+  assert.strictEqual(ops.calls.filter((call) => call === "step:slash").length, 3);
+  const row = result.steps.find((step) => step.type === "repeat");
+  assert.deepStrictEqual([row.ok, row.text], [true, "3 round(s)"]);
+  assert.ok(row.ms >= 90, `a round starts every 0.05 s (took ${row.ms} ms)`);
+  assert.strictEqual(result.steps.length, 3, "login, undock and the repeat: its rounds are not rows");
+});
+
+test("a during repeat without times runs until the run stops, and a refused round fails it", async () => {
+  const scenario = scenarioOf({
+    during: [{ repeat: [{ slash: "/heal" }], every: 0.05, perf: "fight" }],
+    until: { timeout: 0.3 },
+    expect: ["GRID"],
+  });
+  const ops = fakeOps([]);
+  const result = await runScenario(scenario, ops);
+  const heals = ops.calls.filter((call) => call === "step:slash").length;
+  assert.ok(heals >= 3, `${heals} rounds in 0.3 s`);
+  const row = result.steps.find((step) => step.phase === "during");
+  assert.deepStrictEqual([row.ok, row.stopped], [false, true]);
+  assert.match(row.text, /round\(s\) done when the run stopped/);
+  assert.strictEqual(result.failure, null);
+  const marks = result.events.filter((event) => event.kind === "STEP" && event.started);
+  assert.deepStrictEqual(marks.map((event) => [event.perf, event.ok, event.text]), [["fight", true, 'perf phase "fight" starts']],
+    "a step with perf marks where it began, even one the stop cuts short");
+
+  const failing = await runScenario(scenarioOf({ during: [{ repeat: [{ slash: "/heal" }], every: 0.01 }], until: { timeout: 1 },
+    expect: ["GRID"] }), fakeOps([], { failStep: "slash" }));
+  assert.deepStrictEqual(failing.failure,
+    { stage: "during", step: "repeat every 0.01s: slash /heal", error: "round 1, slash /heal: slash -> refused" });
+});
+
+test("repeat and perf are checked: times in setup, no nesting, no login, a perf name", () => {
+  const problems = (raw) => {
+    try {
+      scenarioOf(raw);
+      return "";
+    } catch (error) {
+      return error.problems.join("\n");
+    }
+  };
+  const text = problems({
+    setup: ["undock", { repeat: [{ slash: "/heal" }], every: 5 },
+      { repeat: [{ repeat: ["undock"], every: 1, times: 1 }], every: 1, times: 2 },
+      { repeat: ["login"], every: 1, times: 1 }, { repeat: [], every: 1, times: 1 },
+      { slash: "/heal", perf: "" }, { repeat: [{ slash: "/x", perf: "in" }], every: 1, times: 1 },
+      { repeat: [{ slash: "/x" }], every: 0, times: 1.5 }],
+    until: { timeout: 5 },
+    expect: ["GRID"],
+  });
+  assert.match(text, /setup\[1\]\.times: a setup repeat needs times/);
+  assert.match(text, /setup\[2\]\.repeat\[0\]: a repeat can't hold another repeat/);
+  assert.match(text, /setup\[3\]\.repeat\[0\]: login can't be repeated/);
+  assert.match(text, /setup\[4\]: repeat: a list of steps/);
+  assert.match(text, /setup\[5\]\.perf: the name of the perf phase/);
+  assert.match(text, /setup\[6\]\.repeat\[0\]\.perf: put perf on the repeat itself/);
+  assert.match(text, /setup\[7\]\.every: seconds from the start of one round/);
+  assert.match(text, /setup\[7\]\.times: how many rounds/);
+  assert.match(problems({ setup: [{ repeat: [{ wait: 60 }], every: 5, times: 100 }], until: { timeout: 5 }, expect: ["GRID"] }),
+    /add up to 6005 s/, "the budget counts every round");
+  assert.strictEqual(scenarioOf({ during: [{ slash: "/npc 20", perf: "load" }], until: { timeout: 5 }, expect: ["GRID"] }).during[0].perf,
+    "load");
+});
+
 test("a bare name is the tree's scenario first, then the core's, then a plugin's", (t) => {
   const { scenarioPath } = require("../core/scenario");
   const os = require("os");

@@ -93,6 +93,43 @@ function reportSummary(report) {
   return index >= 0 ? `${report.slice(0, index).trimEnd()}\n\n(The timeline is left out; section "full" has it.)` : report;
 }
 
+// The report sections to shorten first when a summary is over its limit; any
+// other section (a plugin's) goes before these, and the verdict at the top last.
+const SHORTEN_FIRST = ["Tactical frames", "Server performance", "Stop conditions", "During", "Setup", "Expected against observed", "head"];
+
+// The summary within `limit` without cutting out its middle: sections are
+// shortened to their first lines, least needed first, each saying how much
+// more `where` has. Only a summary that still doesn't fit is clipped.
+function compactSummary(report, limit = OUTPUT_LIMIT, where = "report.md") {
+  const summary = reportSummary(report);
+  if (summary.length <= limit) return summary;
+  const sections = reportSections(summary);
+  const order = Object.keys(sections);
+  const text = () => order.map((key) => sections[key]).filter(Boolean).join("\n\n");
+  const rank = [...order.filter((key) => !SHORTEN_FIRST.includes(key)), ...SHORTEN_FIRST.filter((key) => key in sections)];
+  for (const keep of [40, 20, 8]) {
+    for (const key of rank) {
+      if (text().length <= limit) return text();
+      const lines = sections[key].split("\n");
+      if (lines.length > keep + 1) {
+        sections[key] = [...lines.slice(0, keep), `(${lines.length - keep} more lines of this section in ${where})`].join("\n");
+      }
+    }
+  }
+  return clip(text(), limit, where);
+}
+
+// A run's console in short: the lines that say what the run did with the
+// server (`run ...`, `note: ...`), then its last lines. The steps are in the report.
+function consoleSummary(output, { tail = 10, limit = 3000 } = {}) {
+  const lines = String(output || "").trimEnd().split("\n");
+  if (lines.length <= tail + 4) return clip(lines.join("\n"), limit);
+  const last = lines.slice(-tail);
+  const notes = lines.slice(0, -tail).filter((line) => /^(run[ :]|note:|warning)/i.test(line)).slice(0, 8);
+  const skipped = lines.length - last.length - notes.length;
+  return clip([...notes, `... ${skipped} console line(s) left out; the report's step tables have the steps ...`, ...last].join("\n"), limit);
+}
+
 function frameWhy(frame) {
   return `${frame.reason}${frame.stop && frame.reason !== "stop" ? " + stop" : ""}`;
 }
@@ -314,7 +351,7 @@ function createRuns({ treeRoot, runsDir, e2eDir, surface = "mcp" }) {
       case "full": return { ...result, text: clip(report, OUTPUT_LIMIT, reportPath) };
       case "result": return { ...result, text: clip(JSON.stringify(state.result, null, 2)) };
       case "pr": return { ...result, text: prCitation(state, report) };
-      default: return { ...result, text: `${clip(reportSummary(report))}\n\n${filesBlock(state)}` };
+      default: return { ...result, text: `${compactSummary(report, OUTPUT_LIMIT - 1500, reportPath)}\n\n${filesBlock(state)}` };
     }
   }
 
@@ -325,6 +362,7 @@ function createRuns({ treeRoot, runsDir, e2eDir, surface = "mcp" }) {
 }
 
 module.exports = {
-  OUTPUT_LIMIT, REPORT_SECTIONS, createRuns, clip, readText, reportSections, reportSummary, runStamp, safeRunID,
+  OUTPUT_LIMIT, REPORT_SECTIONS, createRuns, clip, compactSummary, consoleSummary, readText, reportSections, reportSummary,
+  runStamp, safeRunID,
   sleep, tailLines, verdictOf,
 };

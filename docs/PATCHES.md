@@ -104,8 +104,8 @@ controller. The run that measured this cost is in the plan's run log.
 ### `slash-success`
 
 Stock's slash commands answer `{ handled, message }` and never say whether they did what was asked.
-Every caller in stock ignores `success`. Without the patch, `gridcheck slash` reports `done (this tree
-doesn't say whether it refused)` and exits 0. The bridge's `/slash` reports `success: null`.
+Every caller in stock ignores `success`. Without the patch, `gridcheck slash` reports `done (unconfirmed)`
+and exits 0. The bridge's `/slash` reports `success: null`.
 
 The patch doesn't convert every refusal in stock. That would take hundreds of hunks. It covers the
 commands the tool, its scenarios and its loadouts drive: `/tr`, `/dock`, `/heal`, `/npc`,

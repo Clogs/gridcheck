@@ -65,6 +65,36 @@ test("a background run that died without a report says so, naming its console", 
   assert.match(reply.text, /ended without a report[\s\S]*crashed: boom/);
 });
 
+test("a long summary shortens its least needed sections, never the verdict or the steps", () => {
+  const { compactSummary } = require("../core/runs");
+  const rows = (count, what) => Array.from({ length: count }, (_, index) => `| ${what} ${index} | ${"x".repeat(60)} |`).join("\n");
+  const report = ["# Run r1: PASSED", "", "3 of 3 expectations met.", "", "## Expected against observed", "", rows(3, "expect"), "",
+    "## Server performance", "", rows(200, "phase"), "", "## Setup", "", rows(12, "step"), "", "## Timeline", "", rows(500, "event")].join("\n");
+  const text = compactSummary(report, 6000, "runs/r1/report.md");
+  assert.ok(text.length <= 6000, `${text.length} characters`);
+  assert.match(text, /3 of 3 expectations met\./);
+  assert.match(text, /\| step 11 \|/, "the last setup step is still there");
+  assert.match(text, /\| phase 0 \|/);
+  assert.match(text, /more lines of this section in runs\/r1\/report\.md\)/);
+  assert.doesNotMatch(text, /characters cut/, "nothing cut from the middle");
+  assert.doesNotMatch(text, /\| event 0 \|/, "the timeline is left out");
+  assert.strictEqual(compactSummary("# short\n\n## Timeline\nx", 6000), "# short\n\n(The timeline is left out; section \"full\" has it.)");
+});
+
+test("a run's console in short: what it did with the server, then its last lines", () => {
+  const { consoleSummary } = require("../core/runs");
+  const output = ["run r1: perf from world starter; report in runs/r1",
+    "run: the scenario asks for the tick profiler, and the live server runs without it",
+    ...Array.from({ length: 40 }, (_, index) => `step ${index + 1}/40: slash /heal`), "stop condition met: timeout", "passed"].join("\n");
+  const text = consoleSummary(output);
+  assert.match(text, /^run r1: perf/);
+  assert.match(text, /asks for the tick profiler/);
+  assert.match(text, /\.\.\. 32 console line\(s\) left out/);
+  assert.match(text, /passed$/);
+  assert.doesNotMatch(text, /step 1\/40/);
+  assert.strictEqual(consoleSummary("a\nb"), "a\nb");
+});
+
 test("each surface names its own commands", () => {
   const registry = defaultRegistry();
   const cli = primer({ registry, surface: "cli" });

@@ -68,10 +68,14 @@ const CORE_STEP_KEYS = {
   loadout: ["loadout"],
   wait: ["wait"],
   waitFor: ["waitFor", "timeout"],
+  // { "repeat": [steps], "every": 5, "times": 12 }: the steps again every 5 s.
+  repeat: ["repeat", "every", "times"],
   ...Object.fromEntries(actionTools.ACTION_TYPES.map((type) => [type, ACTION_STEP_KEYS(type)])),
 };
 // What a step keeps that is not a $value to bind at run time.
-const STEP_OWN_KEYS = new Set(["type", "note", "as", "retry", "implicit", "action", "condition", "seconds", "plugin"]);
+const STEP_OWN_KEYS = new Set(["type", "note", "as", "retry", "implicit", "action", "condition", "seconds", "plugin",
+  "steps", "every", "times", "perf"]);
+const PERF_LABEL = /^[A-Za-z0-9][\w .:-]{0,39}$/;
 const DEFAULT_WAIT_FOR_SECONDS = 300;
 
 class ScenarioError extends Error {
@@ -129,6 +133,8 @@ function describeStep(step, registry = defaultRegistry()) {
     case "loadout": return loadoutTools.describeLoadout(step.loadout);
     case "wait": return `wait ${step.seconds}s`;
     case "waitFor": return `waitFor ${step.condition.text} (up to ${step.seconds}s)`;
+    case "repeat": return `repeat every ${step.every}s${step.times ? ` ${step.times} times` : ""}: ` +
+      `${step.steps.map((inner) => describeStep(inner, registry)).join(", ")}`;
     default: {
       if (step.action) return `${actionTools.describeAction(step.action)}${suffixes(step)}`;
       const spec = registry.steps[step.type];
@@ -267,9 +273,8 @@ function validateScenario(raw, { source = "scenario", defaultName = null, worldE
   let budget = 0;
   // Setup runs before the watch's stop conditions; `during` runs beside them,
   // so its waits are bounded by until.timeout and add nothing to the budget.
-  const parseSteps = (list, key) => {
+  const parseSteps = (list, key, { during = key === "during", inRepeat = false } = {}) => {
     const steps = [];
-    const during = key === "during";
     const retryOf = (rawStep, step, where) => {
       if (rawStep.retry === undefined) return;
       const retry = rawStep.retry;
@@ -304,9 +309,9 @@ function validateScenario(raw, { source = "scenario", defaultName = null, worldE
         } catch (_error) {
           keys = [];
         }
-        allowed = new Set([type, "note", ...(plugin.binds ? ["as"] : []), ...(plugin.retries ? ["retry"] : []), ...keys]);
+        allowed = new Set([type, "note", "perf", ...(plugin.binds ? ["as"] : []), ...(plugin.retries ? ["retry"] : []), ...keys]);
       } else {
-        allowed = new Set([...CORE_STEP_KEYS[type], "note"]);
+        allowed = new Set([...CORE_STEP_KEYS[type], "note", "perf"]);
       }
       for (const key of Object.keys(rawStep)) {
         if (allowed.has(key)) continue;
@@ -327,6 +332,16 @@ function validateScenario(raw, { source = "scenario", defaultName = null, worldE
       };
       const value = rawStep[type];
       const step = { type, note: typeof rawStep.note === "string" ? rawStep.note : null };
+      // A step with "perf" starts a named phase in the report's performance table.
+      if (rawStep.perf !== undefined) {
+        if (typeof rawStep.perf !== "string" || !PERF_LABEL.test(rawStep.perf)) {
+          problem(`${where}.perf`, "the name of the perf phase this step starts, e.g. \"fight\": up to 40 letters, digits, spaces, . _ : -");
+        } else if (inRepeat) {
+          problem(`${where}.perf`, "put perf on the repeat itself, not on a step inside it");
+        } else {
+          step.perf = rawStep.perf;
+        }
+      }
       if (plugin) {
         step.plugin = plugin.plugin;
         let fields = null;
@@ -352,7 +367,8 @@ function validateScenario(raw, { source = "scenario", defaultName = null, worldE
       }
       switch (type) {
         case "login":
-          if (during) problem(where, "login is a setup step");
+          if (inRepeat) problem(where, "login can't be repeated");
+          else if (during) problem(where, "login is a setup step");
           else if (index !== 0) problem(where, "login is the first step, or left out (an implicit login runs first)");
           if (value !== true && !isObject(value)) problem(where, 'login: true, or { "user": ..., "name": ... }');
           if (isObject(value)) {
@@ -403,6 +419,30 @@ function validateScenario(raw, { source = "scenario", defaultName = null, worldE
             step.seconds = seconds;
             if (!during) budget += seconds;
           }
+          break;
+        }
+        case "repeat": {
+          if (inRepeat) {
+            problem(where, "a repeat can't hold another repeat");
+            break;
+          }
+          if (!Array.isArray(value) || !value.length) {
+            problem(where, 'repeat: a list of steps, e.g. { "repeat": [{ "slash": "/heal" }], "every": 5, "times": 12 }');
+            break;
+          }
+          if (!positive(rawStep.every)) problem(`${where}.every`, "seconds from the start of one round to the start of the next, above 0");
+          const times = rawStep.times === undefined ? null : rawStep.times;
+          if (times !== null && !(Number.isInteger(times) && times >= 1)) problem(`${where}.times`, "how many rounds: a whole number, 1 or more");
+          if (times === null && !during) {
+            problem(`${where}.times`, "a setup repeat needs times; leave times out only in during, where the repeat runs until the run stops");
+          }
+          const before = budget;
+          step.steps = parseSteps(value, `${where}.repeat`, { during, inRepeat: true });
+          const roundSeconds = budget - before;
+          budget = before;
+          step.every = rawStep.every;
+          step.times = times;
+          if (!during && positive(rawStep.every) && Number.isInteger(times)) budget += times * Math.max(rawStep.every, roundSeconds);
           break;
         }
         default: {
@@ -722,6 +762,91 @@ async function runScenario(scenario, ops, { now = Date.now, signal = null, log =
   let failDuring = () => {};
   const duringFailed = new Promise((resolve) => { failDuring = resolve; });
 
+  const otherwise = (type) => (type === "ended" ? "the watch ended" : type === "stopped" ? "the run stopped first" : "interrupted");
+  const pause = (seconds, stops) => race([timer(seconds * 1000, { type: "done" }), ...(watch ? [watchEnded()] : []), interrupted(), ...stops]);
+
+  // One step's work, without its record: -> { ok, text, stopped?, bound? }. A refusal throws.
+  async function perform(step, label, stops, startedAtMs) {
+    if (step.type === "wait") {
+      const outcome = await pause(step.seconds, stops);
+      return { ok: outcome.type === "done", stopped: outcome.type === "stopped",
+        text: outcome.type === "done" ? `waited ${step.seconds}s` : otherwise(outcome.type) };
+    }
+    if (step.type === "waitFor") {
+      const outcome = await race([waitFor([step.condition], events.length),
+        timer(step.seconds * 1000, { type: "timeout" }), watchEnded(), interrupted(), ...stops]);
+      return { ok: outcome.type === "match", stopped: outcome.type === "stopped",
+        text: outcome.type === "match" ? `seen: ${formatTimelineEvent(outcome.event)}`
+          : outcome.type === "timeout" ? `not seen in ${step.seconds}s` : otherwise(outcome.type) };
+    }
+    if (step.type === "repeat") return repeat(step, stops);
+    const attempt = () => race([
+      { promise: Promise.resolve().then(() => ops.step(bindStep(step, bindings), bindings))
+        .then((result) => ({ type: "done", result }), (error) => ({ type: "refused", error })), cancel() {} },
+      interrupted(),
+      ...stops,
+    ]);
+    let outcome = await attempt();
+    let attempts = 1;
+    while (step.retry && (outcome.type === "refused" || (outcome.type === "done" && outcome.result.ok === false)) &&
+        now() - startedAtMs + step.retry.every * 1000 <= step.retry.for * 1000) {
+      const why = outcome.type === "refused" ? outcome.error.message : outcome.result.text;
+      log(`${label}: refused (${String(why || "").split(/\r?\n/)[0]}); again in ${step.retry.every}s`);
+      const paused = await pause(step.retry.every, stops);
+      if (paused.type !== "done") {
+        outcome = paused;
+        break;
+      }
+      outcome = await attempt();
+      attempts += 1;
+    }
+    if (outcome.type === "refused") throw outcome.error;
+    if (outcome.type === "ended" || outcome.type === "interrupted" || outcome.type === "stopped") {
+      return { ok: false, stopped: outcome.type === "stopped", text: otherwise(outcome.type) };
+    }
+    const done = { ok: outcome.result.ok !== false, text: `${outcome.result.text || ""}${attempts > 1 ? ` (attempt ${attempts})` : ""}` };
+    if (step.as && done.ok) {
+      const ids = outcome.result.ids || [];
+      bindings[step.as] = ids;
+      done.bound = { [step.as]: ids };
+      if (!ids.length) {
+        done.ok = false;
+        done.text = `${done.text}\nthe reply named no ID to bind as $${step.as}`.trim();
+      }
+    }
+    return done;
+  }
+
+  // A repeat's rounds, one `every` seconds after the last began, until `times`
+  // rounds, a step fails or (in during, with no times) the run stops.
+  async function repeat(step, stops) {
+    let rounds = 0;
+    for (;;) {
+      const roundStartedAtMs = now();
+      for (const inner of step.steps) {
+        const label = describeStep(inner);
+        let result;
+        try {
+          result = await perform(inner, label, stops, now());
+        } catch (error) {
+          result = { ok: false, text: error.message };
+        }
+        if (!result.ok) {
+          return result.stopped
+            ? { ok: false, stopped: true, text: `${rounds} round(s) done; the run stopped in round ${rounds + 1}` }
+            : { ...result, text: `round ${rounds + 1}, ${label}: ${result.text}` };
+        }
+      }
+      rounds += 1;
+      if (step.times && rounds >= step.times) return { ok: true, text: `${rounds} round(s)` };
+      const outcome = await pause(Math.max(0, step.every * 1000 - (now() - roundStartedAtMs)) / 1000, stops);
+      if (outcome.type !== "done") {
+        return { ok: false, stopped: outcome.type === "stopped",
+          text: outcome.type === "stopped" ? `${rounds} round(s) done when the run stopped` : otherwise(outcome.type) };
+      }
+    }
+  }
+
   async function runStep(step, index, phase = "setup") {
     const during = phase === "during";
     const list = during ? scenario.during || [] : scenario.setup;
@@ -729,62 +854,18 @@ async function runScenario(scenario, ops, { now = Date.now, signal = null, log =
     const record = { index, phase, step: label, type: step.type, note: step.note, startedAtMs: now(), ok: false, text: "" };
     steps.push(record);
     log(`${during ? "during" : "step"} ${index + 1}/${list.length}: ${label}`);
+    // Marks where the step began, so a step that runs until the run stops still opens its phase.
+    if (step.perf) {
+      runnerEvent({ kind: "STEP", index, ...(during ? { phase } : {}), step: label, ok: true, started: true, perf: step.perf,
+        text: `perf phase "${step.perf}" starts` });
+    }
     const stops = during ? [stoppedEntry()] : [];
-    const otherwise = (type) => (type === "ended" ? "the watch ended" : type === "stopped" ? "the run stopped first" : "interrupted");
     try {
-      if (step.type === "wait") {
-        const outcome = await race([timer(step.seconds * 1000, { type: "done" }), ...(watch ? [watchEnded()] : []), interrupted(), ...stops]);
-        record.ok = outcome.type === "done";
-        record.stopped = outcome.type === "stopped";
-        record.text = record.ok ? `waited ${step.seconds}s` : otherwise(outcome.type);
-      } else if (step.type === "waitFor") {
-        const outcome = await race([waitFor([step.condition], events.length),
-          timer(step.seconds * 1000, { type: "timeout" }), watchEnded(), interrupted(), ...stops]);
-        record.ok = outcome.type === "match";
-        record.stopped = outcome.type === "stopped";
-        record.text = record.ok
-          ? `seen: ${formatTimelineEvent(outcome.event)}`
-          : outcome.type === "timeout" ? `not seen in ${step.seconds}s` : otherwise(outcome.type);
-      } else {
-        const attempt = () => race([
-          { promise: Promise.resolve().then(() => ops.step(bindStep(step, bindings), bindings))
-            .then((result) => ({ type: "done", result }), (error) => ({ type: "refused", error })), cancel() {} },
-          interrupted(),
-          ...stops,
-        ]);
-        let outcome = await attempt();
-        let attempts = 1;
-        while (step.retry && (outcome.type === "refused" || (outcome.type === "done" && outcome.result.ok === false)) &&
-            now() - record.startedAtMs + step.retry.every * 1000 <= step.retry.for * 1000) {
-          const why = outcome.type === "refused" ? outcome.error.message : outcome.result.text;
-          log(`${label}: refused (${String(why || "").split(/\r?\n/)[0]}); again in ${step.retry.every}s`);
-          const paused = await race([timer(step.retry.every * 1000, { type: "done" }), ...(watch ? [watchEnded()] : []), interrupted(),
-            ...stops]);
-          if (paused.type !== "done") {
-            outcome = paused;
-            break;
-          }
-          outcome = await attempt();
-          attempts += 1;
-        }
-        if (outcome.type === "refused") throw outcome.error;
-        if (outcome.type === "ended" || outcome.type === "interrupted" || outcome.type === "stopped") {
-          record.stopped = outcome.type === "stopped";
-          record.text = otherwise(outcome.type);
-        } else {
-          record.ok = outcome.result.ok !== false;
-          record.text = `${outcome.result.text || ""}${attempts > 1 ? ` (attempt ${attempts})` : ""}`;
-          if (step.as && record.ok) {
-            const ids = outcome.result.ids || [];
-            bindings[step.as] = ids;
-            record.bound = { [step.as]: ids };
-            if (!ids.length) {
-              record.ok = false;
-              record.text = `${record.text}\nthe reply named no ID to bind as $${step.as}`.trim();
-            }
-          }
-        }
-      }
+      const result = await perform(step, label, stops, record.startedAtMs);
+      record.ok = result.ok;
+      record.text = result.text || "";
+      if (result.stopped !== undefined) record.stopped = result.stopped;
+      if (result.bound) record.bound = result.bound;
     } catch (error) {
       record.ok = false;
       record.text = error.message;
@@ -1043,7 +1124,7 @@ function renderReport(result, { runID, scenario, scenarioFile = null, timelineFi
   lines.push("");
   if (framesSection) lines.push(framesSection);
   const perfSection = perfTools.renderPerfSection(perfTools.perfRecord(result.events), {
-    offset: formatOffset, watchStartedAtMs: result.watchStartedAtMs });
+    offset: formatOffset, watchStartedAtMs: result.watchStartedAtMs, profileAsked: Boolean(scenario && scenario.up && scenario.up.profile) });
   if (perfSection) lines.push(perfSection);
 
   const stepTable = (title, rows, intro) => {

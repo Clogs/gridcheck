@@ -40,6 +40,9 @@ test("a target is the nearest ball that passes every term, never self", LU, () =
   assert.strictEqual(pickTarget(ROWS, "npc family=police").itemID, 77);
   assert.strictEqual(pickTarget(ROWS, "type~slasher").itemID, 78);
   assert.strictEqual(pickTarget(ROWS, "name~\"Patrol 1916\"").itemID, 78);
+  assert.throws(() => parseTargetSpec("name~Asteroid Belt"),
+    /can't read "Belt";.*Terms split at spaces; quote a value that has one: name~"Asteroid Belt"/);
+  assert.throws(() => parseTargetSpec("Belt"), (error) => !/quote a value/.test(error.message), "no hint without a term before it");
   assert.strictEqual(pickTarget(ROWS, "kind=station").itemID, 60004603);
   assert.strictEqual(pickTarget(ROWS, "player").itemID, 5);
   assert.strictEqual(pickTarget(ROWS, "78").itemID, 78);

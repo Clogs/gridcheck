@@ -60,13 +60,30 @@ test("the lu plugin's trigger tool uses the scenario step's names", LU, () => {
   assert.throws(() => mcp.cliArgs("trigger", {}), /no CLI command for trigger/, "no core trigger tool");
 });
 
-test("the instructions are the core's, then each plugin's primer", LU, () => {
-  const { emptyRegistry } = require("../core/plugins");
-  const core = mcp.instructions(emptyRegistry());
-  assert.match(core, /run_scenario/);
-  assert.doesNotMatch(core, /Living Universe|trigger|HUNT/);
-  assert.match(mcp.INSTRUCTIONS, /Living Universe \(plugin lu\)[\s\S]*lu_trigger/);
-  assert.match(mcp.INSTRUCTIONS, /Kinds: GRID PRESENT .*SIGHTING HUNT/);
+test("the instructions are a brief clients won't cut off; the guide tool has the rest by topic", LU, async () => {
+  const { emptyRegistry, defaultRegistry } = require("../core/plugins");
+  const { BRIEF_LIMIT, primer } = require("../core/primer");
+  assert.ok(mcp.INSTRUCTIONS.length <= BRIEF_LIMIT, `${mcp.INSTRUCTIONS.length} characters`);
+  assert.match(mcp.INSTRUCTIONS, /read `guide` \{ topic \}: "start" .*"scenarios" .*"events" .*"plugins" \(notes from lu\)/);
+  assert.match(mcp.INSTRUCTIONS, /`run_scenario` \{ name, scenario, check: true \}/);
+  assert.doesNotMatch(mcp.instructions(emptyRegistry()), /"plugins"/, "no plugins topic without plugins");
+  assert.deepStrictEqual(mcp.cliArgs("guide", { topic: "events" }), ["primer", "--mcp", "--", "events"]);
+  assert.deepStrictEqual(mcp.cliArgs("guide", {}), ["primer", "--mcp"]);
+  assert.match(mcp.checkParams(mcp.TOOLS.find((tool) => tool.name === "guide"), { topic: "nope" })[0], /topic must be one of start, scenarios/);
+  const registry = defaultRegistry();
+  const topic = (name) => primer({ registry, surface: "mcp", topic: name });
+  assert.match(topic("plugins"), /Living Universe \(plugin lu\)[\s\S]*lu_trigger/);
+  assert.match(topic("conditions"), /Kinds: GRID PRESENT .*SIGHTING HUNT/);
+  assert.match(topic("events"), /^- MODE: itemID, label, from, to, targetID, targetLabel, distanceMeters:m, groupKey$/m);
+  assert.match(topic("events"), /^- HUNT \(plugin lu\): huntID, phase/m);
+  assert.match(topic("events"), /^- the lu plugin's data on PRESENT, ARRIVE, .*KILLMAIL \(name a field alone or as lu\.<field>\): flightID/m);
+  assert.match(topic("scenarios"), /\{ "repeat": \[<steps>\], "every": 5, "times": 12 \}/);
+  assert.match(topic("scenarios"), /quote a value that has one \(name~"Asteroid Belt"\)/);
+  assert.match(topic("perf"), /"perf": "<name>"/);
+  assert.throws(() => topic("nope"), /no topic "nope"; the topics are start, scenarios, conditions, events, perf, plugins/);
+  const whole = primer({ registry, surface: "mcp" });
+  assert.ok(whole.length < 20_000, `the whole guide fits one reply (${whole.length})`);
+  for (const name of ["start", "scenarios", "events", "plugins"]) assert.ok(whole.includes(topic(name)), `${name} is in the whole guide`);
 });
 
 test("player actions use the scenario step's names, and the CLI reads them back as the same action", () => {
@@ -96,7 +113,7 @@ test("arguments are checked against each tool's schema before the CLI runs", LU,
   const tool = (name) => mcp.TOOLS.find((row) => row.name === name);
   assert.deepStrictEqual(mcp.checkParams(tool("slash"), {}), ["command is required"]);
   assert.match(mcp.checkParams(tool("grid"), { range: "far" })[0], /range must be a number/);
-  assert.match(mcp.checkParams(tool("grid"), { radius: 5 })[0], /unknown argument radius; grid takes range, all, json/);
+  assert.match(mcp.checkParams(tool("grid"), { radius: 5 })[0], /unknown argument radius; grid takes range, all, kind, json/);
   assert.match(mcp.checkParams(tool("lu_trigger"), { name: "nuke" })[0], /name must be one of scout, hunt/);
   assert.match(mcp.checkParams(tool("watch"), { seconds: 1.5 })[0], /seconds must be an integer/);
   assert.match(mcp.checkParams(tool("watch"), { seconds: 4000 })[0], /at most 3000/);
@@ -238,6 +255,9 @@ test("over stdio, a tool runs the CLI and returns what it printed", async () => 
     assert.strictEqual(checked.result.isError, true);
     assert.match(checked.result.content[0].text, /no-such-scenario-here\.json:\n {2}no such scenario file\. `gridcheck run` lists the scenarios.*\n\(exit 1\)/,
       "the CLI's own refusal and exit code");
+    const guide = await call(3, "tools/call", { name: "guide", arguments: { topic: "conditions" } });
+    assert.strictEqual(guide.result.isError, false);
+    assert.match(guide.result.content[0].text, /^Conditions \(until\.any, expect, waitFor\) are KIND then field tests/);
   } finally {
     child.stdin.end();
   }

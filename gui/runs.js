@@ -27,6 +27,8 @@
   const ZOOMS = [["auto", "auto"], ["5000", "5 km"], ["20000", "20 km"], ["50000", "50 km"], ["150000", "150 km"], ["500000", "500 km"]];
   const SPEEDS = [1, 4, 15, 60];
   const HISTORY = 8;
+  const DIM_LABELS = 8;
+  const LIST_LIVE_MS = 3000;
   const COLOURS = {
     self: "#6fc3ff", hostile: "#d4614e", drone: "#4fd1c5", concord: "#e0b341", player: "#57b87a", drifter: "#a48bf0",
     neutral: "#7d8b9a", weapon: "#f0a848", div: "#a48bf0", dim: "#5b6b7c",
@@ -79,6 +81,7 @@
       openGroups: new Set(), closedGroups: new Set(), only: "all", filter: "",
       colourRules: [], palette: new Map(), current: -1, rows: [], frameURLs: new Map(),
       visible: false, treeKey: null, startT: Number(shell.params.get("t")),
+      clockSkew: 0, autoHalf: {}, listAt: 0,
     };
     if (!["workbench", "trace"].includes(state.view)) state.view = "workbench";
 
@@ -87,9 +90,14 @@
     const runName = (run) => (run.result && run.result.name) || run.runID.replace(/^\d{8}-\d{6}-/, "") || run.runID;
     const runStamp = (run) => (/^(\d{8}-\d{6})/.exec(run.runID) || [run.runID])[0];
     const isLive = (run) => !run.result && state.nowMs - run.mtimeMs < LIVE_IDLE_MS;
+    // The run ID starts with its start time, in UTC.
+    const runStartMs = (run) => {
+      const m = /^(\d{4})(\d\d)(\d\d)-(\d\d)(\d\d)(\d\d)/.exec(run.runID);
+      return m ? Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]), Number(m[4]), Number(m[5]), Number(m[6])) : NaN;
+    };
 
     function verdictOf(result, live = false) {
-      if (!result) return live ? { text: "live", cls: "ok", st: "live", hist: "n" } : { text: "no result", cls: "mute", st: "", hist: "n" };
+      if (!result) return live ? { text: "live", cls: "ok", st: "live", hist: "l" } : { text: "no result", cls: "mute", st: "", hist: "n" };
       if (result.exitCode === 2) return { text: "did not complete", cls: "warn", st: "warn", hist: "d" };
       return result.passed ? { text: "passed", cls: "ok", st: "ok", hist: "p" } : { text: "failed", cls: "bad", st: "bad", hist: "f" };
     }
@@ -109,6 +117,7 @@
     }
 
     async function loadRuns() {
+      state.listAt = Date.now();
       const body = await api(`/gui/api/runs?tree=${q(shell.treeID())}`);
       state.runs = body.runs || [];
       state.nowMs = body.nowMs || Date.now();
@@ -150,9 +159,14 @@
       const liveBox = $("rail-live");
       liveBox.textContent = "";
       for (const run of state.runs.filter(isLive).slice(0, 2)) {
-        liveBox.append(h("div", { className: "live" }, h("span", { className: "srcpill", text: "live" }),
-          h("div", {}, h("b", { text: runName(run) }), h("small", { text: `${runStamp(run)} · written ${ago(run.mtimeMs, state.nowMs)} ago` })),
-          h("button", { type: "button", className: "btn sm", text: "Follow", onclick: () => { state.follow = true; openRun(run.runID); } })));
+        const started = runStartMs(run);
+        liveBox.append(h("div", { className: "livecard" }, h("span", { className: "srcpill", text: "live" }),
+          h("div", {}, h("b", { text: runName(run) }),
+            // When it was last written only matters once it has been quiet a while.
+            h("small", { text: `${runStamp(run)}${Number.isFinite(started) ? ` · running ${ago(started, state.nowMs)}` : ""}` +
+              `${state.nowMs - run.mtimeMs >= 5000 ? ` · quiet ${ago(run.mtimeMs, state.nowMs)}` : ""}` })),
+          h("button", { type: "button", className: "btn sm", text: run.runID === state.runID && following() ? "Following" : "Follow",
+            onclick: () => { state.follow = true; openRun(run.runID); } })));
       }
 
       const box = $("rail-groups");
@@ -175,17 +189,23 @@
             state.closedGroups.delete(g.name);
           }
           renderRail();
-        } }, h("span", { className: "caret", text: open ? "▾" : "▸" }), h("span", { className: "nm", text: g.name, title: g.name }), hist);
+        } }, h("span", { className: "caret", text: open ? "▾" : "▸" }), h("span", { className: "nm", text: g.name, title: g.name }),
+        g.runs.some(isLive) ? h("span", { className: "srcpill sm", text: "live", title: "a run of this scenario is still being written" }) : null, hist);
         const grp = h("div", { className: `grp${open ? " open" : ""}` }, head);
         if (open) {
           const list = h("div", { className: "grp-runs" });
           for (const run of g.runs) {
-            const v = verdictOf(run.result, isLive(run));
+            const runLive = isLive(run);
+            const v = verdictOf(run.result, runLive);
             const took = run.result && run.result.startedAtMs && run.result.stoppedAtMs ? `${R.seconds(run.result.stoppedAtMs - run.result.startedAtMs)} · ` : "";
             const met = run.result && run.result.expectations ? ` · ${run.result.expectations - run.result.missing}/${run.result.expectations}` : "";
-            list.append(h("div", { className: `r${run.runID === state.runID ? " sel" : ""}`, title: `${run.runID}  ${v.text}${met}`, onclick: () => openRun(run.runID) },
-              h("span", { className: `st ${v.st}` }), h("span", { className: "mono", text: runStamp(run) }),
-              h("span", { className: "muted", text: `${took}${ago(run.mtimeMs, state.nowMs)}` })));
+            const started = runStartMs(run);
+            const when = runLive
+              ? h("span", { className: "muted" }, h("span", { className: "srcpill sm", text: "live" }), Number.isFinite(started) ? ` ${ago(started, state.nowMs)}` : "")
+              : h("span", { className: "muted", text: `${took}${ago(run.mtimeMs, state.nowMs)}` });
+            list.append(h("div", { className: `r${run.runID === state.runID ? " sel" : ""}`,
+              title: runLive ? `${run.runID}  still running; click to watch it live` : `${run.runID}  ${v.text}${met}`, onclick: () => openRun(run.runID) },
+              h("span", { className: `st ${v.st}` }), h("span", { className: "mono", text: runStamp(run) }), when));
           }
           grp.append(list);
         }
@@ -211,12 +231,27 @@
     const rel = (at) => (t0() === null || at === null ? 0 : at - t0());
     const watchStart = () => (state.detail && state.detail.result && state.detail.result.watchStartedAtMs) || null;
     const timeOf = (ref) => state.model.timeOf(ref, watchStart());
+    const following = () => Boolean(state.follow && live());
+    // Faster than real time, a live view outruns the data and stalls at its edge.
+    const playSpeed = () => (live() ? 1 : state.speed);
+    // The live view plays in real time a few seconds behind the server's
+    // clock, the timelines' clock, so the next position sample has usually
+    // arrived by the time the view gets there.
+    const serverNow = () => Date.now() + state.clockSkew;
+    const liveAt = () => (t0() === null ? null : Math.min(tEnd(), Math.max(t0(), serverNow() - state.model.liveDelayMs())));
+
+    function followLive() {
+      if (!live() || t0() === null) return;
+      state.follow = true;
+      state.at = Math.max(state.at ?? t0(), liveAt());
+      if (!state.playing) setPlaying(true);
+    }
 
     function resetRun(runID) {
       state.generation += 1;
       shell.freeBlobs();
       Object.assign(state, { runID, detail: null, model: R.createModel(), bytes: 0, result: null, mtimeMs: 0, runNowMs: 0, loading: false,
-        at: null, selBall: null, selEvent: -1, win: null, current: -1, rows: [], frameURLs: new Map(), palette: new Map() });
+        at: null, selBall: null, selEvent: -1, win: null, current: -1, rows: [], frameURLs: new Map(), palette: new Map(), autoHalf: {} });
       setPlaying(false);
       $("wb-events").textContent = "";
       shell.saveHash();
@@ -237,10 +272,15 @@
       if (t0() !== null && Number.isFinite(startAt) && startAt > 0) {
         state.follow = false;
         state.at = Math.min(tEnd(), t0() + startAt * 1000);
+      } else if (live()) {
+        // Opening a run that is still going shows it live.
+        state.at = null;
+        followLive();
       } else {
-        state.at = live() && state.follow ? tEnd() : t0();
+        state.at = t0();
       }
       renderData();
+      renderRail();
     }
 
     async function loadDetail(generation = state.generation) {
@@ -263,14 +303,16 @@
       const added = [];
       const hadResult = Boolean(state.result);
       try {
-        for (;;) {
+        for (let first = true; ; first = false) {
           const body = await api(`/viewer/timeline?tree=${q(shell.treeID())}&run=${q(state.runID)}&from=${state.bytes}`);
           if (generation !== state.generation) return;
+          if (first && body.text) state.model.noteArrival(body.nowMs);
           added.push(...state.model.ingest(body.text, body.summaries));
           state.bytes = body.next;
           state.result = body.result;
           state.mtimeMs = body.mtimeMs;
           state.runNowMs = body.nowMs;
+          if (Number.isFinite(body.nowMs)) state.clockSkew = body.nowMs - Date.now();
           if (body.next >= body.size || !body.text) break;
         }
       } catch (error) {
@@ -281,7 +323,8 @@
       if (generation !== state.generation) return;
       if (added.length) appendRows(added);
       if (!hadResult && state.result && state.detail) loadDetail().then(() => loadRuns().catch(() => {}));
-      if (state.at === null || (state.follow && live())) state.at = tEnd();
+      if (following()) followLive();
+      else if (state.at === null) state.at = tEnd();
       if (added.length && state.at !== null) renderData();
       else render();
     }
@@ -427,7 +470,8 @@
       let half = Number(state.zoom);
       if (!(half > 0)) {
         const near = tracked.filter((ball) => planar(ball) <= 300_000).reduce((max, ball) => Math.max(max, planar(ball)), 0);
-        half = Math.max(5000, 1.15 * near);
+        half = R.autoHalf(1.15 * near, state.autoHalf[prefix]);
+        state.autoHalf[prefix] = half;
       }
       const radius = Math.min(W, H) / 2 - 18;
       const scale = radius / half;
@@ -498,6 +542,9 @@
 
       const order = [...balls].sort((a, b) => planar(b) - planar(a));
       const labelAll = tracked.filter((ball) => ball.kind === "ship").length <= 16;
+      // A belt has a hundred asteroids: name only the nearest few of what isn't tracked.
+      const dimLabels = new Set(order.filter((ball) => !R.TRACKED.has(ball.kind) && planar(ball) * scale < radius)
+        .slice(-DIM_LABELS).map((ball) => ball.id));
       const swarms = new Map();
       const edge = [];
       for (const ball of order) {
@@ -541,7 +588,7 @@
           s.x += p.x;
           s.y += p.y;
         } else if (isTracked ? (labelAll || ball.who === "self" || String(ball.id) === String(state.selBall) || selfLocks.has(ball.id))
-          : planar(ball) * scale < radius) {
+          : dimLabels.has(ball.id)) {
           const isSelf = ball.who === "self";
           const name = el("text", { className: isTracked ? `m-lbl${isSelf ? " self" : ""}` : "m-dimlbl", x: p.x + 12, y: p.y - 3 });
           if (isTracked && !isSelf) name.style.fill = c;
@@ -598,10 +645,11 @@
         box.append(h("div", { className: "notrack", text: state.runID ? "No events with a time yet." : "" }));
         return;
       }
+      // One lane for every kind; later kinds in TRACK_KINDS draw on top.
+      const lt = h("div", { className: "lt" });
       for (const kind of R.TRACK_KINDS) {
         if (!state.model.counts.get(kind)) continue;
         const kc = R.kindClass(kind);
-        const lt = h("div", { className: "lt" });
         const seen = new Set();
         for (const event of state.model.events) {
           if (event.kind !== kind) continue;
@@ -609,12 +657,12 @@
           const bucket = Math.round(p * 4);
           if (seen.has(bucket)) continue;
           seen.add(bucket);
-          const tick = h("i", { className: `tick ${kc}`, title: `${R.offset(rel(event.atMs))}  ${R.summary(event).slice(0, 160)}` });
+          const tick = h("i", { className: `tick ${kc}`, title: `${kind}  ${R.offset(rel(event.atMs))}  ${R.summary(event).slice(0, 160)}` });
           tick.style.left = `${p.toFixed(2)}%`;
           lt.append(tick);
         }
-        box.append(h("div", { className: "lane" }, h("span", { className: `lk ${kc}`, text: kind }), lt));
       }
+      box.append(h("div", { className: "lane" }, lt));
       const area = h("div", { className: "track-area" }, h("div", { className: "played", id: "wb-played" }), h("div", { className: "playhead", id: "wb-playhead" }));
       const axis = h("div", { className: "taxis" });
       const step = R.niceStep(span, 5);
@@ -633,9 +681,47 @@
     function trackSeek(event) {
       const box = $("wb-track");
       const rect = box.getBoundingClientRect();
-      const left = rect.left + 84;
+      const left = rect.left;
       const f = Math.min(1, Math.max(0, (event.clientX - left) / Math.max(1, rect.right - left)));
       if (t0() !== null) seek(t0() + f * (tEnd() - t0()), { pause: false });
+    }
+
+    // Drag the event log's top edge to resize it; the height sticks across reloads.
+    function wireLogResize() {
+      const KEY = "gridcheckLogHeight";
+      const handle = $("wb-ev-resize");
+      const log = handle.parentElement;
+      const center = log.closest(".center");
+      // Capped at 75% so the map never collapses when the window gets shorter.
+      const apply = (px) => center.style.setProperty("--ev-h", `min(${Math.round(px)}px, 75%)`);
+      const saved = Number(localStorage.getItem(KEY));
+      if (saved > 0) apply(saved);
+      let drag = null;
+      handle.addEventListener("pointerdown", (event) => {
+        if (event.button !== 0) return;
+        event.preventDefault();
+        handle.setPointerCapture(event.pointerId);
+        handle.classList.add("drag");
+        drag = { y: event.clientY, height: log.getBoundingClientRect().height, px: null };
+      });
+      handle.addEventListener("pointermove", (event) => {
+        if (!drag) return;
+        const max = center.clientHeight * 0.75;
+        drag.px = Math.max(80, Math.min(max, drag.height + drag.y - event.clientY));
+        apply(drag.px);
+      });
+      const end = () => {
+        if (!drag) return;
+        if (drag.px !== null) localStorage.setItem(KEY, String(Math.round(drag.px)));
+        handle.classList.remove("drag");
+        drag = null;
+      };
+      handle.addEventListener("pointerup", end);
+      handle.addEventListener("pointercancel", end);
+      handle.addEventListener("dblclick", () => {
+        localStorage.removeItem(KEY);
+        center.style.removeProperty("--ev-h");
+      });
     }
 
     // ---------- the inspector ----------
@@ -1485,12 +1571,25 @@
       const clock = $("wb-clock");
       clock.textContent = R.offset(atRel);
       clock.append(h("small", { text: ` / ${R.offset(total).slice(2)}` }));
+      if (following()) {
+        clock.append(h("small", { className: "livetag", text: " · live" }));
+        clock.title = `Live, ${Math.max(0, Math.round((serverNow() - state.at) / 1000))} s behind the server, so ships glide between position samples instead of jumping.`;
+      } else {
+        clock.title = "";
+      }
       $("tr-clock").textContent = R.offsetFine(atRel);
       for (const button of document.querySelectorAll("#tab-runs [data-act='play']")) {
         button.textContent = state.playing ? (button.closest(".runbar") ? "❚❚" : "❚❚ Pause") : (button.closest(".runbar") ? "▶" : "▶ Play");
         button.classList.toggle("on", state.playing || Boolean(button.closest(".controls")));
       }
       for (const input of document.querySelectorAll("#tab-runs .follow")) input.checked = state.follow;
+      const speed = playSpeed();
+      for (const b of document.querySelectorAll("#tab-runs [data-speed]")) {
+        const s = Number(b.dataset.speed);
+        b.classList.toggle("on", s === speed);
+        b.disabled = live() && s !== speed;
+        b.title = b.disabled ? "A live run plays in real time" : "";
+      }
       if (!state.visible) return;
       if (state.view === "workbench") {
         $("wb-map-clock").textContent = R.offset(atRel);
@@ -1542,7 +1641,16 @@
       if (!state.playing) return;
       const dt = nowMs - lastTick;
       lastTick = nowMs;
-      state.at = Math.min(tEnd(), state.at + dt * state.speed);
+      if (following()) {
+        // Eases toward the live point rather than holding until it catches up,
+        // so a change in the delay slows the view for a few seconds instead of
+        // freezing it. Never past the live point or the data, never backwards.
+        const target = liveAt();
+        const step = state.at + dt * R.liveRate(target - state.at);
+        state.at = Math.min(tEnd(), target > state.at ? Math.min(step, target) : step);
+      } else {
+        state.at = Math.min(tEnd(), state.at + dt * playSpeed());
+      }
       if (state.at >= tEnd() && !live()) {
         setPlaying(false);
         return;
@@ -1563,7 +1671,11 @@
     }
 
     function act(name) {
-      if (name === "play") setPlaying(!state.playing);
+      if (name === "play") {
+        // Pausing a live view stops following it, or the next poll would resume it.
+        if (state.playing && following()) state.follow = false;
+        setPlaying(!state.playing);
+      }
       else if (name === "start") seek(t0());
       else if (name === "prev") stepEvent(-1);
       else if (name === "next") stepEvent(1);
@@ -1588,7 +1700,7 @@
         for (const speed of SPEEDS) {
           box.append(h("button", { type: "button", "data-speed": speed, text: `${speed}×`, onclick: () => {
             state.speed = speed;
-            for (const b of document.querySelectorAll("#tab-runs [data-speed]")) b.classList.toggle("on", Number(b.dataset.speed) === speed);
+            render();
           } }));
         }
       }
@@ -1617,7 +1729,8 @@
       for (const input of document.querySelectorAll("#tab-runs .follow")) {
         input.addEventListener("change", () => {
           state.follow = input.checked;
-          if (state.follow && live()) seek(tEnd(), { pause: false });
+          if (state.follow) followLive();
+          render();
         });
       }
       for (const button of document.querySelectorAll("#view-switch [data-view]")) button.addEventListener("click", () => setView(button.dataset.view));
@@ -1659,6 +1772,8 @@
       });
       track.addEventListener("pointermove", (event) => { if (track.hasPointerCapture(event.pointerId)) trackSeek(event); });
 
+      wireLogResize();
+
       const trace = $("trace");
       let dragging = false;
       trace.addEventListener("pointerdown", (event) => {
@@ -1695,7 +1810,14 @@
         const keys = { " ": "play", ArrowRight: "next", ArrowLeft: "prev", Home: "start", d: "diverge", D: "diverge" };
         if (event.key === "End") {
           event.preventDefault();
-          seek(tEnd());
+          if (live()) {
+            // Pinned to the newest event, following could never move back to glide.
+            state.at = null;
+            followLive();
+            render();
+          } else {
+            seek(tEnd());
+          }
         } else if (keys[event.key]) {
           event.preventDefault();
           act(keys[event.key]);
@@ -1759,14 +1881,18 @@
       };
     }
 
-    function tick15() {
+    // The list every 15 s, and every few seconds while a run is live, so a
+    // live run's mark and times keep up and a finished one gets its verdict.
+    function refreshList() {
       if (!state.visible) return;
+      const anyLive = live() || state.runs.some(isLive);
+      if (Date.now() - state.listAt < (anyLive ? LIST_LIVE_MS : 15_000)) return;
       loadRuns().catch(() => {});
     }
 
     wire();
     setInterval(() => { if (state.visible && live() && !state.loading) pull(); }, 1000);
-    setInterval(tick15, 15_000);
+    setInterval(refreshList, 1000);
 
     return {
       load, treeChanged, show, hide, context,

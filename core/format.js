@@ -4,6 +4,8 @@
 
 const AU_METERS = 149_597_870_700;
 const DEFAULT_RANGE_KM = 10_000;
+const COLLAPSE_AFTER = 10;
+const COLLAPSE_KEEP = 3;
 
 function formatDistance(meters) {
   if (meters === null || meters === undefined || !Number.isFinite(Number(meters))) return "?";
@@ -84,13 +86,36 @@ function formatGrid(grid, options = {}) {
   if (!grid.inSpace) return lines.join("\n");
 
   const rangeMeters = (Number.isFinite(options.rangeKm) ? options.rangeKm : DEFAULT_RANGE_KM) * 1000;
+  const rangeLabel = formatDistance(rangeMeters);
+  const kindOf = (row) => String(row.kind || "").toLowerCase();
+  const wanted = options.kind ? String(options.kind).toLowerCase() : null;
   const rows = Array.isArray(grid.entities) ? grid.entities : [];
-  const shown = options.all
-    ? rows
-    : rows.filter((row) => row.isSelf || (row.distanceMeters !== null && row.distanceMeters <= rangeMeters));
-  const hidden = rows.filter((row) => !shown.includes(row));
+  const pool = wanted ? rows.filter((row) => row.isSelf || kindOf(row) === wanted) : rows;
+  let shown = options.all
+    ? pool
+    : pool.filter((row) => row.isSelf || (row.distanceMeters !== null && row.distanceMeters <= rangeMeters));
+  const hidden = pool.filter((row) => !shown.includes(row));
   const byID = new Map(rows.map((row) => [row.itemID, row]));
   const selfID = grid.self && grid.self.itemID;
+
+  // A belt's asteroids would bury the ships: past COLLAPSE_AFTER of one kind
+  // that isn't a ship, the nearest COLLAPSE_KEEP stay and the rest are a count.
+  const collapsed = [];
+  if (!options.all && !wanted) {
+    const collapsible = (row) => !row.isSelf && !row.isNpc && !row.characterID && kindOf(row) !== "" && kindOf(row) !== "ship";
+    const counts = new Map();
+    for (const row of shown) if (collapsible(row)) counts.set(row.kind, (counts.get(row.kind) || 0) + 1);
+    const big = new Set([...counts].filter(([, count]) => count > COLLAPSE_AFTER).map(([kind]) => kind));
+    const kept = new Map();
+    shown = shown.filter((row) => {
+      if (!collapsible(row) || !big.has(row.kind)) return true;
+      kept.set(row.kind, (kept.get(row.kind) || 0) + 1);
+      return kept.get(row.kind) <= COLLAPSE_KEEP;
+    });
+    for (const kind of big) {
+      collapsed.push(`+${counts.get(kind) - COLLAPSE_KEEP} more ${kind} within ${rangeLabel} (--kind ${kind} to list them)`);
+    }
+  }
 
   lines.push(`${fit("dist", 12)}${fit("name", 24)}${fit("type", 20)}${fit("who", 8)}${fit("mode", 9)}${fit("target", 18)}S/A/H`);
   for (const row of shown) {
@@ -105,13 +130,17 @@ function formatGrid(grid, options = {}) {
       health(row),
     );
   }
+  lines.push(...collapsed);
   if (hidden.length > 0) {
     const nearest = hidden[0];
-    const rangeLabel = formatDistance(rangeMeters);
     lines.push(
-      `+${hidden.length} beyond ${rangeLabel}; nearest ${nearest.name || nearest.typeName || `#${nearest.itemID}`} ` +
+      `+${hidden.length}${wanted ? ` ${wanted}` : ""} beyond ${rangeLabel}; nearest ${nearest.name || nearest.typeName || `#${nearest.itemID}`} ` +
       `at ${formatDistance(nearest.distanceMeters)} (--all to list)`,
     );
+  }
+  if (wanted && !pool.some((row) => !row.isSelf)) {
+    const kinds = [...new Set(rows.filter((row) => !row.isSelf && row.kind).map((row) => row.kind))].sort();
+    lines.push(`nothing of kind ${wanted}${kinds.length ? `; the kinds the session sees: ${kinds.join(", ")}` : ""}`);
   }
   return lines.join("\n");
 }

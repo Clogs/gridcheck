@@ -508,7 +508,7 @@ async function runSlash(command) {
   // success null: the tree's command doesn't say whether it refused (stock
   // EveJS; gridcheck patch apply slash-success makes the commands this tool drives say).
   const verdict = !reply.handled ? "not a command" : reply.success === null || reply.success === undefined
-    ? "done (this tree doesn't say whether it refused)" : reply.success ? "ok" : "refused";
+    ? "done (unconfirmed)" : reply.success ? "ok" : "refused";
   const text = `${command} -> ${verdict}${reply.message ? `\n${reply.message}` : ""}`;
   console.log(text);
   const refused = reply.handled && reply.success === false;
@@ -527,8 +527,10 @@ async function cmdGrid(flags) {
   }
   const rangeKm = flags.range === undefined ? undefined : Number(flags.range);
   if (rangeKm !== undefined && !(rangeKm > 0)) throw new CliError("--range takes a positive number of km");
+  if (flags.kind === true || flags.kind === "") throw new CliError("--kind takes a kind from the grid's type column, e.g. --kind planet");
   console.log(formatGrid(reply.grid, {
     all: Boolean(flags.all),
+    kind: flags.kind,
     rangeKm,
     sinceMs: state.loggedInAtMs ? Date.now() - state.loggedInAtMs : undefined,
   }));
@@ -1201,14 +1203,19 @@ async function cmdReport(positionals, flags) {
   process.exitCode = reply.running ? 3 : reply.isError ? 2 : (reply.exitCode || 0);
 }
 
-function cmdPrimer(flags) {
+function cmdPrimer(positionals, flags) {
   const dir = (file, fallback) => {
     const relative = relativePath(file);
     return relative.startsWith("..") ? fallback : relative;
   };
-  console.log(require("../core/primer").primer({ registry: REGISTRY, mode: MODE, surface: flags.mcp ? "mcp" : "cli",
-    scenarioDirs: { tree: dir(scenarioTools.TREE_SCENARIO_DIR, "tools/gridcheck-scenarios"),
-      drafts: dir(scenarioTools.DRAFT_SCENARIO_DIR, "_local/gridcheck/scenarios") } }));
+  try {
+    console.log(require("../core/primer").primer({ registry: REGISTRY, mode: MODE, surface: flags.mcp ? "mcp" : "cli",
+      topic: positionals[0] || null,
+      scenarioDirs: { tree: dir(scenarioTools.TREE_SCENARIO_DIR, "tools/gridcheck-scenarios"),
+        drafts: dir(scenarioTools.DRAFT_SCENARIO_DIR, "_local/gridcheck/scenarios") } }));
+  } catch (error) {
+    throw new CliError(error.message);
+  }
 }
 
 async function cmdRun(positionals, flags) {
@@ -2475,7 +2482,7 @@ const CORE_COMMANDS = {
       "loadout --file <loadout.json> | --spec '<json>'"],
     run: cmdLoadout,
   },
-  grid: { usage: ["grid [--range 10000] [--all] [--json]"], run: (_positionals, flags) => cmdGrid(flags) },
+  grid: { usage: ["grid [--range 10000] [--all] [--kind <kind>] [--json]"], run: (_positionals, flags) => cmdGrid(flags) },
   watch: {
     usage: ["watch [--for 600] [--every 2] [--offgrid-every 5] [--grep <regex>] [--no-log] [--json] [--run <id>]",
       "      [--client all|fx|diverge|off] [--diverge-meters 5000] [--positions] [--perf [--perf-every 5]]"],
@@ -2497,7 +2504,7 @@ const CORE_COMMANDS = {
   scenario: { usage: ["scenario new <name> [--from <scenario>] [--save] [--force]"], run: cmdScenario },
   log: { usage: ["log [--grep NpcController] [--lines 40] [--any-pid]"], run: (_positionals, flags) => cmdLog(flags) },
   perf: { usage: ["perf [--for 10] [--now] [--json]"], run: (_positionals, flags) => cmdPerf(flags) },
-  primer: { usage: ["primer [--mcp]"], run: (_positionals, flags) => cmdPrimer(flags) },
+  primer: { usage: ["primer [start|scenarios|conditions|events|perf|plugins] [--mcp]"], run: (positionals, flags) => cmdPrimer(positionals, flags) },
   help: { usage: ["help [--json]"], run: (_positionals, flags) => { console.log(flags.json ? JSON.stringify(commandCatalog(), null, 2) : helpText()); } },
 };
 

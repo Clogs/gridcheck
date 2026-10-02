@@ -41,13 +41,13 @@ Install tab.
 Run from a tree's vendored copy, it manages that tree only. It can still update the copy, from a
 checkout path you type.
 
-Under the tabs, the context bar describes the chosen tree. The server has the block on the left:
+Beside the picker, the context bar describes the chosen tree. The server has the block on the left:
 whether it's up (with its pid), and what a run does about that in the tree's mode, for example
 "Managed mode starts it for each run" or, with a server up in managed mode, that a run needs it
-stopped first. To its right are the mode, the EveJS version, the copy, the active plugins and the
-tree's folder; on the Runs tab also the run's world and client view. Hover or focus a fact for
-more: the copy's card has its installed and checked-out versions, whether its files still match,
-and **Update…** when there's a newer commit. Click the folder to copy it.
+stopped first. To its right are the mode, the EveJS version, the copy and the active plugins; on
+the Runs tab also the run's world and client view. Hover or focus a fact for more: the copy's card
+has its installed and checked-out versions and commits, whether its files still match, and
+**Update…** when there's a newer commit.
 
 ## Runs
 
@@ -62,13 +62,27 @@ Three panes:
 
 - **The rail** lists the tree's runs grouped by scenario, newest group first. Each group shows the
   verdicts of its last 8 runs, oldest first: passed, failed, or did not complete. A run that is still
-  being written is pinned at the top with **Follow**. The filter matches scenario names, and
-  **Failing** keeps the scenarios with a failed run. The list refreshes every 15 s.
+  being written (no `result.json` yet, and its timeline written in the last 30 s) is marked
+  **live** on its row and its scenario, and is pinned at the top with **Follow**. The filter
+  matches scenario names, and **Failing** keeps the scenarios with a failed run. The list
+  refreshes every 15 s, and every 3 s while a run is live.
 - **The replay** is a top-down map centred on self, with range rings, locks, shots, damage and
-  DIVERGE rings. Click a ship to select it. Below the map are the play controls (step by event,
-  next DIVERGE, speed, follow live) and a track with one lane per event kind. Click or drag the
-  track to seek. The event list under it has a chip per kind to show or hide it, and a regex
-  filter. CLIENT, PERF and PROFILE lines start hidden.
+  DIVERGE rings. Click a ship to select it. Auto zoom moves in steps, so the map doesn't rescale
+  as ships move about. Only the nearest 8 objects that aren't ships, drones, wrecks, containers or
+  structures, such as asteroids, get a name. Below the map are the play controls (step by event,
+  next DIVERGE, speed, follow live) and a one-lane track with a tick per event, coloured by kind.
+  Click or drag the track to seek. The event list under it has a chip per kind to show or hide
+  it, and a regex filter. CLIENT, PERF and PROFILE lines start hidden. Drag the list's top edge
+  to resize it; double-click the edge to reset.
+- **Live runs.** Opening a live run follows it, and the clock says "live". The view plays in real
+  time a few seconds behind the newest data: the usual gap between position samples plus 1.5 s,
+  or the latest any data reached the page in the last 30 s plus 1.5 s if that is longer, between
+  2.5 and 12 s. The run samples positions every few seconds and holds each line 1.5 s before
+  writing it, so this keeps ships gliding from one sample to the next instead of catching up to the
+  newest one and waiting. When that delay changes, the view plays a little slower or faster
+  (0.75× to 1.25×) until it is back on it, rather than stopping or skipping. Otherwise a live run
+  always plays at 1×. Pausing, seeking or stepping stops following.
+  **Follow live** or **Follow** on the pinned card picks it up again.
 - **The inspector** has six tabs:
   - **Summary**: the totals, the expectations, the selected ship and the frames. The selected
     ship's shield, armour and hull come from its DAMAGE events; a layer the run never reports
@@ -84,7 +98,7 @@ Three panes:
   `report`, `facts`) in the URL opens that tab.
 
 Keys: space plays and pauses, left and right step by event, D jumps to the next DIVERGE, and Home
-and End go to the ends.
+and End go to the ends. On a live run, End goes back to following it.
 
 ### Trace
 
@@ -182,13 +196,15 @@ colour and icon per kind. Click a command or a full path to copy it.
    has "Add pointer…", which adds a pointer to [CLI.md](CLI.md) to the tree's `AGENTS.md` or
    `CLAUDE.md`, for agents without MCP. Setup only adds entries.
    [GUIDE.md](GUIDE.md#setting-up-agents) has the rules. Agents are optional.
-4. **Dependencies and reference data.** Its npm dependencies (`node_modules` at the root and in
+4. **Patches.** How many of the Patches tab's patches are on, each listed in the details with its
+   state. Optional: tests run without them. "Patches" opens the Patches tab, where they're applied.
+5. **Dependencies and reference data.** Its npm dependencies (`node_modules` at the root and in
    `server/`, where their `package.json` lists any) and the reference data (the data dir's
    `solarSystems/data.json`), each missing one with the command that fixes it. The GUI doesn't run
    these; they are the tree's own setup.
-5. **Plugins.** The plugins that apply to the tree and the ones skipped, with the reason. "Run
+6. **Plugins.** The plugins that apply to the tree and the ones skipped, with the reason. "Run
    health check" runs the tree's `gridcheck doctor --json` and shows its report in the row.
-6. **The game server.** Whether it's up, and what that means in the tree's mode. It never blocks
+7. **The game server.** Whether it's up, and what that means in the tree's mode. It never blocks
    the banner.
 
 Under the checklist, **Run a test** shows how to run one once the tree is ready, in two steps:
@@ -203,8 +219,7 @@ Under the checklist, **Run a test** shows how to run one once the tree is ready,
    the command, the scenario's description, what it checks, where it starts and when it stops, its
    last run and the scenario file. `--check`, `--keep-up` and `--reuse` change the command.
 
-A note under the steps says how many of the Patches tab's patches are on. The scenarios and
-recipes come from the tree's own copy (`gridcheck run --json`, `gridcheck world recipes --json`). A copy too
+The scenarios and recipes come from the tree's own copy (`gridcheck run --json`, `gridcheck world recipes --json`). A copy too
 old for them gets the two fixed commands instead, with a note to update it.
 
 The second tab, **Ask your agent**, names the connected agents, offers requests to copy and lists

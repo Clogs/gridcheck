@@ -112,7 +112,8 @@ function parseTargetSpec(text, registry = defaultRegistry()) {
   const termList = [...CORE_TERMS, ...Object.keys(pluginTerms).filter((term) => !CORE_TERMS.includes(term))];
   const tests = [];
   const bindings = [];
-  for (const token of tokenize(source)) {
+  const tokens = tokenize(source);
+  for (const [index, token] of tokens.entries()) {
     if (/^\d+$/.test(token)) {
       const id = Number(token);
       tests.push({ what: token, test: (row) => row.itemID === id });
@@ -129,7 +130,12 @@ function parseTargetSpec(text, registry = defaultRegistry()) {
     if (lower === "npc") { tests.push({ what: token, test: (row) => row.isNpc === true }); continue; }
     if (lower === "player") { tests.push({ what: token, test: (row) => !row.isNpc && Boolean(row.characterID) }); continue; }
     const match = /^([A-Za-z]+)(=|~)(.+)$/.exec(token);
-    if (!match) throw new Error(`target: can't read "${token}"; use npc, player, ${termList.map((term) => `${term}${term === "name" || term === "type" ? "~" : "="}`).join(", ")}`);
+    if (!match) {
+      // Terms split at spaces: "name~Asteroid Belt" is name~Asteroid, then Belt.
+      const previous = /^([A-Za-z]+)(=|~)(.+)$/.exec(tokens[index - 1] || "");
+      const quote = previous ? `. Terms split at spaces; quote a value that has one: ${previous[1]}${previous[2]}"${previous[3]} ${token}"` : "";
+      throw new Error(`target: can't read "${token}"; use npc, player, ${termList.map((term) => `${term}${term === "name" || term === "type" ? "~" : "="}`).join(", ")}${quote}`);
+    }
     const [, field, op, value] = match;
     const plugin = CORE_TERMS.includes(field) ? null : pluginTerms[field];
     if (value.startsWith("$")) {

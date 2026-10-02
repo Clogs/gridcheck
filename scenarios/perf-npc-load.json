@@ -4,8 +4,8 @@
   "up": { "profile": true },
   "setup": [
     "undock",
-    { "wait": 15, "note": "the baseline: one ship on grid" },
-    { "slash": "/npctest2 20", "note": "20 NPCs in a free-for-all; /npc 20 would spawn 20 that attack the ship instead" }
+    { "wait": 15, "perf": "baseline", "note": "the baseline: one ship on grid" },
+    { "slash": "/npctest2 20", "perf": "fight", "note": "20 NPCs in a free-for-all; /npc 20 would spawn 20 that attack the ship instead" }
   ],
   "until": { "any": ["DESTROYED self"], "timeout": 60 },
   "expect": [

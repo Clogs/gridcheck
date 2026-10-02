@@ -17,9 +17,32 @@
   const SWARM_KINDS = new Set(["drone", "fighter"]);
   const TRACKED = new Set(["ship", "drone", "fighter", "wreck", "container", "structure"]);
   const MOVING = new Set(["ORBIT", "FOLLOW", "APPROACH"]);
-  // The lanes of the workbench's compact track, in this order, when present.
+  // The kinds on the workbench's compact track, drawn in this order (later on top).
   const TRACK_KINDS = ["STEP", "ARRIVE", "TARGET", "MODE", "FX", "DAMAGE", "DESTROYED", "DIVERGE"];
   const HIDDEN_KINDS = new Set(["POS", "START", "END"]);
+  const LIVE_DELAY = Object.freeze({ defaultMs: 3500, minMs: 2500, maxMs: 12_000, slackMs: 1500, arrivalWindowMs: 30_000,
+    easeMs: 4000, minRate: 0.75, maxRate: 1.25 });
+
+  // How fast a view following live plays, given how far the live point is
+  // ahead of it: real time on it, a little faster or slower to close a gap.
+  function liveRate(behindMs) {
+    return Math.min(LIVE_DELAY.maxRate, Math.max(LIVE_DELAY.minRate, 1 + behindMs / LIVE_DELAY.easeMs));
+  }
+  // The map's auto zoom, as half its width in metres.
+  const AUTO_HALVES = [5000, 7500, 10_000, 15_000, 20_000, 30_000, 40_000, 50_000, 75_000, 100_000, 150_000, 200_000,
+    300_000, 400_000, 500_000];
+
+  // The auto zoom's step for a view that needs `needMeters` of half width. It
+  // goes up a step as soon as the view needs it, and down only when the step
+  // below has room to spare, so ships moving around the edge don't make the
+  // whole map breathe.
+  function autoHalf(needMeters, current = null) {
+    const need = Math.max(0, Number(needMeters) || 0);
+    const fit = AUTO_HALVES.find((half) => half >= need) || AUTO_HALVES[AUTO_HALVES.length - 1];
+    if (!AUTO_HALVES.includes(current) || fit >= current) return fit;
+    const below = AUTO_HALVES[AUTO_HALVES.indexOf(current) - 1];
+    return need <= below * 0.85 ? fit : current;
+  }
 
   // ---------- text ----------
 
@@ -217,7 +240,16 @@
 
     // The newest sample at or before `at`, moved toward the next one so a
     // replay glides; `velocity` is metres per second from the pair it sits in.
+    // The map and the inspector both ask for the same moment on every frame.
+    let frameMemo = null;
     model.frameAt = function frameAt(at) {
+      if (frameMemo && frameMemo.at === at && frameMemo.version === model.version) return frameMemo.value;
+      const value = frameAtUncached(at);
+      frameMemo = { at, version: model.version, value };
+      return value;
+    };
+
+    function frameAtUncached(at) {
       const list = model.positions;
       if (!list.length || at === null || at === undefined) return null;
       let low = 0;
@@ -262,6 +294,35 @@
         return { ...ball, x: ball.x + (to2.x - ball.x) * f, y: ball.y + (to2.y - ball.y) * f, z: ball.z + (to2.z - ball.z) * f };
       });
       return { pos: a, balls, velocity };
+    }
+
+    // Called with the server's clock as a new batch of lines arrives, before
+    // ingesting it: how far the newest data had fallen behind by then. Kept
+    // for a while rather than for a few batches, so the delay holds steady.
+    const arrivals = [];
+    model.noteArrival = function noteArrival(nowMs) {
+      if (model.tEnd === null || !Number.isFinite(nowMs)) return;
+      arrivals.push({ nowMs, lagMs: Math.max(0, nowMs - model.tEnd) });
+      while (arrivals[0].nowMs < nowMs - LIVE_DELAY.arrivalWindowMs) arrivals.shift();
+    };
+
+    // How far behind the newest data a live view plays, so a later sample has
+    // usually arrived and ships glide instead of jumping from one to the next:
+    // the recent gap between samples, plus the page's 1 s poll and some slack.
+    // Data written in batches can trail the clock by more than a sample gap, so
+    // it is also at least the worst recent arrival lag plus slack; otherwise the
+    // view reaches the newest data and stalls until the next batch.
+    model.liveDelayMs = function liveDelayMs() {
+      const list = model.positions;
+      const gaps = [];
+      for (let index = list.length - 1; index > 0 && gaps.length < 5; index -= 1) {
+        const gap = list[index].atMs - list[index - 1].atMs;
+        if (gap > 0 && list[index].systemID === list[index - 1].systemID) gaps.push(gap);
+      }
+      gaps.sort((a, b) => a - b);
+      const bySamples = gaps.length ? gaps[gaps.length >> 1] + LIVE_DELAY.slackMs : LIVE_DELAY.defaultMs;
+      const byArrivals = arrivals.length ? Math.max(...arrivals.map((a) => a.lagMs)) + LIVE_DELAY.slackMs : 0;
+      return Math.min(LIVE_DELAY.maxMs, Math.max(LIVE_DELAY.minMs, bySamples, byArrivals));
     };
 
     // The newest event at or before `at` that passes `test`, as an index.
@@ -463,7 +524,7 @@
   }
 
   return {
-    AU, TRACKED, MOVING, TRACK_KINDS, HIDDEN_KINDS,
-    distance, offset, offsetFine, clockShort, seconds, summary, kindClass, niceStep, axisLabel, createModel,
+    AU, TRACKED, MOVING, TRACK_KINDS, HIDDEN_KINDS, LIVE_DELAY, liveRate, AUTO_HALVES,
+    autoHalf, distance, offset, offsetFine, clockShort, seconds, summary, kindClass, niceStep, axisLabel, createModel,
   };
 });

@@ -59,11 +59,12 @@ by hand. When an entry already runs this tree's `mcp.js`, setup leaves it as it 
 | Tool | CLI | Notes |
 | --- | --- | --- |
 | `status` | `status`, `world list`, `run` | Start here: server, character, saved worlds and recipes, scenarios, active plugins, recent runs and background runs. |
+| `guide` | `primer [<topic>]` | How to drive the tool, by `topic`: `start`, `scenarios`, `conditions`, `events` (every kind's fields), `perf`, `plugins`. No topic returns them all. |
 | `doctor` | `doctor` | What the tree supports: gateway calls, the client view, patches, plugins, ports, loadouts. |
 | `up`, `down` | `up`, `down` | Auto and managed mode. In auto mode `down` stops only a server `up` started. |
 | `login`, `undock`, `teleport` | `login`, `undock`, `teleport` | `teleport` is stock `/tr`. |
 | `loadout` | `loadout` | A ship and its fit by item name, skills checked first. |
-| `grid` | `grid` | `json: true` prints the field names conditions use. |
+| `grid` | `grid` | `json: true` prints the field names conditions use. More than 10 rows of one kind that isn't a ship (a belt's asteroids) collapse to the nearest 3 and a count; `kind` lists only that kind, `all` everything. |
 | `slash` | `slash` | The command goes after `--`, so it is never read as flags. A refused command is a tool error. |
 | `watch` | `watch` | `seconds` defaults to 60, not the CLI's 600, because the call blocks for the whole watch. Call `act` in the same turn to watch its effect. |
 | `act` | `act` | A player action, with the names a scenario's action step uses: `action`, `target`, `modules`, `drones`, `range`, `once`, `charge`, `count`, `timeout`. |
@@ -72,9 +73,12 @@ by hand. When an entry already runs this tree's `mcp.js`, setup leaves it as it 
 | `run_scenario` | `run` | Writes a scenario it is handed, checks it, runs it. See below. |
 | `report` | none | Reads a run's `report.md` and `result.json`; waits for a background run. |
 
-A plugin's tools are named `<plugin>_<tool>`. The server's MCP instructions carry a primer:
-the workflow, the scenario format and the condition syntax, then each active plugin's own primer.
-An agent with no other context can write a scenario from them. When an argument fails its schema
+A plugin's tools are named `<plugin>_<tool>`. The server's MCP instructions are a brief of under
+2,000 characters, because clients cut long instructions off: what the tool is, the server mode, the
+loop, and the `guide` topics. The primer itself is the `guide` tool's: the workflow, the scenario
+format, the condition syntax, every event kind's fields (built from the same table the check reads,
+so it can't drift), performance runs, and each active plugin's own primer. An agent with no other
+context can write a scenario from it. When an argument fails its schema
 check, the tool returns an error naming the argument, and the CLI never runs. CLI messages name CLI
 commands: "`gridcheck login` first" means the `login` tool.
 
@@ -84,8 +88,11 @@ tool's `tools/gridcheck/scenarios/` or a plugin's `plugins/<name>/scenarios/`, o
 or with `save: true` to `tools/gridcheck-scenarios/` to commit with the feature. It always runs
 `gridcheck run --check` first and stops there on a problem, or when `check: true`. Then:
 
-- by default it waits for the run and returns the end of the console, the report without its
-  timeline, and the paths of the report, timeline and frames. With a progress token it sends one
+- by default it waits for the run and returns the console's `run` and `note` lines and its last
+  lines, the report without its timeline, and the paths of the report, timeline and frames. A
+  summary too long for one reply keeps every section: the least needed (frames, performance) are
+  cut to their first lines first, each saying how many more `report.md` has, and the verdict,
+  expectations and step tables last. With a progress token it sends one
   progress notification a second with the latest console line;
 - `wait: false` starts the run detached and returns its run ID at once, with the console in
   `_local/gridcheck/background/<run>.log`. `report { run, waitSeconds: 600 }` waits for it, up to 600 s a
@@ -100,7 +107,7 @@ or with `save: true` to `tools/gridcheck-scenarios/` to commit with the feature.
 
 Every tool has a CLI form, for agents that don't use MCP. `gridcheck run <scenario> --detach` is
 `wait: false`, `gridcheck report [<run>|latest] [--section ...] [--wait <s>]` is `report`, and
-`gridcheck primer` prints these instructions naming CLI commands. [CLI.md](CLI.md) is the reference.
+`gridcheck primer [<topic>]` prints the guide naming CLI commands. [CLI.md](CLI.md) is the reference.
 
 ## What runs where
 
@@ -439,10 +446,16 @@ node tools/gridcheck/bin/gridcheck.js act stop
 | `launchDrones [<drones>]` | `ship.LaunchDrones([[stack, qty]])` | `--count`. The call answers success even when it refuses, so the action counts this ship's new drones on grid. |
 | `engageDrones <target>` | `entity.CmdEngage(drones, id)` | This ship's drones in space. |
 
-- **Targets.** A target is the nearest ball on grid, never your own ship, that passes every
-  term: `npc`, `player`, `name~<regex>`, `type~<regex>`, `kind=station`, `within=30km`, or an
+- **Targets.** A target is the nearest ball the session sees, never your own ship, that passes
+  every term: `npc`, `player`, `name~<regex>`, `type~<regex>`, `kind=station`, `within=30km`, or an
   item ID, plus any terms the plugins add. `nearest` reads well but changes nothing. In a
   scenario, `$name` matches a ball an earlier step bound, or its group.
+- **Terms split at spaces.** `name~Asteroid Belt` is two terms, `name~Asteroid` and `Belt`, and
+  `Belt` can't be read. Quote a value that has a space, as in conditions: `name~"Asteroid Belt"`,
+  or match the space with `.`: `name~Asteroid.Belt`.
+- **Off grid too.** The session sees the system's celestials (planets, moons, stargates,
+  stations, belts) wherever they are, not only what's on grid, so `warpTo kind=planet` or
+  `warpTo name~"Asteroid Belt"` reaches one. `gridcheck grid --all` lists what the session sees.
 - **Modules.** `weapons` (the default: high-slot turrets and launchers), `high`, `mid`, `low`,
   `all`, `name~<regex>`, `group~<regex>` or an item ID. Several terms must all hold:
   `"mid name~afterburner"`. Module names come from the static item table, read once a command.
@@ -506,11 +519,15 @@ Steps:
 | `{ "loadout": { "ship": "Tristan", "modules": [...], "drones": [...], "cargo": [...], "charges": [...] } }` | `gridcheck loadout` ([WORLDS.md](WORLDS.md)). |
 | `{ "wait": 30 }` | Waits that many seconds. Prefer `waitFor` on the event you are waiting for: a `GRID` with the new `systemName` after a teleport, or the first `GRID` after an undock. |
 | `{ "waitFor": "<condition>", "timeout": 300 }` | Waits for an event, seen after the step starts, that matches the condition. Setup fails if none comes before the timeout (default 300 s). |
+| `{ "repeat": [<steps>], "every": 5, "times": 12 }` | Runs its steps a round every `every` seconds, start to start, for `times` rounds; the report shows one step, "12 round(s)". A step that fails in a round fails the repeat, naming the round. In `during`, leave `times` out and it repeats until the run stops. It can't hold another `repeat` or `login`, and in setup its rounds count toward the run's budget. |
 | `{ "lock": "nearest npc", "as": "mark" }`, `{ "activate": "weapons", "target": "$mark" }`, `"stop"`, ... | A [player action](#player-actions): `approach`, `orbit`, `keepAtRange`, `warpTo`, `stop`, `lock`, `unlock`, `activate`, `deactivate`, `loadAmmo`, `launchDrones`, `engageDrones`. The value is the target, or the modules or drones; the other arguments are keys (`range`, `target`, `once`, `charge`, `count`, `timeout`). `as` binds the target's item ID, or the drones launched. A refused action fails the step. |
 
 Player actions, and plugin steps that allow it, take `"retry": { "every": 15, "for": 480 }`, which
 tries a refused step again every `every` seconds until it is accepted or `for` runs out. Use it
 where the feature refuses for now, rather than a fixed `wait`. Plugins add steps of their own.
+
+Any step takes `"note"`, shown in the report, and `"perf": "<name>"`, which opens a named phase in
+the performance table where the step begins (see [In a scenario](#in-a-scenario)).
 
 ### During
 
@@ -527,9 +544,12 @@ step that fails ends the run as not completed (exit 2), because the test didn't 
   { "wait": 5, "note": "the rats close in" },
   { "lock": "nearest npc", "as": "mark", "retry": { "every": 5, "for": 60 } },
   { "activate": "weapons", "target": "$mark" },
-  { "orbit": "$mark", "range": 2000 }
+  { "orbit": "$mark", "range": 2000 },
+  { "repeat": [{ "slash": "/heal" }], "every": 5, "note": "keep the ship alive until the run stops" }
 ]
 ```
+
+A `repeat` without `times` that the stop cuts short shows as `stopped`, with the rounds it ran.
 
 The report gets a "During" table after "Setup", with each step's time, and the timeline marks
 those `STEP` lines `during:`.
@@ -816,11 +836,21 @@ different element. So `PROFILE sections.label=npc sections.msPerTick>5` doesn't 
 5 ms. A `PERF` condition needs `watch.perf`, and a `PROFILE` one needs `up.profile`; the check says
 so before anything boots.
 
-The report gets a "Server performance" section. It gives the whole run's figures, then a table of
-phases. Each phase starts where a setup or `during` step ended and is named for that step, so the
-time before a spawn is the baseline for the time after it. Ticks go to a phase by their own time,
-so a window that spans a step splits at it. Then come the profiler's sections, merged over the
-whole run. `result.json` has the same figures under `perf`. The GUI's Perf tab draws them
+The report gets a "Server performance" section. It gives the whole run's figures, and when the
+slowest tick and the longest event-loop stall happened, with their phase. Then comes a table of
+phases. By default each phase starts where a setup or `during` step ended and is named for that
+step, so the time before a spawn is the baseline for the time after it. Once any step has
+`"perf": "<name>"`, only those steps open phases, each named for its step and starting where the
+step begins, so a `during` repeat that runs until the stop is one phase, not one per round:
+
+```json
+"setup": ["undock", { "wait": 15, "perf": "baseline" }, { "slash": "/npc 20", "perf": "fight" }],
+"during": [{ "repeat": [{ "slash": "/heal" }], "every": 5 }]
+```
+
+Ticks go to a phase by their own time, so a window that spans a step splits at it. Then come the
+profiler's sections, merged over the whole run. When the scenario asks for the profiler but ran on
+a server that was already up without it, the section says so in bold. `result.json` has the same figures under `perf`. The GUI's Perf tab draws them
 ([GUI.md](GUI.md#perf)).
 
 `perf-npc-load` runs on stock: 15 s of one ship on grid, then 20 NPCs for 60 s. On 2026-10-02 on
@@ -888,8 +918,9 @@ case-insensitively, `--lines N` sets the count, and `--any-pid` keeps every proc
   session's SetState until it binds the remote park, as a real client does straight after undock
   or a jump. `gridcheck undock`, `gridcheck teleport` and any `gridcheck slash` that changes system bind it, so these
   lines mean something else entered space unbound, e.g. a gateway call made directly.
-- **"done (this tree doesn't say whether it refused)"** after `gridcheck slash`. Stock's slash commands
-  report no outcome. The `slash-success` patch makes the commands the tool drives report one.
+- **"done (unconfirmed)"** after `gridcheck slash`. Stock's slash commands report no outcome, so the
+  command ran but may have refused; read its reply text. The `slash-success` patch
+  (`gridcheck patch apply slash-success`) makes the commands the tool drives report one.
 - **Protection.** Undock sets undock invulnerability; the grid header shows it. NPCs may ignore a
   protected ship, so wait out any countdown first.
 - **The ship stays in space after `logout`.** Releasing the session takes the character offline

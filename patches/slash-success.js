@@ -44,7 +44,7 @@ module.exports = {
   title: "Slash commands the tool drives say whether they refused",
   headline: "Know when a slash command refused",
   gain: "A refused command fails the scenario or `gridcheck slash` call instead of passing quietly. Covers the commands Gridcheck uses:",
-  without: "Stock commands never say whether they worked. Gridcheck reports `done (this tree doesn't say whether it refused)` and carries on.",
+  without: "Stock commands never say whether they worked. Gridcheck reports `done (unconfirmed)` and carries on.",
   commands: COMMANDS,
   hunks: [
     { file: REPLIES, anchor: ["function handledResult(chatHub, session, options, message) {"], insert: "before", lines: [
