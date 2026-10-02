@@ -9,7 +9,7 @@
   },
   "bin": {
     "gridcheck": "bin/gridcheck.js",
-    "e2e-mcp": "bin/mcp.js"
+    "gridcheck-mcp": "bin/mcp.js"
   },
   "scripts": {
     "test": "node test/run.js",
