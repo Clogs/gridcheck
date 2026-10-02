@@ -53,6 +53,49 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+// () -> the object that keeps the tick ring. Stock EveJS 0.12.9 builds its
+// runtime once and exports a copy of it (space/runtime.js:
+// Object.assign(runtimeExports, runtimeSingleton)), but the tick timer, set in
+// the constructor, runs on the original, so the ring is on an object nothing
+// exports. The two share a prototype, which holds tick(): a one-shot wrapper
+// there names the object the first tick runs on, then puts the method back,
+// so it costs one call. A tree whose exported runtime ticks itself (the LU
+// fork starts ticking on the exports) is named the same way.
+function findTicker(exported) {
+  let ticker = null;
+  let probing = false;
+  return () => {
+    if (ticker) return ticker;
+    const runtime = exported();
+    if (!runtime || typeof runtime !== "object") return null;
+    if (Array.isArray(runtime._recentTickSummaries)) {
+      ticker = runtime;
+      return ticker;
+    }
+    const proto = Object.getPrototypeOf(runtime);
+    if (!probing && proto && Object.prototype.hasOwnProperty.call(proto, "tick") && typeof proto.tick === "function") {
+      probing = true;
+      const original = proto.tick;
+      const probe = function tick(...args) {
+        try {
+          return original.apply(this, args);
+        } finally {
+          if (this && typeof this === "object" && Array.isArray(this._recentTickSummaries)) {
+            ticker = this;
+            if (proto.tick === probe) proto.tick = original;
+          }
+        }
+      };
+      try {
+        proto.tick = probe;
+      } catch (_error) {
+        // A frozen prototype: tick figures stay empty, nothing else changes.
+      }
+    }
+    return runtime;
+  };
+}
+
 // space: () -> the space runtime (loaded on first use). logger: the tree's
 // logger module, whose info the monitor wraps when the profiler is on.
 // describeSystem: (systemID) -> { name } or null. The rest are for tests.
@@ -69,13 +112,15 @@ function createPerfMonitor({
   wait = sleep,
 } = {}) {
   const profiler = profilerSettings(env);
-  const runtime = () => {
+  const exported = () => {
     try {
       return typeof space === "function" ? space() : space;
     } catch (_error) {
       return null;
     }
   };
+  const runtime = findTicker(exported);
+  runtime();
 
   // ---------- the profiler's windows ----------
 

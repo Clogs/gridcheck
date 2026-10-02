@@ -148,6 +148,36 @@ test("a sampler reads each tick once, in windows, and counts what fell out of th
   assert.strictEqual(loop.state.closed, 1);
 });
 
+test("stock's exported runtime is a copy: the first tick names the object that keeps the ring, then the probe goes", () => {
+  // As stock space/runtime.js: tick() on the prototype, the timer on the
+  // original, and a copy of its fields as the module's exports.
+  class Runtime {
+    constructor() {
+      this.scenes = new Map();
+      this._tickIntervalMs = 100;
+    }
+  }
+  let mono = 0;
+  Object.defineProperty(Runtime.prototype, "tick", {
+    writable: true, configurable: true, enumerable: false,
+    value() {
+      mono += 100;
+      if (!Array.isArray(this._recentTickSummaries)) this._recentTickSummaries = [];
+      this._recentTickSummaries.push({ startedAtMonotonicMs: mono, tickDurationMs: 7, latenessMs: 0 });
+    },
+  });
+  const original = Runtime.prototype.tick;
+  const singleton = new Runtime();
+  const exportsCopy = Object.setPrototypeOf(Object.assign({}, singleton), Runtime.prototype);
+  const monitor = createPerfMonitor({ space: () => exportsCopy, env: {}, perfNow: () => mono, loopDelay: fakeLoop().make });
+  assert.notStrictEqual(Runtime.prototype.tick, original, "a probe waits for the first tick");
+  singleton.tick();
+  assert.strictEqual(Runtime.prototype.tick, original, "and takes itself off after it");
+  singleton.tick();
+  assert.strictEqual(monitor.snapshot().perf.ticks, 2, "the ring is read from the object that ticks");
+  assert.strictEqual(exportsCopy._recentTickSummaries, undefined);
+});
+
 test("with EVEJS_TICK_PROFILE=1 the logger's info is wrapped; each block is kept and still logged", () => {
   const logged = [];
   const logger = { info: (text) => logged.push(text) };
