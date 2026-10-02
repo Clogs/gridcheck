@@ -36,6 +36,22 @@ data dir and the world beside it, `EVEJS_DATA_ROOT` moves the log, and
 file with a mistake stops every command except `init`, `doctor`, `help`, `vendor`, `gui` and
 `agents`, and says what is wrong. `init --dry-run` prints the file it would write without writing it.
 
+## Running from a checkout
+
+A tree always runs its own copy, so the CLI and the bridge inside its server are one version. A
+checkout's CLI hands each command to that copy:
+
+```
+node bin/e2e.js --tree F:/EveJS-0.12.9 run smoke-undock   # from anywhere
+cd F:/EveJS-0.12.9/server && node <checkout>/bin/e2e.js status   # inside a tree, --tree isn't needed
+```
+
+`npm link` in the checkout puts `e2e` on `PATH`, so `e2e --tree <tree> <command>`, or `e2e <command>`
+inside a tree, works from any shell. `vendor`, `gui` and `setup` read `--tree` themselves and run
+from the checkout. A tree with no copy yet gets the `setup` command to run. `status` and `doctor`
+add a note when the tree's copy isn't the checkout's `HEAD`. Developing the tool itself,
+`EVEJS_E2E_TREE=<tree>` runs the checkout's own code against the tree instead.
+
 ## Auto, attach and managed
 
 In **auto** mode, the default, the tool uses the tree's server when it's up and starts its own when

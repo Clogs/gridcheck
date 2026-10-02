@@ -12,6 +12,19 @@ if (require.main === module && process.argv[2] === "vendor") {
   process.exitCode = require("../core/vendor").main(process.argv.slice(3));
   return;
 }
+// From a checkout, --tree (or a working directory inside a tree) runs the
+// tree's own copy, so the CLI and the bridge in its server are one version.
+if (require.main === module) {
+  const launcher = require("../core/launcher");
+  const ownRoot = require("node:path").resolve(__dirname, "..");
+  const plan = launcher.planLaunch({ argv: process.argv.slice(2), ownRoot });
+  const code = launcher.launch(plan, { ownRoot });
+  if (code !== null) {
+    process.exitCode = code;
+    return;
+  }
+  process.argv = [...process.argv.slice(0, 2), ...plan.argv];
+}
 // `e2e gui` manages trees other than this copy's, so it reads no tree config here.
 if (require.main === module && process.argv[2] === "gui") {
   require("../core/gui").main(process.argv.slice(3)).then((code) => { process.exitCode = code; }, (error) => {
