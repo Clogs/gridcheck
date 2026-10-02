@@ -71,6 +71,19 @@ const EVENT_FIELDS = Object.freeze({
     clientMode: "str", errorMeters: "m", positionSource: "str", ageMs: "ms", update: "str", count: "num",
     inServerGrid: "bool", warpSource: "str", minRangeMeters: "m", durationMs: "ms", sinceMs: "ms",
   },
+  // One window of server ticks (bridge/perf.js), with "perf" on the watch.
+  PERF: {
+    windowMs: "ms", ticks: "num", missedTicks: "num", budgetMs: "ms", tickAvgMs: "ms", tickP50Ms: "ms", tickP95Ms: "ms",
+    tickP99Ms: "ms", tickMaxMs: "ms", overBudget: "num", lateAvgMs: "ms", lateMaxMs: "ms", loopP50Ms: "ms",
+    loopP99Ms: "ms", loopMaxMs: "ms", cpuPct: "num", rssMB: "num", heapMB: "num", scenes: "num", entities: "num",
+    tidiMin: "num",
+    busiest: { list: { systemID: "id", systemName: "str", workAvgMs: "ms", workMaxMs: "ms", entities: "num", sessions: "num" } },
+  },
+  // One tick profiler window: needs a server booted with the profiler (e2e up --profile).
+  PROFILE: {
+    ticks: "num", totalMsPerTick: "ms", totalLabel: "str",
+    sections: { list: { label: "str", msPerTick: "ms", pct: "num", calls: "num", msPerCall: "ms", nested: "bool", afterTick: "bool" } },
+  },
 });
 
 const KINDS = Object.freeze(Object.keys(EVENT_FIELDS));

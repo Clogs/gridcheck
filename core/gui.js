@@ -60,6 +60,8 @@ const PAGES = Object.freeze({
   "/gui": [PAGE_DIR, "index.html", "text/html; charset=utf-8"],
   "/gui/gui.js": [PAGE_DIR, "gui.js", "text/javascript; charset=utf-8"],
   "/gui/replay.js": [PAGE_DIR, "replay.js", "text/javascript; charset=utf-8"],
+  // The run's tick figures, as the report computes them (core/perf.js).
+  "/gui/perf.js": [__dirname, "perf.js", "text/javascript; charset=utf-8"],
   "/gui/runs.js": [PAGE_DIR, "runs.js", "text/javascript; charset=utf-8"],
   "/gui/gui.css": [PAGE_DIR, "gui.css", "text/css; charset=utf-8"],
   "/viewer": [VIEWER_DIR, "index.html", "text/html; charset=utf-8"],

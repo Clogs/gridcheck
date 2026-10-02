@@ -222,7 +222,8 @@ test("a scenario loads to its steps, conditions and defaults", LU, () => {
   assert.deepStrictEqual(scenario.setup[5].positionals, ["$scout"]);
   assert.deepStrictEqual(scenario.setup[6].positionals, ["pirate"]);
   assert.deepStrictEqual(scenario.setup[6].flags, { doctrine: "sanshas", count: 2 });
-  assert.deepStrictEqual(scenario.up, { realClock: true, market: true, offgridTravel: null, offgridActivity: null, timeout: null });
+  assert.deepStrictEqual(scenario.up, { realClock: true, market: true, offgridTravel: null, offgridActivity: null, timeout: null,
+    profile: false, profileEvery: null });
   assert.strictEqual(scenario.watch.client, "diverge");
   assert.strictEqual(scenario.until.any.length, 2);
   assert.deepStrictEqual(scenario.expect.map((entry) => [entry.text, entry.absent]),
@@ -305,7 +306,7 @@ test("without a plugin, its kinds, data, steps and up keys are unknown, and the 
   assert.match(error.problems.join("\n"), /up.offgridTravel: unknown key; up takes market, timeout/);
   assert.match(error.problems.join("\n"), /setup\[1\]: unknown step; steps are login, undock/);
   const scenario = validateScenario({ world: "lowsec-docked", setup: ["undock"], until: { timeout: 5 }, expect: ["GRID"] }, { ...STUBS, registry, defaultName: "t" });
-  assert.deepStrictEqual(scenario.up, { market: true, timeout: null });
+  assert.deepStrictEqual(scenario.up, { market: true, timeout: null, profile: false, profileEvery: null });
 });
 
 test("a plugin's step validates, describes, binds and runs through the registry", () => {

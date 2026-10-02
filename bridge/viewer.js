@@ -44,6 +44,7 @@ function resolveRunDir(runsDir, runID) {
 }
 
 const KIND_IN_LINE = /"kind":"([A-Z_]+)"/;
+const TEXT_KINDS = new Set(["PERF", "PROFILE"]);
 // A timeline line's text without its "t+00:00:00  KIND" head.
 const LINE_HEAD = /^t[+-]\d\d:\d\d:\d\d {2}\S+\s+/;
 
@@ -54,12 +55,13 @@ function createAgentBridgeViewer({ runsDir, pageDir = path.join(__dirname, "view
   if (!runsDir) throw new TypeError("createAgentBridgeViewer needs runsDir");
   const root = path.resolve(runsDir);
 
-  // [lineIndex, text] for each line of a plugin's kind in `text`.
+  // [lineIndex, text] for each line of a plugin's kind in `text`, and of the
+  // server performance kinds, whose figures the page doesn't format itself.
   function summaries(text) {
     const out = [];
     text.split("\n").forEach((line, index) => {
       const kind = KIND_IN_LINE.exec(line);
-      if (!kind || !registry.formatters[kind[1]]) return;
+      if (!kind || !(registry.formatters[kind[1]] || TEXT_KINDS.has(kind[1]))) return;
       try {
         out.push([index, formatTimelineEvent(JSON.parse(line), registry).replace(LINE_HEAD, "").replace(/\s{2,}/g, "  ")]);
       } catch (_error) {

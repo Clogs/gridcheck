@@ -25,6 +25,7 @@ const { annotateRow, createGridWatch } = require("./watch");
 const { createDestinyTee, probeDestinyLayout } = require("./destiny");
 const { createAgentBridgeViewer } = require("./viewer");
 const { createLoadout, loadLoadoutModules } = require("./loadout");
+const { createPerfMonitor } = require("./perf");
 const { createStock, serverRequire } = require("./stock");
 const { DEFAULT_PLUGINS_DIR, loadPlugins, startPlugins, stopPlugins } = require("./plugins");
 const { createToolRegistry, treeAt } = require("../core/plugins");
@@ -151,6 +152,15 @@ function createService({ serverRoot, stock: givenStock = null, pluginsDir = DEFA
       decodePackaged: (bytes) => stock.marshal.marshalDecodeExact(bytes),
       off: layout.ok ? null : layout.error,
     });
+    // Tick figures from the runtime's ring; the profiler's windows when the
+    // server runs with EVEJS_TICK_PROFILE=1 (perf.js).
+    const perf = createPerfMonitor({
+      space: () => stock.space,
+      logger: optional(() => stock.logger),
+      describeSystem: seams.describeSystem,
+      env,
+    });
+    if (perf.profiler.enabled) log.info(`[AgentBridge] tick profiler on: a PROFILE window every ${perf.profiler.everyTicks} ticks`);
     const watcher = createGridWatch({
       findSession: seams.findSession,
       readGrid: grid.readGrid,
@@ -158,6 +168,7 @@ function createService({ serverRoot, stock: givenStock = null, pluginsDir = DEFA
       killmails: optional(() => stock.killmailState),
       describeType: seams.describeType,
       destinyTee,
+      perf,
     });
     const routes = createAgentBridgeRoutes({
       findSession: seams.findSession,
@@ -171,6 +182,7 @@ function createService({ serverRoot, stock: givenStock = null, pluginsDir = DEFA
       log,
       destinyTee,
       loadout,
+      perf,
       gridAnnotate: (row, entity, session) => annotateRow(hooks, row, entity, {
         nowMs: Date.now(),
         characterID: session && session.characterID,
@@ -208,11 +220,13 @@ function createService({ serverRoot, stock: givenStock = null, pluginsDir = DEFA
         logFile: optional(() => stock.dataRoot.resolveDataRootPath("logs", "server.log")) || config.logFile,
         dataDir: optional(() => stock.storeRoot.resolveDataDir()) || config.dataDir,
         tool: copyInfo(),
+        profiler: perf.profiler,
       }),
     });
     bridge.start().catch(() => { bridge = null; });
     stock.gameStore.registerShutdownHook("agent-bridge", () => {
       stopPlugins(hooks, log);
+      perf.stop();
       const stopping = bridge ? bridge.stop() : Promise.resolve();
       bridge = null;
       return stopping;

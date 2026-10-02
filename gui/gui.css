@@ -476,6 +476,55 @@ dialog::backdrop { background: rgba(4, 6, 8, 0.7); }
 dialog.wide { width: min(1000px, 94vw); }
 dialog.wide img { width: 100%; display: block; background: var(--map-bg); }
 
+/* Perf tab: the server's tick figures (gui/runs.js perfPanel) */
+.v.warn { color: var(--warn); }
+.pf { display: flex; flex-direction: column; gap: 14px; }
+.pf-none p { margin: 0 0 6px; }
+.pf-chart { width: 100%; height: auto; display: block; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; cursor: crosshair; }
+.pf-grid { stroke: var(--line); stroke-width: 1; }
+.pf-axis { stroke: #33414f; stroke-width: 1; }
+.pf-yl { fill: var(--dim); font: 9px var(--mono); }
+.pf-band { stroke: color-mix(in srgb, var(--accent) 38%, transparent); stroke-width: 2; fill: none; }
+.pf-avg { stroke: var(--accent); stroke-width: 1.5; fill: none; stroke-linejoin: round; stroke-linecap: round; }
+.pf-budget { stroke: var(--bad); stroke-width: 1; stroke-dasharray: 4 3; }
+.pf-bl { fill: var(--bad); font: 9px var(--mono); }
+.pf-over { fill: var(--bad); }
+.pf-step line { stroke: var(--k-step); stroke-width: 1; stroke-dasharray: 2 3; opacity: 0.75; }
+.pf-step text { fill: var(--k-step); font: 9px var(--mono); }
+.pf-cur { stroke: var(--text); stroke-width: 1; opacity: 0.55; pointer-events: none; }
+.pf-phases { width: 100%; border-collapse: collapse; font-size: 11.5px; font-variant-numeric: tabular-nums; }
+.pf-phases th { text-align: right; color: var(--dim); font-weight: 500; font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em; padding: 0 4px 3px; }
+.pf-phases td { text-align: right; font-family: var(--mono); padding: 3px 4px; border-top: 1px solid var(--line); }
+.pf-phases th:nth-child(2), .pf-phases td.pl { text-align: left; }
+.pf-phases td.pl { font-family: var(--font); max-width: 128px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pf-phases td.pn { color: var(--k-step); }
+.pf-phases td.ok { color: var(--ok); } .pf-phases td.warn { color: var(--warn); } .pf-phases td.bad { color: var(--bad); }
+.pf-phases tbody tr { cursor: pointer; }
+.pf-phases tbody tr:hover { background: var(--panel2); }
+.pf-phases tbody tr.cur { background: var(--sel); box-shadow: inset 2px 0 0 var(--accent); }
+.pf-bars { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.pf-bars li { display: grid; grid-template-columns: minmax(0, 120px) minmax(0, 1fr) 42px 30px; gap: 8px; align-items: center; font-size: 11.5px; }
+.pf-lab { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pf-bar { height: 8px; background: var(--bg); border-radius: 2px; overflow: hidden; }
+.pf-bar i { display: block; height: 100%; background: var(--accent); border-radius: 2px; }
+.pf-val, .pf-pct { text-align: right; font-family: var(--mono); font-variant-numeric: tabular-nums; }
+.pf-pct { color: var(--dim); }
+.pf-bars li.nested .pf-lab { color: var(--muted); padding-left: 8px; }
+.pf-bars li.nested .pf-bar i { background: color-mix(in srgb, var(--accent) 45%, transparent); }
+.pf-bars li.rest .pf-lab { color: var(--muted); }
+.pf-bars li.rest .pf-bar i { background: var(--muted); }
+.pf-bars li.after .pf-lab { color: var(--dim); }
+.pf-bars li.after .pf-bar i { background: var(--dim); }
+.pf-strip { display: flex; align-items: center; gap: 10px; width: 100%; padding: 7px 10px; border: 1px solid var(--line); border-radius: 6px;
+  background: var(--panel2); color: var(--text); font: inherit; font-size: 12px; text-align: left; cursor: pointer; font-variant-numeric: tabular-nums; }
+.pf-strip:hover { border-color: #33414f; }
+.pf-strip .k { font-size: 10px; text-transform: uppercase; letter-spacing: 0.07em; color: var(--dim); }
+.pf-strip.ok { box-shadow: inset 3px 0 0 var(--ok); } .pf-strip.warn { box-shadow: inset 3px 0 0 var(--warn); } .pf-strip.bad { box-shadow: inset 3px 0 0 var(--bad); }
+.dens.tick .bars i { background: color-mix(in srgb, var(--accent) 55%, transparent); }
+.dens.tick .bars i.ok { background: color-mix(in srgb, var(--ok) 60%, transparent); }
+.dens.tick .bars i.warn { background: var(--warn); }
+.dens.tick .bars i.bad { background: var(--bad); }
+
 @media (max-width: 1180px) {
   .wb { grid-template-columns: 230px minmax(0, 1fr) 320px; }
   .tr-bottom { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }

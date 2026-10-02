@@ -35,6 +35,7 @@ const capabilities = require("../core/capabilities");
 const worlds = require("../core/worlds");
 const scenarioTools = require("../core/scenario");
 const frameTools = require("../core/frames");
+const perfTools = require("../core/perf");
 const actionTools = require("../core/actions");
 const loadoutTools = require("../core/loadout");
 const recipeTools = require("../core/recipes");
@@ -69,7 +70,7 @@ const MANAGED = MODE === "managed";
 const AUTO = MODE === "auto";
 
 const BOOLEAN_FLAGS = new Set(["all", "json", "any-pid", "force", "fresh", "no-market", "no-log", "help",
-  "check", "keep-up", "positions", "once", "serve", "offline", "dry-run", ...REGISTRY.booleanFlags]);
+  "check", "keep-up", "positions", "once", "serve", "offline", "dry-run", "profile", "perf", "now", ...REGISTRY.booleanFlags]);
 
 class CliError extends Error {}
 
@@ -514,7 +515,7 @@ function createLogTailer({ file, pid, pattern, keep, onEvent }) {
 // (a scenario step) to the same timeline. Resolves once the bridge has
 // accepted the watch; `ended` resolves with { reason, error } when it stops.
 async function openWatch(state, handshake, { forSeconds, everySeconds, offGridEverySeconds, client, divergeMeters,
-  positions = false, log = true, grep, runDir, print = (line) => console.log(line), onEvent = () => {} }) {
+  positions = false, perfEverySeconds = 0, log = true, grep, runDir, print = (line) => console.log(line), onEvent = () => {} }) {
   fs.mkdirSync(runDir, { recursive: true });
   const timelinePath = path.join(runDir, "timeline.jsonl");
   const out = fs.openSync(timelinePath, "a");
@@ -560,7 +561,7 @@ async function openWatch(state, handshake, { forSeconds, everySeconds, offGridEv
       method: "POST",
       headers: { authorization: `Bearer ${handshake.token}`, "content-type": "application/json" },
       body: JSON.stringify({ characterID: state.characterID, forSeconds, everySeconds, offGridEverySeconds, client,
-        divergeMeters, positions: positions === true }),
+        divergeMeters, positions: positions === true, ...(perfEverySeconds ? { perfEverySeconds } : {}) }),
       signal: AbortSignal.any([controller.signal, AbortSignal.timeout((forSeconds + 120) * 1000)]),
     });
     if (!response.ok) {
@@ -615,6 +616,14 @@ async function openWatch(state, handshake, { forSeconds, everySeconds, offGridEv
   };
 }
 
+// --perf: a PERF window every 5 s; --perf-every N sets the window and implies --perf.
+function perfEveryFrom(flags) {
+  if (flags["perf-every"] === undefined) return flags.perf ? 5 : 0;
+  const seconds = Number(flags["perf-every"]);
+  if (!(seconds >= 1 && seconds <= 60)) throw new CliError("--perf-every takes seconds from 1 through 60");
+  return seconds;
+}
+
 async function cmdWatch(flags) {
   const state = requireLogin(readState());
   const handshake = requireHandshake();
@@ -630,9 +639,10 @@ async function cmdWatch(flags) {
   const divergeMeters = flags["diverge-meters"] === undefined ? undefined : Number(flags["diverge-meters"]);
   if (divergeMeters !== undefined && !(divergeMeters > 0)) throw new CliError("--diverge-meters takes a positive number");
   const runID = flags.run ? String(flags.run).replace(/[^A-Za-z0-9._-]/g, "_") : `${runStamp(Date.now())}-watch`;
+  const perfEverySeconds = perfEveryFrom(flags);
 
   const watch = await openWatch(state, handshake, {
-    forSeconds, everySeconds, offGridEverySeconds, client, divergeMeters,
+    forSeconds, everySeconds, offGridEverySeconds, client, divergeMeters, perfEverySeconds,
     // Positions feed the viewer (e2e view); a run always records them.
     positions: Boolean(flags.positions),
     log: !flags["no-log"],
@@ -927,6 +937,8 @@ function upFlagsFor(up) {
   const flags = {
     "no-market": up.market ? undefined : true,
     timeout: up.timeout || undefined,
+    profile: up.profile ? true : undefined,
+    "profile-every": up.profile && up.profileEvery ? up.profileEvery : undefined,
   };
   for (const flag of REGISTRY.upFlags) {
     const value = up[flag.key];
@@ -945,7 +957,8 @@ function printScenario(file, scenario) {
   for (const step of scenario.setup) console.log(`  step   ${scenarioTools.describeStep(step, REGISTRY)}`);
   for (const step of scenario.during) console.log(`  during ${scenarioTools.describeStep(step, REGISTRY)}`);
   console.log(`  watch  every ${scenario.watch.every}s, off grid every ${scenario.watch.offgridEvery}s, ` +
-    `client ${scenario.watch.client}${scenario.watch.log ? "" : ", no log"}`);
+    `client ${scenario.watch.client}${scenario.watch.log ? "" : ", no log"}` +
+    `${scenario.watch.perf ? `, perf every ${scenario.watch.perf}s` : ""}`);
   for (const condition of scenario.until.any) console.log(`  until  ${condition.text}`);
   if (scenario.until.any.length) {
     console.log(`  until  matched ${scenario.until.from === "start" ? "from the watch's start, setup included" : "after setup ends"}`);
@@ -1025,6 +1038,10 @@ async function cmdRun(positionals, flags) {
         console.log(`run: ${AUTO ? "auto mode found the server up" : "attach mode"}: scenario world ${loaded.world} ` +
           "and its up options are not applied; " +
           `running on the live server, pid ${running.pid}, and leaving it up`);
+        if (loaded.up.profile && !(running.profiler && running.profiler.enabled)) {
+          console.log("run: the scenario asks for the tick profiler, and the live server runs without it, so no PROFILE " +
+            "lines will come. Start the server with EVEJS_TICK_PROFILE=1, or `e2e down` and let the run boot its own.");
+        }
       },
     step: runScenarioStep,
     startWatch: (onEvent) => openWatch(requireLogin(readState()), requireHandshake(), {
@@ -1035,6 +1052,7 @@ async function cmdRun(positionals, flags) {
       client: scenario.watch.client,
       divergeMeters: scenario.watch.divergeMeters || undefined,
       positions: true,
+      perfEverySeconds: scenario.watch.perf || 0,
       log: scenario.watch.log,
       grep: scenario.watch.grep === null ? undefined : scenario.watch.grep,
       runDir,
@@ -1296,6 +1314,22 @@ function describePorts(ports) {
 // { values: { key: value }, env, restore: { key: value } }. A number flag sets
 // its environment variable for the server; a bool flag goes to the plugins'
 // world restore.
+// --profile boots the tree's tick profiler (EVEJS_TICK_PROFILE=1), one window
+// every --profile-every ticks (default 50, 5 s at 10 Hz). -> { everyTicks } or null.
+function profileFrom(flags) {
+  if (flags["profile-every"] !== undefined && !flags.profile) throw new CliError("--profile-every sets the profiler's window; add --profile");
+  if (!flags.profile) return null;
+  const everyTicks = flags["profile-every"] === undefined ? scenarioTools.PROFILE_EVERY_TICKS : Number(flags["profile-every"]);
+  if (!(Number.isInteger(everyTicks) && everyTicks >= 1 && everyTicks <= 10000)) {
+    throw new CliError("--profile-every takes ticks from 1 through 10000 (10 ticks a second)");
+  }
+  return { everyTicks };
+}
+
+function profileEnvironment(profile) {
+  return profile ? { EVEJS_TICK_PROFILE: "1", EVEJS_TICK_PROFILE_EVERY: String(profile.everyTicks) } : {};
+}
+
 function upOptions(flags) {
   const values = {};
   const env = {};
@@ -1321,10 +1355,15 @@ function upOptions(flags) {
 
 async function cmdUp(flags) {
   requireManaged("up");
+  const profile = profileFrom(flags);
   const running = readHandshake();
   if (running && await bridgeReady(running)) {
     console.log(`already up: pid ${running.pid}, ${describePorts(activePorts())}` +
       `${AUTO && startedElsewhere(running) ? "; you started it, and auto mode attaches to it" : ""}`);
+    if (profile && !(running.profiler && running.profiler.enabled)) {
+      console.log("note: it runs without the tick profiler, so e2e perf and PERF lines have tick figures but no " +
+        "per-subsystem breakdown. `e2e down`, then `e2e up --profile`.");
+    }
     return;
   }
   if (flags.world && flags.fresh) throw new CliError("--world and --fresh both choose the world; pass one");
@@ -1393,8 +1432,8 @@ async function cmdUp(flags) {
   const child = spawn(process.execPath, serverStartArgs(), {
     cwd: CONFIG.serverDir,
     // The data dir as the config resolved it, so the server and this CLI agree.
-    env: { ...process.env, ...serverEnvironment(ports, LISTENERS), ...options.env, EVEJS_GAMESTORE_DATA_DIR: CONFIG.dataDir,
-      EVEJS_AGENT_BRIDGE: "1" },
+    env: { ...process.env, ...serverEnvironment(ports, LISTENERS), ...options.env, ...profileEnvironment(profile),
+      EVEJS_GAMESTORE_DATA_DIR: CONFIG.dataDir, EVEJS_AGENT_BRIDGE: "1" },
     detached: true,
     stdio: ["ignore", out, out],
     windowsHide: true,
@@ -1408,6 +1447,7 @@ async function cmdUp(flags) {
     ports,
     world: flags.world ? `saved ${flags.world}` : flags.fresh ? "fresh" : "kept",
     options: Object.keys(options.values).length ? options.values : null,
+    profile,
     startedAtMs,
     readyAtMs: null,
     bootSeconds: null,
@@ -1433,6 +1473,10 @@ async function cmdUp(flags) {
       run.bootSeconds = Number(((run.readyAtMs - startedAtMs) / 1000).toFixed(1));
       writeRun(run);
       console.log(`up in ${run.bootSeconds}s: pid ${child.pid}, world ${run.world}, ${describePorts(ports)}`);
+      if (profile) {
+        console.log(`tick profiler on: a window every ${profile.everyTicks} ticks (${profile.everyTicks / 10} s at 10 Hz); ` +
+          "`e2e perf` reads it, and a watch with --perf streams it");
+      }
       for (const upNote of REGISTRY.upNotes) {
         try {
           const note = upNote(options.values);
@@ -1895,6 +1939,36 @@ function describePlugins() {
     `${REGISTRY.warnings.length ? `\nplugin warnings: ${REGISTRY.warnings.join("; ")}` : ""}`;
 }
 
+// e2e perf: how the server's ticks are doing. Samples --for seconds (default
+// 10) through POST /perf; --now reads the ticks the runtime holds (about 12 s)
+// at once, without CPU or loop delay. Needs a server, not a character.
+async function cmdPerf(flags) {
+  const handshake = requireHandshake();
+  let reply;
+  if (flags.now) {
+    if (flags.for !== undefined) throw new CliError("--now reads what the server holds; --for samples. Pass one.");
+    reply = await callBridge(handshake, "GET", "/perf");
+  } else {
+    const seconds = flags.for === undefined ? 10 : Number(flags.for);
+    if (!(seconds >= 1 && seconds <= 600)) throw new CliError("--for takes seconds from 1 through 600");
+    if (!flags.json) console.log(`sampling the server's ticks for ${seconds} s...`);
+    const { status, json } = await requestJSON(`http://${handshake.host}:${handshake.port}/perf`, {
+      method: "POST",
+      body: { seconds },
+      headers: { authorization: `Bearer ${handshake.token}` },
+      timeoutMs: (seconds + 30) * 1000,
+    });
+    if (status >= 400 || json.ok === false) throw new CliError(`bridge /perf: ${json.error || `HTTP ${status}`}`);
+    reply = json;
+  }
+  if (flags.json) {
+    const { ok: _ok, ...body } = reply;
+    console.log(JSON.stringify(body, null, 2));
+    return;
+  }
+  console.log(perfTools.formatPerf(reply));
+}
+
 async function cmdStatus() {
   const run = readRun();
   const handshake = readHandshake();
@@ -1917,6 +1991,11 @@ async function cmdStatus() {
   console.log(handshake
     ? `agent bridge :${handshake.port}  pid ${handshake.pid}  started ${new Date(handshake.startedAtMs).toISOString()}`
     : "agent bridge  none from this tree");
+  if (handshake && handshake.profiler) {
+    console.log(handshake.profiler.enabled
+      ? `tick profiler on: a window every ${handshake.profiler.everyTicks} ticks (e2e perf)`
+      : "tick profiler off (e2e perf has tick figures only; e2e up --profile for the breakdown)");
+  }
   console.log(run && run.marketPid && pidAlive(run.marketPid)
     ? `market pid ${run.marketPid}  ${marketUp ? "ready" : "not answering"}`
     : `market  ${marketUp ? "answering, not started by e2e up" : "down"}`);
@@ -1931,7 +2010,7 @@ async function cmdStatus() {
 
 function upUsage() {
   const plugin = REGISTRY.upFlags.map((flag) => (flag.type === "bool" ? `[--${flag.flag}]` : `[--${flag.flag} ${flag.min}-${flag.max}]`));
-  return [`up [--world <name> | --fresh] [--no-market] [--timeout 600]${plugin.length ? ` ${plugin.join(" ")}` : ""}`];
+  return [`up [--world <name> | --fresh] [--no-market] [--timeout 600] [--profile [--profile-every 50]]${plugin.length ? ` ${plugin.join(" ")}` : ""}`];
 }
 
 // name -> { usage: [lines], run(positionals, flags) }. Plugin commands
@@ -1990,7 +2069,7 @@ const CORE_COMMANDS = {
   grid: { usage: ["grid [--range 10000] [--all] [--json]"], run: (_positionals, flags) => cmdGrid(flags) },
   watch: {
     usage: ["watch [--for 600] [--every 2] [--offgrid-every 5] [--grep <regex>] [--no-log] [--json] [--run <id>]",
-      "      [--client all|fx|diverge|off] [--diverge-meters 5000] [--positions]"],
+      "      [--client all|fx|diverge|off] [--diverge-meters 5000] [--positions] [--perf [--perf-every 5]]"],
     run: (_positionals, flags) => cmdWatch(flags),
   },
   act: {
@@ -2006,6 +2085,7 @@ const CORE_COMMANDS = {
   },
   run: { usage: ["run [<scenario>] [--check] [--run <id>] [--world <name>|fresh] [--keep-up]"], run: cmdRun },
   log: { usage: ["log [--grep NpcController] [--lines 40] [--any-pid]"], run: (_positionals, flags) => cmdLog(flags) },
+  perf: { usage: ["perf [--for 10] [--now] [--json]"], run: (_positionals, flags) => cmdPerf(flags) },
   help: { usage: ["help"], run: () => { console.log(helpText()); } },
 };
 

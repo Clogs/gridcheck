@@ -48,7 +48,7 @@ const MODE_TEXT = Object.freeze({
 
 // The core's instructions, then each plugin's primer.
 function instructions(registry = REGISTRY) {
-  const upKeys = ["market", "timeout", ...registry.upFlags.map((flag) => flag.key)].join(", ");
+  const upKeys = ["market", "timeout", "profile", "profileEvery", ...registry.upFlags.map((flag) => flag.key)].join(", ");
   const pluginSteps = Object.keys(registry.steps);
   const kinds = kindsOf(registry).filter((kind) => !["CLIENT", "FX", "DIVERGE"].includes(kind)).join(" ");
   const pluginTools = registry.mcpTools.map((tool) => tool.name);
@@ -71,9 +71,11 @@ To verify a feature, write a scenario and run it (e2e_run_scenario). A scenario 
 - Conditions: KIND then field tests. Kinds: ${kinds}, and CLIENT (needs "watch": { "client": "all" }), FX (needs "client": "fx" or "all") and DIVERGE. Tests: field=value, field!=value, field~regex, field>=N (also > < <=), bare field (set), !field (unset). Units: 30km, 90s, 5min. "self" = about your ship. $name = IDs a step bound with "as". A field is looked up on the event, then one level down. Field names are the ones e2e_watch with json:true prints; a check lists a kind's fields when you name a wrong one.
 Write the file with e2e_run_scenario { name, scenario, check: true } first: that validates without booting. save:true writes it to ${relativePath(TREE_SCENARIO_DIR)}/ to commit with the feature; otherwise it goes to ${relativePath(DRAFT_DIR)}/.
 
+Performance: how the server copes with a load. The bridge reads every tick's duration from the runtime (no flag needed); a server booted with the tick profiler (e2e_up { profile: true }, or "up": { "profile": true } in a scenario) also breaks each window down by subsystem (npc, drone, movement and so on). By hand: e2e_up { profile: true }, e2e_login, e2e_undock, e2e_perf { seconds: 10 } for a baseline, e2e_slash "/npctest2 20" (20 NPCs fighting each other; "/npc 20" spawns 20 that attack you), then e2e_perf { seconds: 30 } under load, and compare. In a scenario, "up": { "profile": true } streams PERF (a window of ticks every 5 s: tickAvgMs, tickP95Ms, tickP99Ms, tickMaxMs, overBudget, loopP99Ms, cpuPct, heapMB, entities) and PROFILE (sections with msPerTick) into the timeline; the report splits the ticks at each setup step, so the time before a spawn is the baseline for the time after it. Expect a budget like "no PERF tickP99Ms>=100" (a tick is due every 100 ms). The perf-npc-load scenario does all of this.
+
 Runs take minutes (boot about 25 s, then real-time grid behaviour). wait:false starts one in the background; e2e_report { run, waitSeconds } waits for it and reads the verdict. e2e_report { run, section: "pr" } gives the markdown to cite the run in a PR description.
 
-By hand: e2e_up { world }, e2e_login, e2e_undock, e2e_loadout, e2e_grid, e2e_act, e2e_watch { seconds }, e2e_slash, e2e_teleport, e2e_log, e2e_down${pluginTools.length ? `, and the plugins' ${pluginTools.join(", ")}` : ""}. A person can replay any run, or follow a live one, in the viewer: \`node tools/evejs-e2e/bin/e2e.js view [<run>]\` prints its URL. Calling e2e_watch and an action in the same turn lets you see its effect. Replies are the CLI's own output, so a message naming a command such as \`e2e login\` means the tool e2e_login.`;
+By hand: e2e_up { world }, e2e_login, e2e_undock, e2e_loadout, e2e_grid, e2e_act, e2e_watch { seconds }, e2e_slash, e2e_teleport, e2e_log, e2e_perf, e2e_down${pluginTools.length ? `, and the plugins' ${pluginTools.join(", ")}` : ""}. A person can replay any run, or follow a live one, in the viewer: \`node tools/evejs-e2e/bin/e2e.js view [<run>]\` prints its URL. Calling e2e_watch and an action in the same turn lets you see its effect. Replies are the CLI's own output, so a message naming a command such as \`e2e login\` means the tool e2e_login.`;
   return [core, ...registry.primers.map((primer) => primer.text)].join("\n\n");
 }
 
@@ -212,6 +214,8 @@ const CLI_ARGS = {
     flag("fresh", p.fresh);
     flag("no-market", p.market === false);
     for (const upFlag of REGISTRY.upFlags) flag(upFlag.flag, p[upFlag.key]);
+    flag("profile", p.profile);
+    flag("profile-every", p.profile ? p.profileEvery : undefined);
     flag("timeout", p.timeout);
     return args;
   },
@@ -254,7 +258,16 @@ const CLI_ARGS = {
     flag("client", p.client);
     flag("diverge-meters", p.divergeMeters);
     flag("positions", p.positions);
+    flag("perf", p.perf && p.perfEvery === undefined);
+    flag("perf-every", p.perfEvery);
     flag("run", p.run);
+    flag("json", p.json);
+    return args;
+  },
+  e2e_perf(p) {
+    const { args, flag } = argList("perf");
+    flag("for", p.now ? undefined : p.seconds);
+    flag("now", p.now);
     flag("json", p.json);
     return args;
   },
@@ -545,6 +558,9 @@ const TOOLS = [
       ...Object.fromEntries(REGISTRY.upFlags.map((flag) => [flag.key, flag.type === "bool"
         ? bool(flag.description || `--${flag.flag}`)
         : num(flag.description || `--${flag.flag}`, { minimum: flag.min, maximum: flag.max })])),
+      profile: bool("Boot with the tree's tick profiler (EVEJS_TICK_PROFILE=1), so e2e_perf and a watch with perf " +
+        "break each window of ticks down by subsystem. Tick durations need no profiler."),
+      profileEvery: int("With profile: ticks per profiler window (default 50, 5 s at 10 Hz).", { minimum: 1, maximum: 10000 }),
       timeout: int("Seconds to wait for boot (default 600).", { minimum: 10 }),
     }),
     run: simple("e2e_up"),
@@ -630,8 +646,25 @@ const TOOLS = [
       log: bool("Include server log lines (default true)."),
       json: bool("Print events as JSON lines, with the field names scenario conditions use."),
       run: str("Run ID for the timeline directory (default: the start time)."),
+      perf: bool("Add a PERF line every 5 s (the server's tick times, loop delay, CPU, heap), and the tick profiler's " +
+        "PROFILE lines when the server runs it."),
+      perfEvery: int("Seconds per PERF window (default 5); implies perf.", { minimum: 1, maximum: 60 }),
     }),
     run: simple("e2e_watch"),
+  },
+  {
+    name: "e2e_perf",
+    description: "How the server's ticks are doing: samples for some seconds, then gives tick duration (average, p50, " +
+      "p95, p99, max) against the 100 ms budget, how many ticks ran over it, event-loop delay, CPU and heap, the busiest " +
+      "scenes, and, when the server was booted with the tick profiler (e2e_up { profile: true }), the cost of each " +
+      "subsystem per tick. Needs a server up, not a character. Take one before a load (e2e_slash \"/npctest2 20\") and " +
+      "one during it, and compare.",
+    inputSchema: schema({
+      seconds: int("How long to sample (default 10).", { minimum: 1, maximum: 600 }),
+      now: bool("Read the last ticks the server holds (about 12 s) at once, without CPU or loop delay."),
+      json: bool("The bridge's reply as JSON, with every tick's duration."),
+    }),
+    run: simple("e2e_perf"),
   },
   {
     name: "e2e_act",

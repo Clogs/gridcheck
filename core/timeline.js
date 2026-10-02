@@ -6,6 +6,7 @@
 // kinds are formatted by their plugin (core/plugins.js registry.formatters).
 
 const { formatDistance } = require("./format");
+const { perfLine, profileLine } = require("./perf");
 const { defaultRegistry, extOf } = require("./plugins");
 
 const KIND_WIDTH = 10;
@@ -138,7 +139,13 @@ function eventBody(event, registry) {
     case "START":
       return [`character ${event.characterID}, ${Math.round(event.forMs / 1000)}s, sample every ` +
         `${event.everyMs / 1000}s, off grid every ${event.offGridEveryMs / 1000}s`,
-      event.clientOff ? `client=off (${event.clientOff})` : event.clientMode ? `client=${event.clientMode}` : ""];
+      [event.clientOff ? `client=off (${event.clientOff})` : event.clientMode ? `client=${event.clientMode}` : "",
+        event.perf ? `perf every ${event.perf.everyMs / 1000}s, profiler ${event.perf.profiler ? `on (${event.perf.everyTicks} ticks)` : "off"}` : ""]
+        .filter(Boolean).join(", ")];
+    case "PERF":
+      return perfLine(event);
+    case "PROFILE":
+      return profileLine(event);
     case "CLIENT":
       return clientBody(event);
     case "FX":

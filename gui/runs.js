@@ -32,7 +32,7 @@
     neutral: "#7d8b9a", weapon: "#f0a848", div: "#a48bf0", dim: "#5b6b7c",
     others: ["#e8845a", "#ef7fbf", "#9fd36b", "#5fa8d3", "#c79bf2", "#d8b46a"],
   };
-  const ITABS = [["summary", "Summary"], ["expect", "Expectations"], ["frames", "Frames"], ["report", "Report"], ["facts", "Facts"]];
+  const ITABS = [["summary", "Summary"], ["expect", "Expectations"], ["perf", "Perf"], ["frames", "Frames"], ["report", "Report"], ["facts", "Facts"]];
 
   function el(name, attributes = {}) {
     const node = document.createElementNS(SVG, name);
@@ -73,7 +73,7 @@
       runs: [], nowMs: 0, runID: shell.params.get("run") || null, detail: null, model: R.createModel(),
       generation: 0, bytes: 0, result: null, mtimeMs: 0, runNowMs: 0, loading: false,
       at: null, playing: false, speed: 4, follow: true, zoom: "auto",
-      off: new Set(["CLIENT"]), grep: null,
+      off: new Set(["CLIENT", "PERF", "PROFILE"]), grep: null,
       view: ["workbench", "trace"].includes(shell.params.get("view")) ? shell.params.get("view") : (localStorage.getItem("e2eGuiView") || "workbench"),
       itab: "summary", selBall: null, selEvent: -1, win: null,
       openGroups: new Set(), closedGroups: new Set(), only: "all", filter: "",
@@ -741,6 +741,8 @@
         cell("On grid", "-", "", "x-ongrid");
         cell("Events", String([...state.model.counts.values()].reduce((a, b) => a + b, 0)), "", "x-events");
         body.append(tot);
+        const strip = perfStrip();
+        if (strip) body.append(strip);
         if (xs.length) {
           body.append(h("div", {}, h("div", { className: "shead" }, h("h2", { text: "Expectations" }), h("span", { className: "count", text: "click to seek" })),
             h("ul", { className: "xlist", id: "x-list" }, xs.map((x) => h("li", { "data-at": x.at === null ? "" : x.at, className: x.at === null ? "nowhen" : "",
@@ -769,6 +771,8 @@
           x.at !== null ? h("span", { className: "mono", text: `first ${R.offset(rel(x.at))}` }) : null,
           h("span", { className: "spacer" }),
           x.kind ? h("span", { className: `ek ${R.kindClass(x.kind)}`, text: x.kind }) : null)))));
+      } else if (state.itab === "perf") {
+        body.append(perfPanel());
       } else if (state.itab === "frames") {
         if (!frames.length) body.append(h("p", { className: "muted", text: "No frames: the run has no position samples." }));
         body.append(h("div", { className: "fgrid one" }, frames.map((frame) => frameFigure(frame))));
@@ -819,6 +823,224 @@
       return wrap;
     }
 
+    // ---------- server performance ----------
+
+    // The run's PERF and PROFILE lines, as the report reads them (core/perf.js,
+    // served as /gui/perf.js), recomputed when more of the timeline arrives.
+    const P = window.E2EPerf;
+    let perfCache = { version: -1, record: null, ticks: [] };
+    function perf() {
+      if (!P) return perfCache;
+      if (perfCache.version !== state.model.version) {
+        const record = P.perfRecord(state.model.events);
+        const ticks = record ? state.model.events.filter((event) => event.kind === "PERF").flatMap(P.ticksOf).sort((a, b) => a.atMs - b.atMs) : [];
+        perfCache = { version: state.model.version, record, ticks };
+      }
+      return perfCache;
+    }
+
+    const fmtMs = (value) => (value === null || value === undefined ? "-" : `${Number(value).toFixed(value >= 100 ? 0 : value >= 10 ? 1 : 2)} ms`);
+    // Green well inside the budget, amber past half of it, red over it.
+    const budgetClass = (value, budget) => (value === null || value === undefined ? "" : value > budget ? "bad" : value > budget / 2 ? "warn" : "ok");
+
+    function niceCeil(value) {
+      if (!(value > 0)) return 1;
+      const power = 10 ** Math.floor(Math.log10(value));
+      for (const step of [1, 2, 2.5, 5, 10]) if (step * power >= value) return step * power;
+      return 10 * power;
+    }
+
+    // Each tick's duration over the run: the worst tick per pixel column as a
+    // band, the average as a line, the budget dashed, the steps as markers.
+    function perfChart(record, ticks) {
+      const W = 352;
+      const H = 156;
+      const pad = { l: 34, r: 6, t: 10, b: 18 };
+      const pw = W - pad.l - pad.r;
+      const ph = H - pad.t - pad.b;
+      const o = record.overall;
+      const budget = record.budgetMs;
+      // Scaled to the run's own ticks, so a quiet run isn't a flat line under the budget.
+      const yMax = niceCeil(Math.max(o.tickP99Ms * 1.6, o.tickAvgMs * 3, Math.min(o.tickMaxMs, budget * 1.25), 1));
+      const from = t0();
+      const to = Math.max(tEnd(), from + 1000);
+      const x = (at) => pad.l + ((at - from) / (to - from)) * pw;
+      const y = (ms) => pad.t + ph - (Math.min(ms, yMax) / yMax) * ph;
+      const svg = el("svg", { viewBox: `0 0 ${W} ${H}`, className: "pf-chart", id: "pf-chart", role: "img", "aria-label": "Tick duration over the run" });
+      for (let i = 0; i <= 4; i += 1) {
+        const value = (yMax / 4) * i;
+        svg.append(el("line", { x1: pad.l, x2: W - pad.r, y1: y(value), y2: y(value), className: i ? "pf-grid" : "pf-axis" }));
+        const label = el("text", { x: pad.l - 4, y: y(value) + 3, className: "pf-yl", "text-anchor": "end" });
+        label.textContent = value >= 10 || value === 0 ? String(Math.round(value)) : value.toFixed(1);
+        svg.append(label);
+      }
+      const unit = el("text", { x: 2, y: pad.t - 2, className: "pf-yl" });
+      unit.textContent = "ms";
+      svg.append(unit);
+      const bins = Math.max(1, Math.floor(pw / 2));
+      const cols = Array.from({ length: bins }, () => ({ max: null, sum: 0, n: 0 }));
+      for (const tick of ticks) {
+        const index = Math.min(bins - 1, Math.max(0, Math.floor(((tick.atMs - from) / (to - from)) * bins)));
+        const col = cols[index];
+        col.max = col.max === null ? tick.ms : Math.max(col.max, tick.ms);
+        col.sum += tick.ms;
+        col.n += 1;
+      }
+      const colX = (index) => pad.l + ((index + 0.5) / bins) * pw;
+      let band = "";
+      let line = "";
+      cols.forEach((col, index) => {
+        if (!col.n) return;
+        band += `M${colX(index).toFixed(1)},${y(0).toFixed(1)}V${y(col.max).toFixed(1)}`;
+        line += `${line ? "L" : "M"}${colX(index).toFixed(1)},${y(col.sum / col.n).toFixed(1)}`;
+        if (col.max > budget) svg.append(el("rect", { x: colX(index) - 1, y: pad.t, width: 2, height: 3, className: "pf-over" }));
+      });
+      svg.append(el("path", { d: band, className: "pf-band" }));
+      svg.append(el("path", { d: line, className: "pf-avg" }));
+      if (budget <= yMax) {
+        svg.append(el("line", { x1: pad.l, x2: W - pad.r, y1: y(budget), y2: y(budget), className: "pf-budget" }));
+        const label = el("text", { x: W - pad.r - 2, y: y(budget) - 3, className: "pf-bl", "text-anchor": "end" });
+        label.textContent = `budget ${budget} ms`;
+        svg.append(label);
+      } else {
+        const label = el("text", { x: W - pad.r - 2, y: pad.t + 8, className: "pf-yl", "text-anchor": "end" });
+        label.textContent = `budget ${budget} ms is off the top`;
+        svg.append(label);
+      }
+      // Each setup and during step, numbered as in the phase table.
+      record.phases.forEach((phase, index) => {
+        if (!phase.step) return;
+        const px = x(phase.fromMs);
+        if (px < pad.l || px > W - pad.r) return;
+        const mark = el("g", { className: "pf-step" });
+        mark.append(el("line", { x1: px, x2: px, y1: pad.t, y2: pad.t + ph }), svgTitle(`${phase.label} at ${R.offset(rel(phase.fromMs))}`));
+        const label = el("text", { x: px + 2, y: H - 5 });
+        label.textContent = String(index);
+        mark.append(label);
+        svg.append(mark);
+      });
+      svg.append(el("line", { id: "pf-cur", className: "pf-cur", x1: pad.l, x2: pad.l, y1: pad.t, y2: pad.t + ph }));
+      svg.addEventListener("click", (event) => {
+        const rect = svg.getBoundingClientRect();
+        const fx = ((event.clientX - rect.left) / Math.max(1, rect.width)) * W;
+        seek(from + Math.min(1, Math.max(0, (fx - pad.l) / pw)) * (to - from));
+      });
+      svg.dataset.from = String(from);
+      svg.dataset.to = String(to);
+      return svg;
+    }
+
+    function perfPanel() {
+      const { record, ticks } = perf();
+      if (!record) {
+        return h("div", { className: "muted pf-none" },
+          h("p", { text: "This run has no PERF lines, so there are no tick figures." }),
+          h("p", {}, "A scenario records them with ", h("code", { text: "\"up\": { \"profile\": true }" }), " or ",
+            h("code", { text: "\"watch\": { \"perf\": true }" }), ", and a watch with ", h("code", { text: "--perf" }), "."));
+      }
+      const o = record.overall;
+      const budget = record.budgetMs;
+      const wrap = h("div", { className: "pf" });
+      const tot = h("div", { className: "mini-tot" });
+      const cell = (k, value, cls = "", title = null) => tot.append(h("div", { title }, h("span", { className: "k", text: k }), h("span", { className: `v ${cls}`, text: value })));
+      cell("Ticks", String(o.ticks), "", `${record.windows} windows of ticks${record.missedTicks ? `, ${record.missedTicks} ticks missed between samples` : ""}`);
+      cell("Avg", fmtMs(o.tickAvgMs), budgetClass(o.tickAvgMs, budget));
+      cell("p95", fmtMs(o.tickP95Ms), budgetClass(o.tickP95Ms, budget));
+      cell("p99", fmtMs(o.tickP99Ms), budgetClass(o.tickP99Ms, budget));
+      cell("Max", fmtMs(o.tickMaxMs), budgetClass(o.tickMaxMs, budget));
+      cell("Over budget", String(o.overBudget), o.overBudget ? "bad" : "ok", `ticks that took longer than the ${budget} ms a tick has`);
+      wrap.append(tot);
+
+      wrap.append(h("div", {}, h("div", { className: "shead" }, h("h2", { text: "Tick time" }),
+        h("span", { className: "count", text: "worst per column, average line; click to seek" })), perfChart(record, ticks)));
+
+      if (record.phases.length) {
+        const rows = record.phases.map((phase, index) => h("tr", { "data-from": phase.fromMs, "data-to": phase.toMs, title: `${phase.label}\nfrom ${R.offset(rel(phase.fromMs))}`,
+          onclick: () => seek(phase.fromMs) },
+        h("td", { className: "pn", text: String(index) }),
+        h("td", { className: "pl", text: phase.label.replace(/^after /, "") }),
+        h("td", { text: String(phase.ticks) }),
+        h("td", { className: budgetClass(phase.tickAvgMs, budget), text: fmtMs(phase.tickAvgMs).replace(" ms", "") }),
+        h("td", { className: budgetClass(phase.tickP95Ms, budget), text: fmtMs(phase.tickP95Ms).replace(" ms", "") }),
+        h("td", { className: budgetClass(phase.tickMaxMs, budget), text: fmtMs(phase.tickMaxMs).replace(" ms", "") }),
+        h("td", { className: phase.overBudget ? "bad" : "", text: String(phase.overBudget) })));
+        wrap.append(h("div", {}, h("div", { className: "shead" }, h("h2", { text: "Phases" }),
+          h("span", { className: "count", text: "each starts where a step ended" })),
+        h("table", { className: "pf-phases", id: "pf-phases" },
+          h("thead", {}, h("tr", {}, ["#", "After", "Ticks", "Avg", "p95", "Max", "Over"].map((title) => h("th", { text: title })))),
+          h("tbody", {}, rows))));
+      }
+
+      const proc = h("div", { className: "mini-tot" });
+      const pcell = (k, value, cls = "", title = null) => proc.append(h("div", { title }, h("span", { className: "k", text: k }), h("span", { className: `v ${cls}`, text: value })));
+      pcell("Loop p99", fmtMs(o.loopP99Ms), budgetClass(o.loopP99Ms, budget), "event-loop delay: how long a timer waited for the process to be free");
+      pcell("CPU", o.cpuPctMax === null ? "-" : `${Math.round(o.cpuPctMax)}%`, "", "the busiest window, as a share of one core");
+      pcell("Heap", o.heapMBMax === null ? "-" : `${Math.round(o.heapMBMax)} MB`, "", o.rssMBMax ? `rss up to ${Math.round(o.rssMBMax)} MB` : null);
+      pcell("Entities", o.entitiesMax === null ? "-" : String(o.entitiesMax), "", "the most at once, in every scene that ticked");
+      pcell("TiDi", o.tidiMin === null ? "-" : o.tidiMin < 1 ? String(o.tidiMin) : "none", o.tidiMin !== null && o.tidiMin < 1 ? "bad" : "", "the lowest time dilation any scene ran at");
+      pcell("Profiler", record.profile ? `${record.profile.windows} win` : record.profiler ? "on" : "off", record.profile ? "ok" : "");
+      wrap.append(h("div", {}, h("div", { className: "shead" }, h("h2", { text: "Process" }), h("span", { className: "count", text: "worst window" })), proc));
+
+      const sub = h("div", {});
+      sub.append(h("div", { className: "shead" }, h("h2", { text: "Subsystems" }),
+        h("span", { className: "count", text: record.profile ? `${fmtMs(record.profile.totalMsPerTick)} a tick, ${record.profile.windows} profiler windows` : "tick profiler" })));
+      if (!record.profile) {
+        sub.append(h("p", { className: "muted" }, "The server ran without the tick profiler. Boot it with ", h("code", { text: "e2e up --profile" }),
+          ", or give the scenario ", h("code", { text: "\"up\": { \"profile\": true }" }), ", to see where each tick goes."));
+      } else {
+        const rows = record.profile.sections.slice(0, 14);
+        const top = Math.max(...rows.map((row) => row.msPerTick), 0.001);
+        const list = h("ul", { className: "pf-bars" });
+        for (const row of rows) {
+          const kind = row.afterTick ? "after" : row.nested ? "nested" : P.isRemainder(row.label) ? "rest" : "top";
+          const fill = h("i");
+          fill.style.width = `${Math.max(0.5, (Math.max(0, row.msPerTick) / top) * 100).toFixed(1)}%`;
+          list.append(h("li", { className: kind, title: `${row.label}${row.afterTick ? " (after the tick)" : ""}: ${row.msPerTick} ms a tick` +
+            `${row.pct !== null ? `, ${row.pct}% of it` : ""}${row.calls ? `, ${row.calls} calls${row.msPerCall !== null ? `, ${row.msPerCall} ms each` : ""}` : ""}` +
+            `${row.nested ? "\ninside the row above, so it doesn't add to the total" : ""}` },
+          h("span", { className: "pf-lab", text: `${row.nested ? "↳ " : ""}${row.label}` }),
+          h("span", { className: "pf-bar" }, fill),
+          h("span", { className: "pf-val", text: fmtMs(row.msPerTick).replace(" ms", "") }),
+          h("span", { className: "pf-pct", text: row.pct === null ? "--" : `${Math.round(row.pct)}%` })));
+        }
+        sub.append(list);
+      }
+      wrap.append(sub);
+      return wrap;
+    }
+
+    // The Summary tab's one line about the server, when the run has PERF lines.
+    function perfStrip() {
+      const { record } = perf();
+      if (!record) return null;
+      const o = record.overall;
+      return h("button", { type: "button", className: `pf-strip ${budgetClass(o.tickP99Ms, record.budgetMs)}`, onclick: () => { state.itab = "perf"; renderInspector(); } },
+        h("span", { className: "k", text: "Server tick" }),
+        h("span", { text: `p99 ${fmtMs(o.tickP99Ms)} · max ${fmtMs(o.tickMaxMs)} · ${o.overBudget} over ${record.budgetMs} ms` }),
+        h("span", { className: "spacer" }), h("span", { className: "muted", text: "Perf ›" }));
+    }
+
+    function renderPerfCursor() {
+      const svg = $("pf-chart");
+      const cur = $("pf-cur");
+      if (svg && cur && state.at !== null) {
+        const from = Number(svg.dataset.from);
+        const to = Number(svg.dataset.to);
+        const f = Math.min(1, Math.max(0, (state.at - from) / Math.max(1, to - from)));
+        const px = 34 + f * (352 - 34 - 6);
+        cur.setAttribute("x1", px.toFixed(1));
+        cur.setAttribute("x2", px.toFixed(1));
+      }
+      const table = $("pf-phases");
+      if (table) {
+        for (const row of table.tBodies[0].rows) {
+          const from = Number(row.dataset.from);
+          const to = Number(row.dataset.to);
+          row.classList.toggle("cur", state.at !== null && state.at >= from && state.at < to);
+        }
+      }
+    }
+
     function selectedBall(frame) {
       if (!frame) return null;
       const byID = new Map(frame.balls.map((ball) => [String(ball.id), ball]));
@@ -830,6 +1052,7 @@
 
     function renderInspectorCursor() {
       if (state.view !== "workbench" || !state.runID) return;
+      renderPerfCursor();
       const list = $("x-list");
       if (list) {
         let currentAt = -Infinity;
@@ -1044,6 +1267,30 @@
         }
         const area = h("div", { className: "tr-area" }, bars);
         box.append(trRow("dens", h("b", { text: "Log lines" }), `${logs.length} · per ${R.seconds((v1 - v0) / bins)}`, area));
+      }
+      // Server tick time: the worst tick per column, red over the budget.
+      const { record: perfRecord, ticks: perfTicks } = perf();
+      if (perfRecord && perfTicks.length) {
+        const bins = 160;
+        const worst = new Array(bins).fill(null);
+        for (const tick of perfTicks) {
+          const p = pct(tick.atMs);
+          if (p < 0 || p > 100) continue;
+          const index = Math.min(bins - 1, Math.floor((p / 100) * bins));
+          worst[index] = worst[index] === null ? tick.ms : Math.max(worst[index], tick.ms);
+        }
+        const o = perfRecord.overall;
+        const scale = niceCeil(Math.max(o.tickP99Ms * 1.6, o.tickAvgMs * 3, 1));
+        const bars = h("div", { className: "bars" });
+        const binMs = (v1 - v0) / bins;
+        worst.forEach((value, index) => {
+          const bar = h("i", { className: value === null ? "" : budgetClass(value, perfRecord.budgetMs),
+            title: value === null ? "" : `${R.offset(rel(v0 + index * binMs))}  worst tick ${fmtMs(value)}` });
+          bar.style.height = `${value === null ? 0 : Math.max(4, Math.min(100, (value / scale) * 100))}%`;
+          bars.append(bar);
+        });
+        const area = h("div", { className: "tr-area" }, bars);
+        box.append(trRow("dens tick", h("b", { text: "Server tick" }), `p99 ${fmtMs(o.tickP99Ms)} · max ${fmtMs(o.tickMaxMs)} · scale ${scale} ms`, area));
       }
       const overlay = h("div", { className: "tr-overlay" }, h("div", { className: "tcursor", id: "tr-cursor" }, h("b", { id: "tr-cursor-t" })));
       box.append(overlay);

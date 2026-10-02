@@ -7,9 +7,13 @@
 //   GET  /health                     liveness, no token
 //   POST /slash    { characterID, command }  -> { handled, success, message }
 //   GET  /grid     ?characterID=      what that character's session can see
-//   POST /watch    { characterID, forSeconds, everySeconds, offGridEverySeconds, client, divergeMeters, positions }
+//   POST /watch    { characterID, forSeconds, everySeconds, offGridEverySeconds, client, divergeMeters, positions,
+//                    perfEverySeconds }
 //                                     NDJSON stream of grid changes and plugin events; one call per watch.
-//                                     client: "all" (default), "diverge" or "off"
+//                                     client: "all" (default), "diverge" or "off". perfEverySeconds adds a PERF
+//                                     window that often, and the tick profiler's PROFILE windows (perf.js)
+//   GET  /perf                        the server's last ticks, from the runtime's ring; no character needed
+//   POST /perf     { seconds }        sample that long, then the ticks, CPU, loop delay and profiler windows
 //   POST /tee      { characterID }    start keeping the client's view of that gateway session
 //   POST /loadout  { characterID, ship, modules, drones, cargo, charges }
 //                                     a new ship by item name, fitted and boarded (loadout.js)
@@ -21,6 +25,7 @@
 // plugin can't replace a core route.
 
 const { LIMITS } = require("./watch");
+const { LIMITS: PERF_LIMITS } = require("./perf");
 
 function toPositiveInt(value) {
   const numeric = Math.trunc(Number(value) || 0);
@@ -82,7 +87,7 @@ function createRouteTable(log) {
 
 function createAgentBridgeRoutes({
   findSession, executeChatCommand, readGrid, watcher, requestShutdown, log, destinyTee = null, gridAnnotate = null,
-  viewer = null, extraRoutes = [], capabilities = null, loadout = null,
+  viewer = null, extraRoutes = [], capabilities = null, loadout = null, perf = null,
 }) {
   const logger = log || { debug() {} };
 
@@ -170,6 +175,14 @@ function createAgentBridgeRoutes({
     if (divergeMeters !== null && !(divergeMeters > 0)) {
       return { statusCode: 400, body: { ok: false, error: "divergeMeters must be a positive number." } };
     }
+    const perfEverySeconds = body.perfEverySeconds === undefined || body.perfEverySeconds === null || body.perfEverySeconds === 0
+      ? 0 : secondsIn(body.perfEverySeconds, 5, 1, LIMITS.maxEverySeconds);
+    if (perfEverySeconds === null) {
+      return { statusCode: 400, body: { ok: false, error: `perfEverySeconds must be 1-${LIMITS.maxEverySeconds}, or 0 for none.` } };
+    }
+    if (perfEverySeconds && !perf) {
+      return { statusCode: 503, body: { ok: false, error: "This server has no perf monitor loaded." } };
+    }
     if (watcher.busy()) {
       return { statusCode: 429, body: { ok: false, error: `${LIMITS.maxConcurrent} watches are already running.` } };
     }
@@ -185,6 +198,7 @@ function createAgentBridgeRoutes({
         clientMode,
         divergeMeters,
         positions: body.positions === true,
+        perfEveryMs: perfEverySeconds * 1000,
       }, sink),
     };
   }
@@ -218,6 +232,19 @@ function createAgentBridgeRoutes({
     }
   }
 
+  // GET answers at once from the runtime's ring; POST samples for `seconds`.
+  function perfRoute(method, body) {
+    if (!perf) return { statusCode: 503, body: { ok: false, error: "This server has no perf monitor loaded." } };
+    if (method === "GET") return { statusCode: 200, body: { ok: true, ...perf.snapshot() } };
+    const seconds = secondsIn(body.seconds, 10, 1, PERF_LIMITS.maxSampleSeconds);
+    if (seconds === null) {
+      return { statusCode: 400, body: { ok: false, error: `seconds must be 1-${PERF_LIMITS.maxSampleSeconds}.` } };
+    }
+    return perf.sample(seconds).then((reply) => (reply.busy
+      ? { statusCode: 429, body: { ok: false, error: `${PERF_LIMITS.maxConcurrent} perf samples are already running.` } }
+      : { statusCode: 200, body: { ok: true, ...reply } }));
+  }
+
   function shutdown() {
     if (typeof requestShutdown !== "function") {
       return { statusCode: 503, body: { ok: false, error: "Shutdown is not available." } };
@@ -233,6 +260,8 @@ function createAgentBridgeRoutes({
   table.add("POST /tee", ({ body }) => tee(body), "core");
   table.add("POST /loadout", ({ body }) => buildLoadout(body), "core");
   table.add("POST /shutdown", () => shutdown(), "core");
+  table.add("GET /perf", () => perfRoute("GET", {}), "core");
+  table.add("POST /perf", ({ body }) => perfRoute("POST", body), "core");
   table.add("GET /capabilities", ({ query }) => {
     if (typeof capabilities !== "function") return { statusCode: 503, body: { ok: false, error: "Capabilities are not available." } };
     const id = toPositiveInt(query.characterID);

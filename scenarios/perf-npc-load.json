@@ -1,0 +1,18 @@
+{
+  "description": "How the server's tick copes with a fight. From the starter world's Tristan, undock, measure 15 s of ticks as a baseline, then spawn 20 NPCs that fight each other with stock /npctest2 and measure 60 s of the fight. Booted with the tick profiler, so the report breaks each tick down by subsystem.",
+  "recipe": "starter",
+  "up": { "profile": true },
+  "setup": [
+    "undock",
+    { "wait": 15, "note": "the baseline: one ship on grid" },
+    { "slash": "/npctest2 20", "note": "20 NPCs in a free-for-all; /npc 20 would spawn 20 that attack the ship instead" }
+  ],
+  "until": { "any": ["DESTROYED self"], "timeout": 60 },
+  "expect": [
+    { "match": "ARRIVE who=npc", "note": "the NPCs appear" },
+    { "match": "DAMAGE label!=self", "note": "and fight" },
+    { "match": "PERF ticks>=40", "note": "the watch read the server's ticks" },
+    { "match": "PROFILE totalMsPerTick>0", "note": "the tick profiler broke them down by subsystem" },
+    { "match": "no PERF tickP99Ms>=100", "note": "in every 5 s window, 99% of ticks fit the 100 ms a tick has" }
+  ]
+}

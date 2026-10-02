@@ -664,6 +664,7 @@ function createGridWatch({
   killmails = null,
   destinyTee = null,
   describeType = null,
+  perf = null,
   now = Date.now,
   perfNow = () => Number(process.hrtime.bigint()) / 1e6,
   wait = sleep,
@@ -680,15 +681,17 @@ function createGridWatch({
 
   async function run(options, sink) {
     active += 1;
+    const closers = [];
     try {
-      return await runWatch(options, sink);
+      return await runWatch(options, sink, closers);
     } finally {
       active -= 1;
+      for (const close of closers) safe(close);
     }
   }
 
   async function runWatch({ characterID, forMs, everyMs, offGridEveryMs, clientMode = "all", divergeMeters = null,
-    positions = false }, sink) {
+    positions = false, perfEveryMs = 0 }, sink, closers = []) {
     const startedAtMs = now();
     let seq = 0;
     const emit = (event) => {
@@ -743,9 +746,24 @@ function createGridWatch({
       ? createClientWatch({ tee: destinyTee, differ, describeType, clientMode, divergeMeters, emit })
       : null;
 
+    // Tick figures from the runtime's own ring, a window every perfEveryMs, and
+    // each profiler window as it ends (bridge/perf.js).
+    const sampler = perf && perfEveryMs > 0 ? perf.createSampler() : null;
+    if (sampler) closers.push(() => sampler.close());
+    let lastPerfAtMs = now();
+    const emitPerf = (atMs) => {
+      for (const { id: _id, atMs: profileAtMs, ...profile } of sampler.profiles()) {
+        emit({ kind: "PROFILE", atMs: profileAtMs, ...profile });
+      }
+      const ticks = sampler.window();
+      if (ticks.ticks || ticks.missedTicks) emit({ kind: "PERF", atMs, ...ticks });
+      lastPerfAtMs = atMs;
+    };
+
     emit({ kind: "START", characterID, forMs, everyMs, offGridEveryMs, clientMode: client ? clientMode : "off",
       ...(destinyTee && destinyTee.off && clientMode !== "off" ? { clientOff: destinyTee.off } : {}),
-      positions: positions === true });
+      positions: positions === true,
+      ...(sampler ? { perf: { everyMs: perfEveryMs, profiler: perf.profiler.enabled, everyTicks: perf.profiler.everyTicks } } : {}) });
     for (;;) {
       if (sink.closed()) { reason = "client-closed"; break; }
       const session = findSession(characterID);
@@ -810,9 +828,15 @@ function createGridWatch({
         costs.offGridMsMax = Math.max(costs.offGridMsMax, scanMs);
       }
 
+      if (sampler) {
+        sampler.take();
+        if (atMs - lastPerfAtMs >= perfEveryMs) emitPerf(atMs);
+      }
+
       if (now() - startedAtMs >= forMs) break;
       await wait(Math.max(0, everyMs - (perfNow() - sampleStart)));
     }
+    if (sampler) emitPerf(now());
     emit({
       kind: "END",
       reason,

@@ -431,7 +431,7 @@ test("/watch validates, refuses when busy, and hands the HTTP layer a stream", (
   assert.strictEqual(typeof accepted.stream, "function");
   accepted.stream(sink());
   assert.deepStrictEqual(calls[0], { characterID: 7, forMs: 30_000, everyMs: 2000, offGridEveryMs: 5000,
-    clientMode: "all", divergeMeters: null, positions: false });
+    clientMode: "all", divergeMeters: null, positions: false, perfEveryMs: 0 });
   busy = true;
   assert.strictEqual(routes.handle("POST", "/watch", {}, { characterID: 7 }).statusCode, 429);
 });
