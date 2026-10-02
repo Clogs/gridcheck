@@ -492,22 +492,29 @@
   const listed = (items) => (items.length < 2 ? items.join("") : `${items.slice(0, -1).join(", ")} and ${items.at(-1)}`);
   const upper = (text) => text.charAt(0).toUpperCase() + text.slice(1);
 
-  function treeItem(tree) {
+  function treeItem(tree, vclass) {
     const dot = !tree.isTree ? "bad" : !tree.copy ? "off" : tree.up ? "warn" : "ok";
-    const facts = [tree.copy ? `e2e ${tree.copy.version || "?"}` : null, tree.mode].filter(Boolean).join(" \u00b7 ");
     const forget = tree.source === "added" ? h("button", { type: "button", className: "btn sm ghost forget", text: "Forget",
       title: "Take it off this list", onclick: (event) => { event.stopPropagation(); forgetTree(tree.id); } }) : null;
+    const hasRuns = tree.runs && tree.runs.total > 0;
     return h("li", { className: `${tree.id === state.treeID ? "sel" : ""}${tree.copy ? "" : " off"}`,
       title: SOURCES[tree.source] || tree.source, onclick: () => { state.tab = "install"; selectTree(tree.id); } },
       h("div", { className: "top" },
         h("i", { className: `tdot ${dot}`, title: !tree.isTree ? "not an EveJS tree" : !tree.copy ? "e2e isn't installed" : tree.up ? "server up" : "e2e installed" }),
         h("b", { text: tree.name }),
-        tree.evejs ? h("span", { className: "ver", text: `EveJS ${tree.evejs}`, title: "From the tree's server/package.json" }) : null),
+        evejsPill(tree, vclass)),
       h("div", { className: "path", text: tree.root }),
-      facts || tree.up || forget ? h("div", { className: "facts" }, facts, tree.up ? badge("warn", "server up") : null, forget) : null);
+      h("div", { className: "facts" },
+        e2ePill(tree),
+        tree.mode ? pill("mute", tree.mode, "e2e.config.json mode") : null,
+        tree.up ? pill("warn", "server up") : null,
+        hasRuns ? null : pill("mute", "no runs"),
+        forget),
+      hasRuns ? h("div", { className: "facts" }, runsCell(tree)) : null);
   }
 
   function renderTreeCards() {
+    const vclass = versionClasses();
     const box = $("trees");
     box.textContent = "";
     $("trees-count").textContent = state.trees.length ? String(state.trees.length) : "";
@@ -519,10 +526,10 @@
     }
     const needle = state.treeFilter.trim().toLowerCase();
     const shown = state.trees.filter((tree) => !needle || `${tree.name}\n${tree.root}`.toLowerCase().includes(needle));
-    for (const [label, trees] of [["Set up", shown.filter((tree) => tree.copy)], ["Not set up", shown.filter((tree) => !tree.copy)]]) {
+    for (const [label, cls, trees] of [["Set up", "ok", shown.filter((tree) => tree.copy)], ["Not set up", "warn", shown.filter((tree) => !tree.copy)]]) {
       if (!trees.length) continue;
-      box.append(h("div", { className: "group-label" }, label, h("span", { className: "count", text: `\u00b7 ${trees.length}` })),
-        h("ul", { className: "cards" }, trees.map(treeItem)));
+      box.append(h("div", { className: "group-label" }, label, pill(cls, String(trees.length))),
+        h("ul", { className: "cards" }, trees.map((tree) => treeItem(tree, vclass))));
     }
     if (!shown.length) box.append(h("p", { className: "none", text: `No tree matches "${state.treeFilter.trim()}".` }));
   }
