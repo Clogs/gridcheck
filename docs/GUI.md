@@ -13,6 +13,11 @@ node tools/evejs-e2e/bin/e2e.js gui        # from a tree's vendored copy: that t
 It prints a URL such as `http://127.0.0.1:52011/gui#token=<64 hex>` and runs until Ctrl-C.
 `--open` opens it in the default browser, and `--port N` fixes the port (default: a free one).
 
+On Windows, `OpenGui.bat` runs `e2e gui --open` from the folder it sits in, so double-click it in
+a checkout, or in a tree's `tools/evejs-e2e/` for that tree. It passes its arguments on
+(`OpenGui.bat --tree F:/EveJS-0.12.9`). It checks for Node 24 first. Closing its window stops the
+GUI, and the window stays open on an error so you can read it.
+
 ## Which trees
 
 Run from a checkout of this repo, the GUI manages any tree and vendors from that checkout's

@@ -64,7 +64,8 @@ node --max-old-space-size=8192 tools/DatabaseCreator/database-creator.js \
 node bin/e2e.js gui --tree F:/EveJS-0.12.9 --open
 ```
 
-Open the printed URL if no browser opens. Then, on the **Install** tab:
+On Windows, double-clicking `OpenGui.bat` in the checkout does the same without `--tree`: add the
+tree by its path on the Install tab. Open the printed URL if no browser opens. Then, on the **Install** tab:
 
 1. "Preview install", read what it will copy, then **Run**. That vendors this checkout into
    `tools/evejs-e2e/` and adds a one-file shim the server's loader finds.
