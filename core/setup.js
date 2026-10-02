@@ -5,7 +5,7 @@
 // the copy, write the config, connect the agents, apply the patches, build the
 // starter world, and run smoke-undock. A step already done is skipped, so
 // setup can run again after a fix. It stops at the first step that fails. The
-// GUI's "Set up everything" previews and runs this command.
+// GUI's "Do full setup for me" previews and runs this command.
 // Guide: docs/TREES.md "Setting a tree up".
 
 const fs = require("node:fs");
@@ -136,7 +136,9 @@ async function runSetup(options, io = defaultIO(), context = ownContext()) {
   const up = serverUpReason(tree, config);
   if (up) blockers.push(`${up}. Stop it first: \`gridcheck down\` if gridcheck started it, or close the server you started.`);
   for (const row of prerequisites(tree, config).filter((one) => !one.ok)) blockers.push(`${row.name} missing (${row.path}): ${row.fix}.`);
-  if (!context.vendored && !context.head) blockers.push(`${slashed(OWN_ROOT)} is not a git checkout, so it can't install itself; clone the tool and run setup from there.`);
+  if (!context.vendored && !context.head && !vendor.isFolderCopy(OWN_ROOT)) {
+    blockers.push(`${slashed(OWN_ROOT)} is neither a git checkout nor a Gridcheck folder, so it can't install itself; clone the tool and run setup from there.`);
+  }
 
   say(`setup ${label}${dryRun ? " (dry run: nothing is written)" : ""}`);
   if (blockers.length) {
@@ -178,7 +180,8 @@ async function runSetup(options, io = defaultIO(), context = ownContext()) {
 
   // 1. The copy.
   const check = hasCopy() ? vendor.checkVendored({ tree }) : null;
-  const current = check && check.ok && check.manifest && check.manifest.commit === context.head;
+  // From a folder there's no commit to match, so the install always runs; rewriting an identical copy is harmless.
+  const current = Boolean(context.head && check && check.ok && check.manifest && check.manifest.commit === context.head);
   if (!await step(1, "Install the tool into the tree", context.vendored
     ? { skip: "this is the tree's own copy; run setup from a checkout of the tool to update it" }
     : current ? { skip: `already installed at ${context.head.slice(0, 7)}, unchanged` }
@@ -267,7 +270,7 @@ async function runSetup(options, io = defaultIO(), context = ownContext()) {
 
   let smokePlan;
   if (options.skip.has("smoke")) smokePlan = { skip: "--skip smoke" };
-  else if (attach) smokePlan = { skip: `attach mode: start the server with EVEJS_AGENT_BRIDGE=1 set, then \`gridcheck run ${SMOKE}\`` };
+  else if (attach) smokePlan = { skip: `attach mode: start the server yourself (npm start or StartServer.bat), then \`gridcheck run ${SMOKE}\`` };
   else if (dryRun) smokePlan = { args: [treeCli, "run", SMOKE], onlyShow: "boots a fresh world, undocks and reads the grid: about 50 s" };
   else smokePlan = { args: [treeCli, "run", SMOKE] };
   if (!await step(6, "Run the smoke test", smokePlan)) return 1;

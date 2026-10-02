@@ -25,6 +25,9 @@ git clone https://github.com/Clogs/gridcheck.git
 cd gridcheck
 ```
 
+An unpacked zip of the repo works too. Without git it installs its files as they are on disk, and
+`VENDOR.json` records its version but no commit, so an update is only noticed when the version changes.
+
 **2. Prepare the tree.** Unpack the EveJS zip into a folder of its own, then install its
 dependencies and build its reference data. This is the tree's own setup, which its `SetupEveJS.bat`
 and `StartServer.bat` would otherwise do on first run. The 0.12.9 zip has no wrapper folder: the
@@ -81,7 +84,7 @@ node bin/gridcheck.js gui --tree <tree> --open
 ```
 
 On Windows, double-clicking `OpenGui.bat` in the checkout does the same without `--tree`: add the
-tree by its path on the Install tab. Open the printed URL if no browser opens. **Set up everything…**
+tree by its path on the Install tab. Open the printed URL if no browser opens. **Do full setup for me…**
 on the Install tab runs the same `setup`, previewed first. Or work through the tab's checklist,
 whose banner says when the tree is ready to run tests:
 
@@ -128,8 +131,8 @@ node tools/gridcheck/bin/gridcheck.js run loadout-npc-fight   # the same, in the
 folder, and `gridcheck <command>` inside a tree ([docs/TREES.md](docs/TREES.md#running-from-a-checkout)).
 
 With no server up, the run boots one, plays the scenario, stops the server, and prints its verdict
-and the path of its `report.md`. If you started the tree's server yourself with
-`EVEJS_AGENT_BRIDGE=1` set, the run uses it instead and leaves it running. In a new tree the first `starter` build took 80 s, most of it the first boot
+and the path of its `report.md`. If you started the tree's server yourself, the run
+uses it instead and leaves it running. In a new tree the first `starter` build took 80 s, most of it the first boot
 seeding a game store; a rebuild takes about 20 s. The fight took about 50 s, boot and shutdown
 included.
 

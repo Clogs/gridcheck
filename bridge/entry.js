@@ -3,8 +3,8 @@
  * and read that character's grid, so an agent can check on-grid behaviour
  * without an EVE client. Loopback only, bearer token from the handshake
  * (gridcheck.config.json handshake, _local/agentBridge/bridge.json by default), and
- * off unless EVEJS_AGENT_BRIDGE=1 -- the shipped mod never listens on it.
- * `gridcheck up` sets the variable; in attach mode you set it yourself. The
+ * on when the tree has a gridcheck.config.json or EVEJS_AGENT_BRIDGE=1, and off with
+ * EVEJS_AGENT_BRIDGE=0 (isEnabled). A tree without gridcheck never listens on it. The
  * handshake also carries this server's ports, log and data dir, which is how
  * the CLI finds a server it didn't start.
  *
@@ -34,9 +34,15 @@ const { buildReport, copyInfo, sessionShape } = require("../core/capabilities");
 
 const DEFAULT_PORT = 26052;
 
-function isEnabledByEnvironment(env = process.env) {
+// EVEJS_AGENT_BRIDGE=1 or =0 decides. Unset, the bridge is on when the tree has a
+// gridcheck.config.json: installing gridcheck and choosing a mode is the opt-in, so a
+// server started as usual (npm start, StartServer.bat) can be attached to. A tree
+// without gridcheck has no shim, so its server never has a bridge.
+function isEnabled(env = process.env, configExists = false) {
   const raw = String(env.EVEJS_AGENT_BRIDGE || "").trim().toLowerCase();
-  return ["1", "true", "on", "yes"].includes(raw);
+  if (["1", "true", "on", "yes"].includes(raw)) return true;
+  if (["0", "false", "off", "no"].includes(raw)) return false;
+  return Boolean(configExists);
 }
 
 function handshakePath(treeRoot, env = process.env) {
@@ -238,7 +244,7 @@ function createService({ serverRoot, stock: givenStock = null, pluginsDir = DEFA
     enabled: true,
     serviceName: "agentBridge",
     exec() {
-      if (!isEnabledByEnvironment(env)) {
+      if (!isEnabled(env, loadTreeConfig(treeRoot, { env }).exists)) {
         removeHandshake(handshakePath(treeRoot, env), { onlyIfOurs: true });
         return null;
       }
@@ -248,7 +254,7 @@ function createService({ serverRoot, stock: givenStock = null, pluginsDir = DEFA
       DEFAULT_HANDSHAKE_PATH: handshakePath(treeRoot, {}),
       DEFAULT_PORT,
       handshakePath: (overrides) => handshakePath(treeRoot, overrides),
-      isEnabledByEnvironment,
+      isEnabled,
       pluginStatus: () => pluginStatus,
       resolvePort,
     },

@@ -107,7 +107,7 @@ Every tool has a CLI form, for agents that don't use MCP. `gridcheck run <scenar
 | Piece | Where | What it does |
 | --- | --- | --- |
 | Web gateway | the tree's `server/src/_secondary/express/` | Account, character, session select, `ship.Undock`, and the player calls. Stock EveJS. |
-| Agent bridge | `tools/gridcheck/bridge/`, loaded by the shim `server/src/_secondary/agentBridge/server.js` | `/slash`, `/grid`, `/watch`, `/tee`, `/loadout`, `/capabilities`, `/shutdown`, the [viewer](#viewer) at `/viewer`, and the plugins' routes. Off unless `EVEJS_AGENT_BRIDGE=1`. |
+| Agent bridge | `tools/gridcheck/bridge/`, loaded by the shim `server/src/_secondary/agentBridge/server.js` | `/slash`, `/grid`, `/watch`, `/tee`, `/loadout`, `/capabilities`, `/shutdown`, the [viewer](#viewer) at `/viewer`, and the plugins' routes. On when the tree has a `gridcheck.config.json` or `EVEJS_AGENT_BRIDGE=1`; off with `EVEJS_AGENT_BRIDGE=0` ([TREES.md](TREES.md#which-servers-gridcheck-touches)). |
 | CLI | `tools/gridcheck/bin/gridcheck.js`, with `core/` | Calls the gateway and the bridge, and runs the plugins' commands and steps. Writes `_local/gridcheck/`. |
 | MCP server | `tools/gridcheck/bin/mcp.js` | The CLI as MCP tools over stdio. |
 | GUI | `tools/gridcheck/gui/`, `core/gui.js` | `gridcheck gui`: runs, install and patches in a browser ([GUI.md](GUI.md)). |
@@ -130,8 +130,8 @@ server's ports, log and data dir. `GET /health` needs no token. Override the por
 The core reads only stock EveJS modules (`bridge/stock.js`) and names no mod: a test
 (`test/e2ePurity.test.js`) fails if `core/`, `bridge/`, `bin/` or the core scenarios name a mod's
 identifiers. Anything a mod adds is a plugin in `tools/gridcheck/plugins/<name>/plugin.js`. The
-loader (`core/plugins.js`) scans that folder only; the bridge loads it only when
-`EVEJS_AGENT_BRIDGE=1`. A plugin exports `name`, `apiVersion: 1`, `applies(tree)`, `server(ctx)`
+loader (`core/plugins.js`) scans that folder only; the bridge loads it only when the bridge is
+on. A plugin exports `name`, `apiVersion: 1`, `applies(tree)`, `server(ctx)`
 and `tool`:
 
 - `applies({ treeRoot, serverRoot, resolve })` answers `true` or `{ ok: false, reason }`. A
@@ -212,8 +212,8 @@ world commands need the server down.
 ## Starting and stopping
 
 In auto mode, the default, the tool uses the tree's server when it's up and starts its own when it
-isn't. In attach mode you start the server with `EVEJS_AGENT_BRIDGE=1` set, and the tool works on
-it. In managed mode the CLI starts and stops it. [TREES.md](TREES.md) has all three, and
+isn't. In attach mode you start the server yourself (`npm start` or `StartServer.bat`), and the tool
+works on it. In managed mode the CLI starts and stops it. [TREES.md](TREES.md) has all three, and
 `gridcheck status` prints the mode and, in auto mode, which case applies now.
 
 `gridcheck up` starts any daemons the config turns on, then the server's own start command, in the

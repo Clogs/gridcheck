@@ -7,7 +7,7 @@
 
 (() => {
   const GROUP_ICONS = { setup: "wrench", worlds: "globe", server: "power", ship: "ship", watch: "eye", scenarios: "target", tool: "box" };
-  const FILTERS = [["all", "All"], ["now", "Works now"], ["mcp", "Agents have it"], ["writes", "Changes the tree"]];
+  const FILTERS = [["all", "All"], ["now", "Works now"], ["mcp", "Agents have it"], ["writes", "Changes the Eve.js instance"]];
 
   function create(shell) {
     const { h, icon, api } = shell;
@@ -34,7 +34,7 @@
       if (!state.data || state.data.treeID !== id) {
         $("cm-groups").textContent = "";
         $("cm-empty").hidden = false;
-        $("cm-empty").textContent = "reading the tree's commands...";
+        $("cm-empty").textContent = "reading the Eve.js instance's commands...";
       }
       const data = await catalog(id);
       if (id !== shell.treeID()) return;
@@ -140,7 +140,7 @@
       $("cm-source").textContent = data.source === "tree" ? `${data.command}` : "this page's own gridcheck";
       const lede = $("cm-lede");
       lede.textContent = "";
-      lede.append("Everything gridcheck can do in this tree. Run each from ", summary ? shell.ref("path", summary.root, { dir: true }) : "the tree's folder",
+      lede.append("Everything gridcheck can do in this Eve.js instance. Run each from ", summary ? shell.ref("path", summary.root, { dir: true }) : "the Eve.js instance's folder",
         " as ", shell.ref("cmd", `${data.prefix} <command>`, { copy: false }), ". Open a row for its flags and examples.");
       $("cm-note").hidden = !data.note;
       $("cm-note").textContent = data.note || "";
@@ -149,7 +149,7 @@
       filters.textContent = "";
       for (const [id, label] of FILTERS) {
         filters.append(h("button", { type: "button", className: "fchip", "aria-pressed": String(state.show === id),
-          title: id === "now" ? "With the server as it is now, and the tree's mode" : null,
+          title: id === "now" ? "With the server as it is now, and the Eve.js instance's mode" : null,
           onclick: () => { state.show = id; render(); } }, label));
       }
 

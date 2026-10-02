@@ -18,7 +18,7 @@ const path = require("node:path");
 // cli is any other agent: it gets a pointer to docs/CLI.md in the tree's
 // AGENTS.md (or CLAUDE.md), not an MCP server, and is never set up unasked.
 const AGENT_IDS = Object.freeze(["claude", "codex", "cli"]);
-const AGENT_NAMES = Object.freeze({ claude: "Claude Code", codex: "Codex", cli: "Other agents (CLI)" });
+const AGENT_NAMES = Object.freeze({ claude: "Claude Code", codex: "Codex", cli: "CLI only" });
 const CLI_GUIDE = "tools/gridcheck/docs/CLI.md";
 const CLI_MARKER = "gridcheck:cli";
 const CLI_POINTER = Object.freeze([

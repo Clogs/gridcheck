@@ -4,12 +4,14 @@
 // `gridcheck up` starts the server, which listeners can move and which daemons the
 // tree has. `gridcheck init` probes the tree and writes it; the CLI, the MCP server
 // and the bridge take every path from here. Paths are relative to the tree
-// root with forward slashes, so the file can be committed with the tree.
+// root with forward slashes, so the file can be committed with the tree. Its
+// presence turns the agent bridge on in every server the tree starts (bridge/entry.js
+// isEnabled), so don't ship it in a build people play on.
 //
 //   mode "auto"     the default. When the tree's server is up, the CLI attaches
 //                   to it and leaves it running; when none is, a run boots its
 //                   own world and stops it after. down stops only what up started.
-//   mode "attach"   you start the server with EVEJS_AGENT_BRIDGE=1 and the CLI
+//   mode "attach"   you start the server (npm start, StartServer.bat) and the CLI
 //                   talks to it; up, down and world refuse.
 //   mode "managed"  the CLI boots, restores and stops the tree's server itself.
 //

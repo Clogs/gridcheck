@@ -31,7 +31,8 @@ Apply refuses when:
 - a target file has uncommitted changes. In a tree that isn't a git checkout, such as an unpacked
   zip, this can't be checked, and apply says so;
 - the tree's server is up. The tool sees a server through its bridge handshake or `gridcheck up`'s
-  record, so a server started without `EVEJS_AGENT_BRIDGE=1` isn't seen.
+  record, so a server started with `EVEJS_AGENT_BRIDGE=0`, or before the tree had a
+  `gridcheck.config.json`, isn't seen.
 
 A refusal writes nothing. A patch that changes several files writes all of them or none.
 

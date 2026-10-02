@@ -35,6 +35,7 @@ const { spawn, spawnSync } = require("node:child_process");
 const vendor = require("./vendor");
 const treeConfig = require("./treeConfig");
 const agents = require("./agents");
+const { summarizePreview } = require("./previewSummary");
 const { prerequisites, serverUpInfo, serverUpReason } = require("./treeState");
 const { createToolRegistry, loadPlugins, treeAt } = require("./plugins");
 const { createAgentBridgeHttp } = require("../bridge/http");
@@ -52,6 +53,7 @@ const MAX_OUTPUT_CHARS = 200_000;
 const MAX_REPORT_BYTES = 2 * 1024 * 1024;
 const MAX_FRAME_BYTES = 4 * 1024 * 1024;
 const MAX_TREES = 50;
+const MAX_BROWSE_ENTRIES = 1000;
 const FRAME_FILE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}\.svg$/;
 const PATCH_ID = /^[a-z0-9][a-z0-9-]{0,63}$/;
 const USAGE = "usage: gridcheck gui [--port N] [--tree <path>]... [--open]";
@@ -151,8 +153,11 @@ function ownContext(env = process.env) {
 // with --tree, the ones added on the page before (remembered in stateFile) and
 // the checkout's sibling folders that are EveJS trees.
 function createTreeList({ context, stateFile = null, extra = [] }) {
+  // Without a state file, trees added on the page last until the GUI stops.
+  let session = [];
   const remembered = () => {
-    const state = stateFile ? readJSON(stateFile) : null;
+    if (!stateFile) return session.slice();
+    const state = readJSON(stateFile);
     return Array.isArray(state && state.trees) ? state.trees.filter((entry) => typeof entry === "string") : [];
   };
 
@@ -182,7 +187,7 @@ function createTreeList({ context, stateFile = null, extra = [] }) {
   }
 
   function sourceOf(root) {
-    if (context.mode === "vendored") return "this copy's tree";
+    if (context.mode === "vendored") return "this copy's Eve.js instance";
     if (extra.some((entry) => samePath(entry, root))) return "given";
     if (remembered().some((entry) => samePath(entry, root))) return "added";
     return "nearby";
@@ -190,21 +195,24 @@ function createTreeList({ context, stateFile = null, extra = [] }) {
 
   function find(id) {
     const root = roots().find((candidate) => treeID(candidate) === String(id || ""));
-    if (!root) throw new GuiError("no such tree; pick one from the list", 404);
+    if (!root) throw new GuiError("no such Eve.js instance; pick one from the list", 404);
     return root;
   }
 
   function add(text) {
-    if (context.mode === "vendored") throw new GuiError("this GUI runs from a vendored copy and manages its own tree only");
+    if (context.mode === "vendored") throw new GuiError("this GUI runs from a vendored copy and manages its own Eve.js instance only");
     const raw = String(text || "").trim();
-    if (!raw) throw new GuiError("type the path of an EveJS tree");
+    if (!raw) throw new GuiError("type the path of an Eve.js instance");
     const root = path.resolve(raw);
     if (!exists(root)) throw new GuiError(`${slashed(root)} doesn't exist`);
-    if (!isTree(root)) throw new GuiError(`${slashed(root)} is not an EveJS tree: it has no server/src`);
-    if (context.checkout && samePath(root, context.checkout)) throw new GuiError("that's this Gridcheck checkout, not an EveJS tree");
-    if (!stateFile) return root;
+    if (!isTree(root)) throw new GuiError(`${slashed(root)} is not an Eve.js instance: it has no server/src`);
+    if (context.checkout && samePath(root, context.checkout)) throw new GuiError("that's this Gridcheck checkout, not an Eve.js instance");
     const list = remembered();
     if (!list.some((entry) => samePath(entry, root))) list.push(root);
+    if (!stateFile) {
+      session = list.slice(-MAX_TREES);
+      return root;
+    }
     fs.mkdirSync(path.dirname(stateFile), { recursive: true });
     fs.writeFileSync(stateFile, `${JSON.stringify({ trees: list.slice(-MAX_TREES) }, null, 2)}\n`);
     return root;
@@ -212,13 +220,50 @@ function createTreeList({ context, stateFile = null, extra = [] }) {
 
   function forget(id) {
     const root = find(id);
-    if (!stateFile) return root;
     const list = remembered().filter((entry) => !samePath(entry, root));
+    if (!stateFile) {
+      session = list;
+      return root;
+    }
     fs.writeFileSync(stateFile, `${JSON.stringify({ trees: list }, null, 2)}\n`);
     return root;
   }
 
   return { roots, find, add, forget, sourceOf };
+}
+
+// The folder browser behind "Browse…": one folder's subfolders, each marked if
+// it's an EveJS tree. A page can't read real paths from a file picker, so the
+// server lists them. Names only, never file contents.
+function windowsDrives() {
+  if (process.platform !== "win32") return [];
+  return "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("").map((letter) => `${letter}:\\`).filter(exists);
+}
+
+function browseFolders(text, context) {
+  if (context.mode === "vendored") throw new GuiError("this GUI runs from a vendored copy and manages its own Eve.js instance only");
+  const raw = String(text || "").trim();
+  const start = raw || path.dirname(context.checkout || OWN_ROOT);
+  const dir = path.resolve(start);
+  let entries;
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true });
+  } catch (error) {
+    throw new GuiError(error.code === "ENOENT" ? `${slashed(dir)} doesn't exist` : `can't open ${slashed(dir)}: ${error.code || error.message}`);
+  }
+  const names = entries.filter((entry) => entry.isDirectory() && !entry.name.startsWith(".") && !entry.name.startsWith("$"))
+    .map((entry) => entry.name).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base", numeric: true }));
+  const dirs = names.slice(0, MAX_BROWSE_ENTRIES)
+    .map((name) => ({ name, path: slashed(path.join(dir, name)), tree: isTree(path.join(dir, name)) }));
+  const parent = path.dirname(dir);
+  return {
+    path: slashed(dir),
+    parent: samePath(parent, dir) ? null : slashed(parent),
+    tree: isTree(dir),
+    dirs,
+    truncated: names.length > MAX_BROWSE_ENTRIES,
+    drives: windowsDrives().map(slashed),
+  };
 }
 
 // The tree's server, if it's up: a live bridge handshake, or a live `gridcheck up` run.
@@ -309,7 +354,9 @@ function summarizeTree(root, { context, trees }) {
       ok: check.ok,
       problems: present && check.manifest ? check.problems.slice(0, 50) : [],
       problemCount: present && check.manifest ? check.problems.length : 0,
-      upToDate: Boolean(check.manifest && context.commit && check.manifest.commit === context.commit),
+      // Without a commit here (a folder, not a checkout), the version is all there is to compare.
+      upToDate: Boolean(check.manifest && (context.commit ? check.manifest.commit === context.commit
+        : context.mode === "checkout" && context.version && check.manifest.version === context.version)),
     },
     shim: !exists(path.join(root, vendor.SHIM_PATH)) ? "missing" : shimProblem ? "edited" : check.manifest ? "matches" : "present",
     config: {
@@ -397,7 +444,7 @@ function treeStep(root, args) {
 }
 
 function requireCopy(root) {
-  if (!exists(treeCli(root))) throw new GuiError("the tree has no vendored copy yet; install it first (Install tab)");
+  if (!exists(treeCli(root))) throw new GuiError("the Eve.js instance has no vendored copy yet; install it first (Install tab)");
 }
 
 // action -> { steps: [{ cwd, args, env }], dirtyTargets: [tree-relative paths] }.
@@ -413,7 +460,9 @@ function planAction(action, root, params, context) {
       cli = path.join(checkout, "bin", "gridcheck.js");
       if (!exists(cli)) throw new GuiError(`${slashed(checkout)} is not a Gridcheck checkout (no bin/gridcheck.js)`);
     } else if (!checkout) {
-      throw new GuiError(`${slashed(OWN_ROOT)} is not a git checkout, so it can't vendor itself; run gridcheck gui from a Gridcheck checkout`);
+      // Not a git checkout (an unpacked zip): vendor update copies the folder as it is on disk.
+      if (!vendor.isFolderCopy(OWN_ROOT)) throw new GuiError(`${slashed(OWN_ROOT)} is neither a git checkout nor a Gridcheck folder, so it can't install itself`);
+      checkout = OWN_ROOT;
     }
     return {
       steps: [{ cwd: checkout, args: [cli, "vendor", "update", "--from", checkout, "--tree", root, ...(force ? ["--force"] : [])],
@@ -423,8 +472,8 @@ function planAction(action, root, params, context) {
   }
   if (action === "setup") {
     // From a checkout, the checkout's setup installs it first; from a vendored copy, the copy sets up its own tree.
-    if (context.mode !== "vendored" && !context.checkout) {
-      throw new GuiError(`${slashed(OWN_ROOT)} is not a git checkout, so it can't install itself; run gridcheck gui from a Gridcheck checkout`);
+    if (context.mode !== "vendored" && !context.checkout && !vendor.isFolderCopy(OWN_ROOT)) {
+      throw new GuiError(`${slashed(OWN_ROOT)} is neither a git checkout nor a Gridcheck folder, so it can't install itself`);
     }
     const args = [path.join(OWN_ROOT, "bin", "gridcheck.js"), "setup", "--tree", slashed(root)];
     if (params.mode !== undefined && params.mode !== null && params.mode !== "") {
@@ -472,18 +521,36 @@ function planAction(action, root, params, context) {
   throw new GuiError(`unknown action ${action}`);
 }
 
-function guards(root, plan) {
-  const reasons = [];
-  const up = plan.serverMayRun ? null : serverUpReason(root);
-  if (up) reasons.push(`${up}; stop it first (gridcheck down, or stop the server you started)`);
+// What would stop a change, as sentences (refused, which scripts read) and as
+// cards for the dialog (blockers), with the checks it passed (checks).
+function checkGuards(root, plan) {
+  const refused = [];
+  const blockers = [];
+  const checks = [];
+  const up = serverUpInfo(root);
+  if (up && !plan.serverMayRun) {
+    refused.push(`${serverUpReason(root)}; stop it first (gridcheck down, or stop the server you started)`);
+    blockers.push({ kind: "server-up", pid: up.pid, byGridcheck: up.byE2e });
+  } else {
+    checks.push(up ? { kind: "server-up-ok", pid: up.pid } : { kind: "server-stopped" });
+  }
   if (plan.dirtyTargets.length) {
     const status = gitDirty(root, plan.dirtyTargets);
-    if (status.git && status.dirty.length) {
-      reasons.push(`uncommitted changes in ${status.dirty.slice(0, 10).join(", ")}${status.dirty.length > 10 ? ", ..." : ""}; ` +
+    if (!status.git) {
+      checks.push({ kind: "not-git" });
+    } else if (status.dirty.length) {
+      refused.push(`uncommitted changes in ${status.dirty.slice(0, 10).join(", ")}${status.dirty.length > 10 ? ", ..." : ""}; ` +
         "commit or discard them first");
+      blockers.push({ kind: "dirty", files: status.dirty });
+    } else {
+      checks.push({ kind: "clean", files: plan.dirtyTargets.map(slashed) });
     }
   }
-  return reasons;
+  return { refused, blockers, checks };
+}
+
+function guards(root, plan) {
+  return checkGuards(root, plan).refused;
 }
 
 // ---------- the server ----------
@@ -550,12 +617,13 @@ function createGui({ context = ownContext(), stateFile = null, extraTrees = [], 
     const root = trees.find(body.tree);
     const action = String(body.action || "");
     const plan = planAction(action, root, body, context);
-    const refused = guards(root, plan);
+    const { refused, blockers, checks } = checkGuards(root, plan);
     let unsafe = false;
     for (const step of plan.steps) {
       const problem = await dryRunProblem(step);
       if (problem) {
         refused.push(problem);
+        blockers.push({ kind: "no-dry-run", text: problem });
         unsafe = true;
       }
     }
@@ -568,9 +636,25 @@ function createGui({ context = ownContext(), stateFile = null, extraTrees = [], 
       shown.push({ command: displayCommand(step), cwd: slashed(step.cwd), dryRun: displayCommand(dry), exitCode: result.exitCode,
         output: result.output });
     }
+    const { refusedWhenRun, ...summary } = summarizePreview(action, root, shown,
+      { srcDir: path.join(path.resolve(root, treeConfig.loadTreeConfig(root).serverDir), "src") });
+    for (const text of refusedWhenRun) {
+      const dirty = /^uncommitted changes in (.+)\. Commit or discard them first$/.exec(text);
+      if (dirty) blockers.push({ kind: "dirty", files: dirty[1].split(", ") });
+      // The guards above already turned a running server into a card.
+      else if (!/server is up/.test(text) || !blockers.some((row) => row.kind === "server-up")) blockers.push({ kind: "other", text });
+    }
+    for (const step of shown) {
+      if (step.exitCode !== 0 && !refusedWhenRun.length) blockers.push({ kind: "failed", command: step.command, exitCode: step.exitCode });
+    }
+    // patch apply checks its own targets for uncommitted changes, and says when it couldn't.
+    if (action === "patch-apply" && ok && summary.changes.length) {
+      checks.push(summary.notes.some((text) => /isn't a git checkout/.test(text)) ? { kind: "not-git" }
+        : { kind: "clean", files: summary.changes.map((row) => row.path) });
+    }
     const previewID = ok ? crypto.randomBytes(12).toString("hex") : null;
     if (previewID) previews.set(previewID, { tree: body.tree, root, action, plan, createdAtMs: now() });
-    return { ok, previewID, action, tree: body.tree, refused, steps: shown,
+    return { ok, previewID, action, tree: body.tree, root: slashed(root), refused, blockers, checks, summary, steps: shown,
       note: ok ? "nothing was written; Run does the commands above" : "this change would be refused, so it can't run" };
   }
 
@@ -601,7 +685,7 @@ function createGui({ context = ownContext(), stateFile = null, extraTrees = [], 
   function runDetail(root, runID) {
     const { runsDir } = viewerFor(root);
     const dir = resolveRunDir(runsDir, runID);
-    if (!dir || !exists(dir)) throw new GuiError(`no run ${runID} in this tree`, 404);
+    if (!dir || !exists(dir)) throw new GuiError(`no run ${runID} in this Eve.js instance`, 404);
     let report = null;
     try {
       const stat = fs.statSync(path.join(dir, "report.md"));
@@ -653,8 +737,8 @@ function createGui({ context = ownContext(), stateFile = null, extraTrees = [], 
       throw new GuiError(`couldn't read the command list: ${own.output.slice(0, 300)}`, 500);
     }
     return { ...json, source: "tool", note: read
-      ? "This tree's copy of gridcheck is older than this list, so it shows the commands of the gridcheck running this page. Update the copy for its own."
-      : "gridcheck isn't installed in this tree, so this is the list of the gridcheck running this page." };
+      ? "This Eve.js instance's copy of gridcheck is older than this list, so it shows the commands of the gridcheck running this page. Update the copy for its own."
+      : "gridcheck isn't installed in this Eve.js instance, so this is the list of the gridcheck running this page." };
   }
 
   // The Run a test card: the tree's scenarios and world recipes, from its copy.
@@ -676,6 +760,7 @@ function createGui({ context = ownContext(), stateFile = null, extraTrees = [], 
       const root = trees.add(body.path);
       return json({ tree: listEntry(root, trees) });
     }
+    if (method === "GET" && pathname === "/gui/api/browse") return json({ browse: browseFolders(query.path, context) });
     if (method === "POST" && pathname === "/gui/api/trees/forget") {
       trees.forget(body.tree);
       return json({});
@@ -775,7 +860,8 @@ async function main(argv, { stdout = process.stdout, stderr = process.stderr, wa
       return 1;
     }
   }
-  const stateFile = context.checkout ? path.join(context.checkout, "_local", "gui.json") : null;
+  // A copy that isn't a git checkout (an unpacked zip) still remembers its trees.
+  const stateFile = context.mode === "checkout" ? path.join(context.checkout || OWN_ROOT, "_local", "gui.json") : null;
   const gui = createGui({ context, stateFile, extraTrees: options.trees });
   const server = createAgentBridgeHttp({ routes: gui, port: options.port, handshakePath: null, serviceName: "gridcheck-gui" });
   const port = await server.start();

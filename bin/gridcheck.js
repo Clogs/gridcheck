@@ -199,7 +199,7 @@ function requireManaged(command) {
   if (MODE !== "attach") return;
   throw new CliError(
     `\`gridcheck ${command}\` needs auto or managed mode; this tree is in attach mode (${relativePath(CONFIG.file)}). ` +
-    "Start the server yourself with EVEJS_AGENT_BRIDGE=1 set, or let the CLI start one when none is up: " +
+    "Start the server yourself (npm start in the server folder, or StartServer.bat), or let the CLI start one when none is up: " +
     "`gridcheck init --mode auto --force`.",
   );
 }
@@ -216,8 +216,8 @@ function runLive(run) {
   return Boolean(run && !run.stoppedAtMs && pidAlive(run.pid));
 }
 
-// A live server that `gridcheck up` didn't start: one you started with
-// EVEJS_AGENT_BRIDGE=1 set. Auto mode attaches to it and never stops it.
+// A live server that `gridcheck up` didn't start: one you started yourself.
+// Auto mode attaches to it and never stops it.
 function startedElsewhere(handshake = readHandshake()) {
   if (!handshake) return null;
   const run = readRun();
@@ -285,7 +285,11 @@ function gatewayHeaders() {
   return token ? { "x-evejs-web-token": token } : {};
 }
 
+// Only a server this tree's bridge vouches for is talked to. The bridge exists only where gridcheck
+// is installed, so a server from an instance without it (one people play on) is never logged into,
+// even when a port or EVEJS_MICROSERVICES_PORT happens to point at it.
 async function gateway(method, route, body) {
+  requireHandshake();
   const { status, json } = await requestJSON(`${gatewayBase()}${route}`, { method, body, headers: gatewayHeaders() });
   if (status >= 400 || json.ok === false) {
     // Gateway errors are { ok: false, error: "<CODE>", message }.
@@ -304,8 +308,9 @@ function requireHandshake() {
     throw new CliError(
       `no live agent bridge (${relativePath(BRIDGE_HANDSHAKE_PATH)}). ` +
       (MANAGED ? "Start the server with `gridcheck up`."
-        : AUTO ? "Start one with `gridcheck up`, or start the tree's server yourself with EVEJS_AGENT_BRIDGE=1 set (auto mode attaches to either)."
-          : "Start the tree's server with EVEJS_AGENT_BRIDGE=1 set (attach mode)."),
+        : AUTO ? "Start one with `gridcheck up`, or start the tree's server yourself, with npm start or StartServer.bat (auto mode attaches to either)."
+          : "Start the tree's server yourself, with npm start in the server folder or StartServer.bat (attach mode).") +
+      (MANAGED ? "" : ` A server started before ${relativePath(CONFIG.file)} existed, or with EVEJS_AGENT_BRIDGE=0, has no bridge: restart it.`),
     );
   }
   return handshake;
@@ -1268,8 +1273,8 @@ async function cmdRun(positionals, flags) {
     throw new CliError(`this tree's server is running (pid ${running.pid}); a run boots its own world. \`gridcheck down\` first.`);
   }
   if (!boots && !running) {
-    throw new CliError("attach mode runs on a live server, and this tree has none. Start it with EVEJS_AGENT_BRIDGE=1 " +
-      "set, or `gridcheck init --mode auto --force` to let runs boot their own world when none is up.");
+    throw new CliError("attach mode runs on a live server, and this tree has none. Start it yourself (npm start " +
+      "or StartServer.bat), or `gridcheck init --mode auto --force` to let runs boot their own world when none is up.");
   }
   if (!boots && override !== null && AUTO) {
     throw new CliError(`--world needs the server down: it's up (pid ${running.pid}), so auto mode would run on it as it is. ` +
@@ -1431,7 +1436,7 @@ function cmdLog(flags) {
   const logPath = serverLogPath(handshake);
   if (!fs.existsSync(logPath)) {
     throw new CliError(`no server log at ${logPath}: the server hasn't run in this tree yet, or logs elsewhere ` +
-      `(EVEJS_DATA_ROOT). ${MODE === "attach" ? "Start it with EVEJS_AGENT_BRIDGE=1 set" : "`gridcheck up` starts it"}; ` +
+      `(EVEJS_DATA_ROOT). ${MODE === "attach" ? "Start it yourself (npm start or StartServer.bat)" : "`gridcheck up` starts it"}; ` +
       "`gridcheck status` shows the log path it uses.");
   }
   const lines = Math.max(1, Math.trunc(Number(flags.lines) || 40));
@@ -2021,8 +2026,9 @@ function cmdVendor(positionals, flags) {
 
 // ---------- patches ----------
 
-// Apply and revert refuse while this tree's server runs. A server started
-// without EVEJS_AGENT_BRIDGE=1 writes no handshake, so it isn't seen.
+// Apply and revert refuse while this tree's server runs. A server started with
+// EVEJS_AGENT_BRIDGE=0, or before gridcheck.config.json existed, writes no handshake,
+// so it isn't seen.
 function serverUpReason() {
   const handshake = readHandshake();
   if (handshake) return `this tree's server is up (pid ${handshake.pid})`;
@@ -2127,9 +2133,8 @@ function cmdInit(flags) {
       ? "next: gridcheck up --fresh (a new world) or gridcheck up --world <name>, then gridcheck login"
       : config.mode === "auto"
         ? "next: gridcheck world build starter, then gridcheck run <scenario>. A run boots its own world when no server is up, and " +
-          "attaches to one you started with EVEJS_AGENT_BRIDGE=1 set"
-        : "next: start the server with EVEJS_AGENT_BRIDGE=1 set (`npm start` in the server folder, or StartServer.bat " +
-          "from a shell that has it), then gridcheck login",
+          "attaches to one you started yourself"
+        : "next: start the server as usual (`npm start` in the server folder, or StartServer.bat), then gridcheck login",
   ].filter((line) => line !== null);
   for (const line of lines) console.log(line);
   return lines.join("\n");

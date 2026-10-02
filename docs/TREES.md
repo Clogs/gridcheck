@@ -11,7 +11,7 @@ its reference data) to a passing smoke test. It runs six commands, printing each
 
 | Step | Command | Skipped when |
 | --- | --- | --- |
-| 1 | `vendor update` from the checkout | the copy is at the checkout's `HEAD` and unedited; always, run from a tree's own copy |
+| 1 | `vendor update` from the checkout | the copy is at the checkout's `HEAD` and unedited; always, run from a tree's own copy. From an unpacked folder with no git it always runs; its output says which files changed |
 | 2 | `init --mode <mode>` | `gridcheck.config.json` is there and valid, and `--mode` doesn't change it |
 | 3 | `agents setup` | every agent asked for is set up; no agent was found and none was named |
 | 4 | `patch apply` with each patch the copy reports absent | every patch is applied or detected |
@@ -33,7 +33,7 @@ it again after the fix, and the steps already done are skipped.
 | `--dry-run` | | each command's own dry run; world and smoke are only shown |
 
 Setup exits 0 when the tree is ready, 1 when a step failed, and 2 when it refused to start. The
-GUI's **Set up everything…** previews `setup --dry-run` and then runs it ([GUI.md](GUI.md)).
+GUI's **Do full setup for me…** previews `setup --dry-run` and then runs it ([GUI.md](GUI.md)).
 
 ## The tree's config
 
@@ -86,20 +86,34 @@ add a note when the tree's copy isn't the checkout's `HEAD`. Developing the tool
 ## Auto, attach and managed
 
 In **auto** mode, the default, the tool uses the tree's server when it's up and starts its own when
-it isn't. If a server is up, whether you started it with `EVEJS_AGENT_BRIDGE=1` set or `gridcheck up`
-did, a run uses it as attach mode does: the scenario's world isn't restored, and the server stays
+it isn't. If a server is up, whether you started it yourself or `gridcheck up` did, a run uses it as attach mode does: the scenario's world isn't restored, and the server stays
 up afterwards. If none is up, a run boots the scenario's world and stops the server at the end, as
 managed mode does. `up` starts a server, and says so when one is already up. `down` stops only a
 server `gridcheck up` started; it refuses one you started. `world copy`, `world save`, `world build`,
 `up` and `run --world` need the server down. `gridcheck status` says which case applies now.
 
-In **attach** mode you start the server and the tool talks to it. Set `EVEJS_AGENT_BRIDGE=1` in
-the shell that starts it, for example `npm start` in the server folder, or `StartServer.bat`
-run from that shell. The bridge's handshake carries the server's game and gateway ports, its log
+In **attach** mode you start the server and the tool talks to it: `npm start` in the server folder,
+or `StartServer.bat`. Nothing needs setting. The bridge's handshake carries the server's game and gateway ports, its log
 and its data dir, so the CLI finds the server wherever its ports are. `login`, `undock`, `grid`,
 `watch`, `act`, `slash`, `doctor` and `run` work. `up`, `down`, `world copy` and `world save`
 refuse. A scenario run uses the live server as it is: the scenario's world isn't restored and the
 server stays up afterwards.
+
+### Which servers gridcheck touches
+
+The agent bridge is what lets gridcheck log in to, drive and stop a server. It's on in every
+server a tree starts once the tree has a `gridcheck.config.json`, whichever way it's started.
+`EVEJS_AGENT_BRIDGE=0` in the shell that starts the server turns it off, and
+`EVEJS_AGENT_BRIDGE=1` turns it on in a tree with no config. A server started before the config
+was written has no bridge until it restarts.
+
+gridcheck only works on a server its tree's bridge reports. `login` and every other gateway
+command refuse when no bridge is up, and `down` stops only a server through its bridge, or one
+`gridcheck up` started. An Eve.js instance without gridcheck installed has no bridge, so gridcheck
+never attaches to its server or stops it. The same goes for an instance where gridcheck is
+installed but has no config, unless that server was started with `EVEJS_AGENT_BRIDGE=1`. Don't
+install gridcheck in an instance people play on, and don't ship a build with
+`gridcheck.config.json` in it.
 
 In **managed** mode the CLI runs the server. `gridcheck up` restores or seeds a world, moves every
 listener it can onto the tree's own port block, starts the server in the background and waits

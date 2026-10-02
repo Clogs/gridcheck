@@ -234,11 +234,13 @@ test("a disabled bridge leaves a live server's handshake alone", () => {
   }
 });
 
-test("the service is off unless EVEJS_AGENT_BRIDGE turns it on", () => {
-  const { isEnabledByEnvironment, resolvePort } = agentBridgeService.__testing;
-  assert.strictEqual(isEnabledByEnvironment({}), false);
-  assert.strictEqual(isEnabledByEnvironment({ EVEJS_AGENT_BRIDGE: "0" }), false);
-  assert.strictEqual(isEnabledByEnvironment({ EVEJS_AGENT_BRIDGE: "1" }), true);
+test("the service is on in a tree with a gridcheck config, and EVEJS_AGENT_BRIDGE overrides it either way", () => {
+  const { isEnabled, resolvePort } = agentBridgeService.__testing;
+  assert.strictEqual(isEnabled({}, false), false);
+  assert.strictEqual(isEnabled({}, true), true);
+  assert.strictEqual(isEnabled({ EVEJS_AGENT_BRIDGE: "0" }, true), false);
+  assert.strictEqual(isEnabled({ EVEJS_AGENT_BRIDGE: "off" }, true), false);
+  assert.strictEqual(isEnabled({ EVEJS_AGENT_BRIDGE: "1" }, false), true);
   assert.strictEqual(resolvePort({}), 26052);
   assert.strictEqual(resolvePort({ EVEJS_AGENT_BRIDGE_PORT: "27000" }), 27000);
   assert.strictEqual(agentBridgeService.enabled, true);

@@ -93,8 +93,8 @@ test("from a checkout it offers trees beside it, adds a typed one and remembers 
   assert.strictEqual(added.body.tree.source, "added");
   assert.deepStrictEqual(JSON.parse(fs.readFileSync(s.stateFile, "utf8")).trees, [path.resolve(elsewhere)]);
 
-  for (const [text, error] of [[path.join(s.dir, "notatree"), /not an EveJS tree/], [path.join(s.dir, "nowhere"), /doesn't exist/],
-    ["", /type the path/], [s.checkout, /not an EveJS tree|this Gridcheck checkout/]]) {
+  for (const [text, error] of [[path.join(s.dir, "notatree"), /not an Eve\.js instance/], [path.join(s.dir, "nowhere"), /doesn't exist/],
+    ["", /type the path/], [s.checkout, /not an Eve\.js instance|this Gridcheck checkout/]]) {
     const refused = await app.handle("POST", "/gui/api/trees", {}, { path: text });
     assert.strictEqual(refused.statusCode, 400, text);
     assert.match(refused.body.error, error);
@@ -105,7 +105,42 @@ test("from a checkout it offers trees beside it, adds a typed one and remembers 
 
   const own = gui.createGui({ context: { mode: "vendored", version: "9.9.9", commit: "c0ffee", checkout: null, tree: s.tree }, run: fakeRun().run });
   assert.deepStrictEqual(body(await own.handle("GET", "/gui/api/trees")).trees.map((tree) => tree.root), [s.tree.split(path.sep).join("/")]);
-  assert.match((await own.handle("POST", "/gui/api/trees", {}, { path: s.other })).body.error, /manages its own tree only/);
+  assert.match((await own.handle("POST", "/gui/api/trees", {}, { path: s.other })).body.error, /manages its own Eve\.js instance only/);
+});
+
+test("without a state file, an added tree can still be opened and forgotten", async (t) => {
+  const s = setup(t);
+  const app = gui.createGui({ context: { ...s.context, checkout: null }, run: fakeRun().run });
+  const added = body(await app.handle("POST", "/gui/api/trees", {}, { path: s.other })).tree;
+  assert.strictEqual(added.source, "added");
+  const opened = await app.handle("GET", "/gui/api/tree", { tree: added.id });
+  assert.strictEqual(opened.statusCode, 200, opened.body.error);
+  assert.ok(body(await app.handle("GET", "/gui/api/trees")).trees.some((tree) => tree.id === added.id));
+  assert.strictEqual((await app.handle("POST", "/gui/api/trees/forget", {}, { tree: added.id })).statusCode, 200);
+  assert.ok(!body(await app.handle("GET", "/gui/api/trees")).trees.some((tree) => tree.id === added.id));
+});
+
+test("the folder browser lists subfolders, marks EveJS trees, starts beside the checkout and refuses in a vendored copy", async (t) => {
+  const s = setup(t);
+  fs.mkdirSync(path.join(s.dir, ".hidden"));
+  const app = gui.createGui({ context: s.context, stateFile: s.stateFile, run: fakeRun().run });
+  const start = body(await app.handle("GET", "/gui/api/browse", {})).browse;
+  const slash = (file) => file.split(path.sep).join("/");
+  assert.strictEqual(start.path, slash(path.resolve(s.dir)), "it starts in the checkout's parent");
+  assert.strictEqual(start.tree, false);
+  assert.deepStrictEqual(start.dirs.map((dir) => [dir.name, dir.tree]), [["gridcheck", false], ["notatree", false], ["other", true], ["tree", true]]);
+  assert.strictEqual(start.parent, slash(path.dirname(path.resolve(s.dir))));
+
+  const inTree = body(await app.handle("GET", "/gui/api/browse", { path: s.tree })).browse;
+  assert.strictEqual(inTree.tree, true);
+  assert.ok(inTree.dirs.some((dir) => dir.name === "server"));
+
+  const missing = await app.handle("GET", "/gui/api/browse", { path: path.join(s.dir, "nowhere") });
+  assert.strictEqual(missing.statusCode, 400);
+  assert.match(missing.body.error, /doesn't exist/);
+
+  const own = gui.createGui({ context: { mode: "vendored", version: "9.9.9", commit: "c0ffee", checkout: null, tree: s.tree }, run: fakeRun().run });
+  assert.match((await own.handle("GET", "/gui/api/browse", { path: s.dir })).body.error, /manages its own Eve\.js instance only/);
 });
 
 test("the tree list gives each tree's EveJS version and its scenario runs, passed and failed", async (t) => {
@@ -206,12 +241,15 @@ test("agent setup is previewed like any change, may run while the server is up, 
   const previewed = body(await app.handle("POST", "/gui/api/preview", {}, { tree: id, action: "agents", agents: ["codex", "claude", "codex"] })).preview;
   assert.strictEqual(previewed.ok, true, JSON.stringify(previewed));
   assert.deepStrictEqual(previewed.refused, [], "a running server doesn't block it");
+  assert.deepStrictEqual(previewed.checks.map((row) => row.kind), ["server-up-ok", "not-git"],
+    "the dialog says the running server is fine, and that a tree without git couldn't be checked");
   assert.deepStrictEqual(fake.calls.at(-1), ["agents", "setup", "codex", "claude", "--dry-run"]);
   const ran = body(await app.handle("POST", "/gui/api/run", {}, { previewID: previewed.previewID })).result;
   assert.strictEqual(ran.ok, true);
   assert.deepStrictEqual(fake.calls.at(-1), ["agents", "setup", "codex", "claude"]);
   const patch = body(await app.handle("POST", "/gui/api/preview", {}, { tree: id, action: "patch-apply", id: "xmpp-port" })).preview;
   assert.match(patch.refused[0], /server is up/, "other changes still wait for it");
+  assert.deepStrictEqual(patch.blockers, [{ kind: "server-up", pid: process.pid, byGridcheck: false }]);
 
   for (const [agents, error] of [[[], /pick an agent/], [["cursor"], /no agent cursor/], [undefined, /pick an agent/]]) {
     const refused = await app.handle("POST", "/gui/api/preview", {}, { tree: id, action: "agents", agents });
@@ -256,6 +294,7 @@ test("a copy whose command has no --dry-run isn't previewed at all, so an old co
   assert.strictEqual(previewed.ok, false);
   assert.strictEqual(previewed.previewID, null);
   assert.match(previewed.refused[0], /has no --dry-run in this copy/);
+  assert.deepStrictEqual(previewed.blockers.map((row) => row.kind), ["no-dry-run"]);
   assert.deepStrictEqual(fake.calls, [["help"]], "only help ran");
 });
 
@@ -266,6 +305,7 @@ test("a failed dry run, a running server or uncommitted changes to the targets r
   const failed = body(await failing.handle("POST", "/gui/api/preview", {}, { tree: id, action: "patch-revert", id: "xmpp-port" })).preview;
   assert.strictEqual(failed.ok, false);
   assert.strictEqual(failed.previewID, null);
+  assert.deepStrictEqual(failed.blockers, [{ kind: "failed", command: "node tools/gridcheck/bin/gridcheck.js patch revert xmpp-port", exitCode: 1 }]);
 
   const fake = fakeRun();
   const app = gui.createGui({ context: s.context, stateFile: s.stateFile, run: fake.run });
@@ -290,6 +330,8 @@ test("a failed dry run, a running server or uncommitted changes to the targets r
   const dirty = body(await app.handle("POST", "/gui/api/preview", {}, { tree: id, action: "init", mode: "managed" })).preview;
   assert.strictEqual(dirty.ok, false);
   assert.match(dirty.refused.join("\n"), /uncommitted changes in gridcheck\.config\.json/);
+  assert.deepStrictEqual(dirty.blockers, [{ kind: "dirty", files: ["gridcheck.config.json"] }]);
+  assert.deepStrictEqual(dirty.checks.map((row) => row.kind), ["server-stopped"]);
   assert.deepStrictEqual(fake.calls.at(-1).slice(0, 4), ["init", "--mode", "managed", "--force"], "an existing config is replaced with --force");
 });
 

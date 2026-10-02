@@ -84,19 +84,66 @@ function checkoutRoot(dir) {
   return path.resolve(dir);
 }
 
+// A Gridcheck folder that isn't its own git checkout, such as an unpacked zip:
+// it has the package and the shim, and no VENDOR.json (a tree's copy has one).
+function isFolderCopy(dir) {
+  try {
+    const pkg = JSON.parse(fs.readFileSync(path.join(dir, "package.json"), "utf8"));
+    return pkg.name === PACKAGE_NAME && fs.existsSync(path.join(dir, ...SHIM_SOURCE.split("/")))
+      && !fs.existsSync(path.join(dir, MANIFEST_NAME));
+  } catch (_error) {
+    return false;
+  }
+}
+
 // --from: a checkout directory (its HEAD), or a tag, branch or commit of the
-// checkout this file is in. Nothing: this checkout's HEAD.
+// checkout this file is in. Nothing: this checkout's HEAD. A Gridcheck folder
+// that isn't a checkout is read from disk instead: { folder: true }.
 function resolveSource(from) {
   const text = from === undefined || from === null || from === true ? "" : String(from).trim();
-  if (text && fs.existsSync(text)) return { checkout: checkoutRoot(text), ref: "HEAD" };
+  if (text && fs.existsSync(text)) {
+    try {
+      return { checkout: checkoutRoot(text), ref: "HEAD" };
+    } catch (error) {
+      if (isFolderCopy(text)) return { checkout: path.resolve(text), ref: null, folder: true };
+      throw error;
+    }
+  }
   let checkout;
   try {
     checkout = checkoutRoot(OWN_CHECKOUT);
   } catch (error) {
+    if (isFolderCopy(OWN_CHECKOUT)) {
+      if (!text) return { checkout: OWN_CHECKOUT, ref: null, folder: true };
+      throw new VendorError(`"${text}" is a tag, branch or commit, which needs a git checkout; ${OWN_CHECKOUT} is a folder ` +
+        "without git, so it can only install itself as it is (leave out --from)");
+    }
     throw new VendorError(`${error.message}. This is a vendored copy: run vendor update from a Gridcheck ` +
       "checkout, or pass --from <checkout>");
   }
   return { checkout, ref: text || "HEAD" };
+}
+
+// What a folder copy leaves behind, besides vendored()'s dotfiles and test/:
+// installed packages and local state, which a checkout's .gitignore keeps out.
+const FOLDER_SKIP = new Set(["node_modules", "_local"]);
+
+// -> Map(path -> bytes) of a folder copy's files, as they are on disk.
+function readFolder(dir) {
+  const files = new Map();
+  const visit = (full, relative) => {
+    for (const entry of fs.readdirSync(full, { withFileTypes: true })) {
+      const file = relative ? `${relative}/${entry.name}` : entry.name;
+      if (!relative && FOLDER_SKIP.has(entry.name)) continue;
+      if (!vendored(file)) continue;
+      const child = path.join(full, entry.name);
+      if (entry.isDirectory()) visit(child, file);
+      else if (entry.isFile()) files.set(file, fs.readFileSync(child));
+      else throw new VendorError(`${file} in ${dir} is not a file`);
+    }
+  };
+  visit(dir, "");
+  return files;
 }
 
 // git cat-file --batch: one request per line, each answer "<sha> blob <size>\n<bytes>\n".
@@ -117,9 +164,28 @@ function readBlobs(checkout, shas) {
   return blobs;
 }
 
-// -> { checkout, ref, commit, version, files: Map(path -> bytes), dirty }
+function checkPackage(files, checkout, ref) {
+  let pkg = null;
+  try {
+    pkg = JSON.parse(String(files.get("package.json") || ""));
+  } catch (_error) {
+    pkg = null;
+  }
+  const at = ref ? ` at ${ref}` : "";
+  if (!pkg || pkg.name !== PACKAGE_NAME) throw new VendorError(`${checkout}${at} is not ${PACKAGE_NAME} (package.json)`);
+  if (!files.has(SHIM_SOURCE)) throw new VendorError(`${checkout}${at} has no ${SHIM_SOURCE}`);
+  return pkg;
+}
+
+// -> { checkout, ref, commit, version, files: Map(path -> bytes), dirty, folder }
+// A folder copy has no commit or ref: its files are read as they are on disk.
 function readSource({ from } = {}) {
-  const { checkout, ref } = resolveSource(from);
+  const { checkout, ref, folder } = resolveSource(from);
+  if (folder) {
+    const files = readFolder(checkout);
+    const pkg = checkPackage(files, checkout, null);
+    return { checkout, ref: null, commit: null, version: String(pkg.version || "0.0.0"), files, dirty: false, folder: true };
+  }
   let commit;
   try {
     commit = git(checkout, ["rev-parse", "--verify", "--quiet", `${ref}^{commit}`]).trim();
@@ -137,14 +203,7 @@ function readSource({ from } = {}) {
   }
   const blobs = readBlobs(checkout, entries.map((entry) => entry.sha));
   const files = new Map(entries.map((entry) => [entry.file, blobs.get(entry.sha)]));
-  let pkg = null;
-  try {
-    pkg = JSON.parse(String(files.get("package.json") || ""));
-  } catch (_error) {
-    pkg = null;
-  }
-  if (!pkg || pkg.name !== PACKAGE_NAME) throw new VendorError(`${checkout} at ${ref} is not ${PACKAGE_NAME} (package.json)`);
-  if (!files.has(SHIM_SOURCE)) throw new VendorError(`${checkout} at ${ref} has no ${SHIM_SOURCE}`);
+  const pkg = checkPackage(files, checkout, ref);
   const dirty = git(checkout, ["status", "--porcelain", "--untracked-files=no"]).trim() !== "";
   return { checkout, ref, commit, version: String(pkg.version || "0.0.0"), files, dirty };
 }
@@ -313,6 +372,10 @@ function updateVendored({ tree, from, force = false, dryRun = false }) {
 
 const slashed = (file) => String(file).split(path.sep).join("/");
 
+// "at 1a2b3c4d (HEAD)", or, for a copy made from a folder, "(no git commit)".
+const atCommit = (manifest) => (manifest.commit ? `at ${String(manifest.commit).slice(0, 8)}${manifest.ref ? ` (${manifest.ref})` : ""}`
+  : "(no git commit)");
+
 // `gridcheck vendor <action>` -> the lines to print; a VendorError when it fails.
 // What a move from the old names did, or would do.
 function migrationLines(migrated, mood) {
@@ -336,7 +399,7 @@ function runVendor(action, { tree = OWN_TREE, from, force = false, dryRun = fals
         return files.length > DRY_RUN_FILES ? [...shown, `    ... and ${files.length - DRY_RUN_FILES} more`] : shown;
       };
       return [
-        `would vendor ${manifest.name} ${manifest.version} at ${manifest.commit.slice(0, 8)} (${manifest.ref}) from ${slashed(result.checkout)}`,
+        `would vendor ${manifest.name} ${manifest.version} ${atCommit(manifest)} from ${slashed(result.checkout)}`,
         `  ${target}: ${Object.keys(manifest.files).length} files, ${counts.added} added, ${counts.changed} changed, ` +
           `${counts.removed} removed, ${counts.same} the same; shim ${result.shim === "unchanged" ? "unchanged" : `would be ${result.shim}`}`,
         ...listed("+", result.changes.added),
@@ -348,7 +411,7 @@ function runVendor(action, { tree = OWN_TREE, from, force = false, dryRun = fals
       ];
     }
     return [
-      `vendored ${manifest.name} ${manifest.version} at ${manifest.commit.slice(0, 8)} (${manifest.ref}) from ${slashed(result.checkout)}`,
+      `vendored ${manifest.name} ${manifest.version} ${atCommit(manifest)} from ${slashed(result.checkout)}`,
       `  ${target}: ${Object.keys(manifest.files).length} files, ${counts.added} added, ${counts.changed} changed, ` +
         `${counts.removed} removed; shim ${result.shim}`,
       ...(result.dirty ? [`  ${slashed(result.checkout)} has uncommitted changes; they were not vendored`] : []),
@@ -364,8 +427,8 @@ function runVendor(action, { tree = OWN_TREE, from, force = false, dryRun = fals
         "gridcheck vendor update:", ...problemLines(result.problems)].join("\n"));
     }
     const { manifest } = result;
-    return [`${target} matches ${MANIFEST_NAME}: ${manifest.name} ${manifest.version} at ` +
-      `${String(manifest.commit).slice(0, 8)}, ${Object.keys(manifest.files).length} files and the shim`];
+    return [`${target} matches ${MANIFEST_NAME}: ${manifest.name} ${manifest.version} ` +
+      `${manifest.commit ? `at ${String(manifest.commit).slice(0, 8)}` : "from a folder, no commit"}, ${Object.keys(manifest.files).length} files and the shim`];
   }
   throw new VendorError(USAGE);
 }
@@ -413,6 +476,7 @@ module.exports = {
   VendorError,
   buildManifest,
   checkVendored,
+  isFolderCopy,
   problemLines,
   readSource,
   updateVendored,

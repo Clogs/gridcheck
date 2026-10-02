@@ -22,8 +22,8 @@ function namer(surface) {
 function modeText(mode, t) {
   const texts = {
     managed: `This tree is in managed mode: the CLI boots and stops its server (${t("up")}, ${t("down")}), and a run boots its own world, so call ${t("down")} first if the server is up.`,
-    attach: `This tree is in attach mode: its server is started by hand with EVEJS_AGENT_BRIDGE=1 set, and the tools work on that live server. ${t("up")} and ${t("down")} refuse, and a run uses the server as it is: its world is not restored and the server stays up. If no server is up, ask the user to start one.`,
-    auto: `This tree is in auto mode. When its server is up (one the user started with EVEJS_AGENT_BRIDGE=1 set, or one ${t("up")} started), the tools and runs use it as it is: a run doesn't restore its world, and the server stays up. When none is up, a run boots its own world and stops it after, and ${t("up")} starts one. ${t("down")} stops only a server ${t("up")} started. ${t("status")} says which applies now.`,
+    attach: `This tree is in attach mode: the user starts its server by hand (npm start or StartServer.bat), and the tools work on that live server. ${t("up")} and ${t("down")} refuse, and a run uses the server as it is: its world is not restored and the server stays up. If no server is up, ask the user to start one.`,
+    auto: `This tree is in auto mode. When its server is up (one the user started, or one ${t("up")} started), the tools and runs use it as it is: a run doesn't restore its world, and the server stays up. When none is up, a run boots its own world and stops it after, and ${t("up")} starts one. ${t("down")} stops only a server ${t("up")} started. ${t("status")} says which applies now.`,
   };
   return texts[mode] || texts.auto;
 }

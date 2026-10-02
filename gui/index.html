@@ -62,7 +62,7 @@
     <span class="logo"><svg viewBox="0 0 20 20" aria-hidden="true"><polygon points="10,1 19,10 10,19 1,10"/><circle cx="10" cy="10" r="3"/></svg></span>
     <b>Gridcheck</b><span id="context" class="ver"></span>
   </div>
-  <div class="tree"><span class="lbl" id="tree-lbl">Tree</span>
+  <div class="tree"><span class="lbl" id="tree-lbl">Eve.js instance</span>
     <div id="tpick" class="tpick">
       <button id="tree" type="button" class="tpick-btn" aria-haspopup="listbox" aria-expanded="false" aria-labelledby="tree-lbl"></button>
       <div id="tree-list" class="tpick-list" role="listbox" aria-labelledby="tree-lbl" hidden></div>
@@ -189,34 +189,43 @@
   <section id="tab-install" class="tab" hidden>
     <div class="split">
       <aside class="rail">
-        <div class="pane-head"><h2>Trees</h2><span id="trees-count" class="count"></span></div>
-        <div class="tree-filter"><input id="trees-filter" type="search" placeholder="Filter trees" autocomplete="off" spellcheck="false"></div>
+        <div class="pane-head"><h2>Eve.js instances</h2><span id="trees-count" class="count"></span></div>
+        <div class="tree-filter"><input id="trees-filter" type="search" placeholder="Filter Eve.js instances" autocomplete="off" spellcheck="false"></div>
         <div id="trees" class="tree-groups"></div>
         <form id="add-tree" class="add">
-          <label class="lbl" for="add-path">Add a tree by its path</label>
+          <label class="lbl" for="add-path">Add an Eve.js instance by its path</label>
           <div class="row">
-            <input id="add-path" type="text" placeholder="Path to an EveJS tree" autocomplete="off" spellcheck="false">
-            <button type="submit" class="btn">Add</button>
+            <input id="add-path" type="text" placeholder="Path to an Eve.js instance" autocomplete="off" spellcheck="false">
+            <button id="add-browse" type="button" class="btn icon" title="Browse for the folder" aria-label="Browse for the folder"><svg class="i" aria-hidden="true"><use href="#i-folder"></use></svg></button>
+            <button type="submit" class="btn icon" title="Add this Eve.js instance" aria-label="Add this Eve.js instance"><svg class="i" aria-hidden="true"><use href="#i-check"></use></svg></button>
           </div>
         </form>
       </aside>
       <div class="pane-scroll">
-        <div id="install-empty" class="empty">Pick or add a tree.</div>
+        <div id="install-empty" class="onboard">
+          <div class="onboard-card">
+            <span class="onboard-icon"><svg class="i" aria-hidden="true"><use href="#i-folder"></use></svg></span>
+            <h2 id="onboard-title">Add an Eve.js instance to get started</h2>
+            <p id="onboard-lede">Gridcheck tests an EveJS server, so it needs to know where one lives. An Eve.js instance is the folder
+              that holds EveJS's <code>server/</code> folder: an unpacked EveJS zip, or a checkout of your fork.</p>
+            <ol class="onboard-steps">
+              <li>Click <b>Browse for an Eve.js instance</b> below.</li>
+              <li>Open the folder that contains <code>server/</code>. Folders that are Eve.js instances are marked <span class="tpill ok">Eve.js instance</span>.</li>
+              <li>Click <b>Add this Eve.js instance</b>. It's remembered, and this tab then walks you through installing Gridcheck into it.</li>
+            </ol>
+            <button id="onboard-browse" type="button" class="btn primary big"><svg class="i" aria-hidden="true"><use href="#i-folder"></use></svg>Browse for an Eve.js instance</button>
+            <p class="muted onboard-alt">Or paste its path into <b>Add an Eve.js instance by its path</b> on the left.</p>
+          </div>
+        </div>
         <div id="install-detail" class="setup" hidden>
           <div class="dhead">
             <div><div id="install-root" class="crumbs"></div><h1 id="install-title"></h1></div>
             <span class="spacer"></span>
             <button id="install-refresh" type="button" class="btn sm">&#x21BB; Refresh</button>
           </div>
-          <div class="legend" aria-label="How references look">
-            <span class="lbl">How references look</span>
-            <span class="it"><span class="ref path"><svg class="i" aria-hidden="true"><use href="#i-folder"></use></svg>folder/</span>folder</span>
-            <span class="it"><span class="ref path"><svg class="i" aria-hidden="true"><use href="#i-file"></use></svg>file.json</span>file</span>
-            <span class="it"><span class="ref cmd"><svg class="i" aria-hidden="true"><use href="#i-prompt"></use></svg>gridcheck doctor</span>command</span>
-            <span class="it"><span class="ref commit"><svg class="i" aria-hidden="true"><use href="#i-commit"></use></svg>26342fe</span>commit</span>
-            <span class="it"><span class="ref ver"><svg class="i" aria-hidden="true"><use href="#i-tag"></use></svg>0.1.0</span>version</span>
-            <span class="it"><span class="ref env"><svg class="i" aria-hidden="true"><use href="#i-dollar"></use></svg>VAR=1</span>variable</span>
-            <span class="spacer"></span><span class="muted">Click a reference to copy it</span>
+          <div class="panel precheck">
+            <div class="panel-head"><h3>Precheck</h3><span class="right muted">What the Eve.js instance must already have. Gridcheck checks it, but doesn't install it.</span></div>
+            <div id="setup-pre"></div>
           </div>
           <div id="setup-hero" class="hero"></div>
           <div class="panel checklist">
@@ -238,7 +247,7 @@
         <button id="patches-refresh" type="button" class="btn sm">&#x21BB; Refresh</button>
       </div>
       <p class="lede">Optional edits to stock EveJS, written as anchored insertions with a marker comment. Revert gives each file
-        back byte for byte. The tree's server must be down.</p>
+        back byte for byte. The Eve.js instance's server must be down.</p>
       <div class="panel">
         <table id="patches" class="tbl">
           <thead><tr><th>Patch</th><th>State</th><th>What it does</th><th></th></tr></thead>
@@ -261,7 +270,7 @@
           <span class="r"><span class="tg up">server up</span>needs a running server</span>
           <span class="r"><span class="tg down">server down</span>needs it stopped</span>
           <span class="r"><span class="tg mode">auto · managed</span>not in attach mode</span>
-          <span class="r"><span class="tg write">writes files</span>changes the tree</span>
+          <span class="r"><span class="tg write">writes files</span>changes the Eve.js instance</span>
           <span class="r"><span class="tg mcp">MCP</span>agents have it too</span>
         </div>
       </aside>
@@ -282,16 +291,39 @@
   </section>
 </main>
 
-<dialog id="preview" aria-labelledby="preview-title">
-  <div class="dialog-h"><h2 id="preview-title">Preview</h2></div>
+<dialog id="preview" class="pv" aria-labelledby="preview-title">
+  <div class="dialog-h">
+    <span id="preview-glyph" class="pv-glyph"></span>
+    <div class="pv-head"><h2 id="preview-title">Preview</h2><div id="preview-where" class="pv-where"></div></div>
+  </div>
   <div class="dialog-b">
-    <ul id="preview-refused" class="problems"></ul>
     <div id="preview-steps"></div>
   </div>
   <div class="dialog-f">
     <p id="preview-note" class="note"></p>
-    <button id="preview-close" type="button" class="btn">Close</button>
+    <button id="preview-close" type="button" class="btn ghost">Cancel</button>
+    <button id="preview-again" type="button" class="btn" hidden>Preview again</button>
     <button id="preview-run" type="button" class="btn primary">Run</button>
+  </div>
+</dialog>
+
+<dialog id="browse" class="browse" aria-labelledby="browse-title">
+  <div class="dialog-h"><h2 id="browse-title">Choose an Eve.js instance</h2></div>
+  <div class="dialog-b">
+    <p class="muted browse-help">Open the folder that contains EveJS's <code>server/</code> folder, then click <b>Add this Eve.js instance</b>.
+      Click a folder to open it.</p>
+    <form id="browse-go" class="row browse-bar">
+      <button id="browse-up" type="button" class="btn sm" title="Up one folder"><svg class="i" aria-hidden="true"><use href="#i-up"></use></svg>Up</button>
+      <input id="browse-path" type="text" aria-label="Folder" autocomplete="off" spellcheck="false">
+      <button type="submit" class="btn sm">Go</button>
+    </form>
+    <div id="browse-drives" class="row browse-drives" hidden></div>
+    <ul id="browse-list" class="browse-list" aria-label="Folders"></ul>
+  </div>
+  <div class="dialog-f">
+    <p id="browse-note" class="note"></p>
+    <button id="browse-close" type="button" class="btn">Cancel</button>
+    <button id="browse-add" type="button" class="btn primary" disabled>Add this Eve.js instance</button>
   </div>
 </dialog>
 

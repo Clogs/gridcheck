@@ -156,6 +156,31 @@ test("a tag is read from the checkout the tool runs from; anything else that isn
   assert.ok(![...own.files.keys()].some((file) => file.startsWith("test/") || file.startsWith(".")));
 });
 
+test("a Gridcheck folder that isn't a checkout installs its files from disk, with no commit", (t) => {
+  const s = setup(t);
+  // An unpacked zip: the same files, no .git, plus what a working folder collects.
+  const folder = path.join(s.dir, "unpacked");
+  fs.cpSync(s.source, folder, { recursive: true, filter: (from) => path.basename(from) !== ".git" });
+  write(folder, "node_modules/dep/index.js", "// installed, not ours\n");
+  write(folder, "_local/gui.json", "{}\n");
+  write(folder, ".serena/x", "\n");
+  assert.ok(vendor.isFolderCopy(folder));
+  const result = vendor.updateVendored({ tree: s.tree, from: folder });
+  assert.strictEqual(fs.readFileSync(path.join(s.target, "core", "crlf.js"), "latin1"), CRLF, "bytes are kept as they are on disk");
+  assert.strictEqual(fs.readFileSync(s.shim, "utf8"), SHIM);
+  const manifest = JSON.parse(fs.readFileSync(path.join(s.target, "VENDOR.json"), "utf8"));
+  assert.strictEqual(manifest.commit, null);
+  assert.strictEqual(manifest.version, "1.2.3");
+  assert.deepStrictEqual(Object.keys(manifest.files), ["bridge/entry.js", "bridge/shim.js", "core/crlf.js", "core/mixed.js", "package.json"],
+    "test/, dotfiles, node_modules/, _local/ and the compat report stay behind");
+  assert.strictEqual(result.dirty, false);
+  assert.strictEqual(vendor.checkVendored({ tree: s.tree }).ok, true);
+  assert.match(vendor.runVendor("update", { tree: s.tree, from: folder, dryRun: true })[0], /^would vendor gridcheck 1\.2\.3 \(no git commit\) from /);
+  assert.match(vendor.runVendor("check", { tree: s.tree })[0], /from a folder, no commit/);
+  // A tree's own copy has a VENDOR.json, so it is never taken for a folder copy.
+  assert.ok(!vendor.isFolderCopy(s.target));
+});
+
 test("the installed shim loads the vendored bridge from where the stock loader finds it", (t) => {
   const s = setup(t);
   const real = path.resolve(__dirname, "..");

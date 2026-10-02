@@ -29,8 +29,8 @@ Work through these in order. Each step ends on its own criterion.
 
 1. **Orient.** `gridcheck status`, then `gridcheck doctor`. Done when you know the server mode (auto, attach
    or managed), whether a server is up, which scenarios and worlds exist, and that doctor reports
-   no problem for what you need. In attach mode with no server up, ask the user to start one with
-   `EVEJS_AGENT_BRIDGE=1` set; nothing else will start it.
+   no problem for what you need. In attach mode with no server up, ask the user to start one
+   (`npm start` or `StartServer.bat`); nothing else will start it.
 2. **Learn the format.** `gridcheck primer` prints the scenario format, the setup steps and player
    actions, the condition syntax and each plugin's notes. Done when you have read it in this
    session: it is the only reference for those, and it matches this tree's plugins.

@@ -24,10 +24,15 @@ Run from a checkout of this repo, the GUI manages any tree and vendors from that
 committed `HEAD`. Its tree list holds:
 
 - the trees given with `--tree`;
-- trees added on the Install tab by typing a path, remembered in the checkout's `_local/gui.json`;
+- trees added on the Install tab by typing a path or picking the folder with **Browse…**, remembered in
+  the checkout's `_local/gui.json`;
 - the checkout's sibling folders that are EveJS trees (they have `server/src`).
 
-The **Tree** picker in the header lists, in columns, each tree with its path, its EveJS version (from
+With no trees at all, the page opens on the Install tab, which explains what a tree is and offers
+**Browse for an Eve.js instance**. The browser starts beside the checkout, marks the folders that are EveJS
+trees, and adds the one you pick.
+
+The **Eve.js instance** picker in the header lists, in columns, each tree with its path, its EveJS version (from
 `server/package.json`; each version gets its own colour), whether gridcheck is installed, and its scenario
 runs with a pass bar and passed and failed counts. Trees with the most runs come first. Arrow keys,
 Enter and Escape work in the list. The tag beside the picker (installed or not installed) opens the
@@ -138,19 +143,21 @@ tree shows its path and its EveJS version, read from the tree's `server/package.
 `package.json`). Set-up trees also show the copy's version, the mode and whether the server is up. A
 filter box appears once there are six trees or more.
 
-For the chosen tree, a banner at the top says whether it can run tests: "Ready to run tests", how
-many things are left to do, or "Not set up yet". While anything other than the tree's own
-dependencies keeps it from running tests, the banner offers **Set up everything…**, which runs
+For the chosen tree, a **Precheck** panel comes first: the tree's own dependencies and reference
+data, which gridcheck checks but doesn't install. Below it, a banner says whether it can run tests: "Ready to run tests", how
+many things are left to do, or "Gridcheck not installed yet". While anything other than the tree's own
+dependencies keeps it from running tests, the banner offers **Do full setup for me…**, which runs
 [`gridcheck setup`](TREES.md#setting-a-tree-up): install, config, the agents found, the patches, the
-`starter` world and a smoke test, skipping what is done. A tree with no copy also gets "Install
-only…". A bar under its text has
+`starter` world and a smoke test, skipping what is done. A tree with no copy gets two cards instead,
+each saying what it does: **Do full setup for me…**, and **Install…**, which copies
+`tools/gridcheck` and the bridge shim and leaves the rest to the checklist. A bar under its text has
 one segment per row. Below it is a checklist. Each row has an icon for its topic with a badge for
 its state (done, needed, optional, a problem, or information), one line on its state and at most
 one button. Click a row to open its details. Rows that need you start open. The Install tab's
 count is the number of rows that keep the tree from running tests.
 
 Paths, commands, commits, versions and environment variables on this tab are coloured chips, one
-colour and icon per kind; the legend above the banner shows them. Click a chip to copy it.
+colour and icon per kind. Click a command or a full path to copy it.
 
 1. **gridcheck is installed.** Not installed, or its version and commit, and whether it still matches
    its `VENDOR.json` (the drift check, with every edited, added or missing file in the details).
@@ -159,15 +166,20 @@ colour and icon per kind; the legend above the banner shows them. Click a chip t
    adds `--force`, as does replacing a folder that was never vendored. The shim's state is in the
    details.
 2. **Server mode.** The mode from `gridcheck.config.json`, or "Choose a server mode" when there's no
-   file. The details have the three modes side by side, and "Write config…" runs
+   file. The details have a switch for the three modes, Auto marked as the default, and a panel
+   for the one chosen: when to use it and when to pick another, what a run does in each case
+   (server up or not), and its good and bad sides. "Write config…" runs
    `gridcheck init --mode <mode>`, with `--force` when the file exists. Auto mode uses the tree's
    server when it's up and starts its own when it isn't. Managed mode always starts its own; attach
-   mode only uses a server you start.
+   mode only uses a server you start. A red banner under the panel, above "Write config…", says never to use gridcheck on
+   an instance people play on, and why, in every mode: `login --user` takes over an account with no
+   password, and a boot replaces every player's characters. The Mode fact in the bar repeats it,
+   with that mode's own risk, on hover.
 3. **AI agents.** Claude Code and Codex: whether each is on this machine and whether it already
    runs this tree's MCP server. Each agent that isn't connected has its own "Connect…" button
    ("Set up anyway…" when it wasn't found), which runs `gridcheck agents setup <agent>`. The preview
-   shows the lines it adds to the tree's `.mcp.json` or to Codex's `config.toml`. "Other agents
-   (CLI)" has "Add pointer…", which adds a pointer to [CLI.md](CLI.md) to the tree's `AGENTS.md` or
+   shows the lines it adds to the tree's `.mcp.json` or to Codex's `config.toml`. "CLI only"
+   has "Add pointer…", which adds a pointer to [CLI.md](CLI.md) to the tree's `AGENTS.md` or
    `CLAUDE.md`, for agents without MCP. Setup only adds entries.
    [GUIDE.md](GUIDE.md#setting-up-agents) has the rules. Agents are optional.
 4. **Dependencies and reference data.** Its npm dependencies (`node_modules` at the root and in
@@ -229,16 +241,22 @@ revert". [PATCHES.md](PATCHES.md) describes the patches.
 
 ## Every change is previewed
 
-Set up everything, install, update, config, agent setup, apply and revert all work the same way:
+Full setup, install, update, config, agent setup, apply and revert all work the same way:
 
 1. The page asks the server for a preview. The server runs the command with `--dry-run` and
    returns the command, the folder it runs in, and the dry run's output: the files a vendor update
    adds, changes and removes; the config `init` would write; the lines a patch inserts or removes,
    with their line endings.
-2. The dialog shows it. If the change would be refused, it says why and offers no Run button.
+2. The dialog shows it, read from that output (`core/previewSummary.js`): each file as a card that
+   says whether it's new or already there and changed, with the lines it adds; for an update, which
+   of the copy's files are new, which existing ones are overwritten, and which are removed; the
+   checks the change passed; and, for agent setup, what to do next. The command and its raw output
+   sit under "Technical details", open when the output wasn't recognised. If the change would be
+   refused, each reason is a card that says how to fix it, and Preview again replaces Run.
 3. Run asks the server to run that same command, without `--dry-run`, by the preview's ID. A preview
-   runs once and expires after 10 minutes. The output and exit code replace the preview. A command
-   gets 5 minutes, and Set up everything 20, since a first setup builds a world and boots twice.
+   runs once and expires after 10 minutes. What it did, and what to do next, replace the preview; the
+   output stays under "Technical details", open if it failed. A command gets 5 minutes, and full
+   setup 20, since a first setup builds a world and boots twice.
 
 A change is refused when:
 
@@ -276,12 +294,13 @@ The page uses a small JSON API, and a script or an agent can call it the same wa
 | `GET /gui/api/context` | Checkout or vendored copy, its version and commit. |
 | `GET /gui/api/trees` | The tree list: `id`, `root`, EveJS version (`evejs`), copy version, mode, server up, and `runs` (`total`, `passed`, `failed` scenario runs). |
 | `POST /gui/api/trees` `{ "path": "<tree>" }` | Add a tree. |
+| `GET /gui/api/browse?path=<folder>` | The folder browser: `path`, `parent`, `tree` (whether it's an EveJS tree), `dirs` (each `{ name, path, tree }`), `truncated`, and `drives` on Windows. With no `path`, the checkout's parent folder. Refused from a vendored copy. |
 | `GET /gui/api/tree?tree=<id>` | The Install tab's summary: `copy`, `shim`, `config`, `prerequisites` (each `{ name, path, ok, fix }`), `serverUp`, `serverPid`, `plugins`, `agents` (each `{ id, name, installed, evidence, file, registered, serverName, problem }`). |
 | `GET /gui/api/scenarios?tree=<id>` | `scenarios` (the copy's `run --json`: each `{ name, file, plugin, description, world, recipe, timeout, expect, problem }`) and `recipes` (`world recipes --json`: each `{ name, description, state, why, savedAt, steps }`); `null` for a copy without them. |
 | `GET /gui/api/commands?tree=<id>` | The copy's `help --json`: `prefix`, `groups`, `commands` (each `{ name, group, summary, usage, needs, managed, writes, mcp, flags, examples, note, plugin }`) and `mcpTools`, with `source` `tree`, or `tool` and a `note` when it's this copy's list. |
 | `GET /gui/api/doctor?tree=<id>` | `gridcheck doctor --json`, parsed. |
 | `GET /gui/api/patches?tree=<id>` | `gridcheck patch status --json`, parsed. |
-| `POST /gui/api/preview` `{ "tree": "<id>", "action": "vendor" \| "init" \| "agents" \| "patch-apply" \| "patch-revert", "mode": "auto", "agents": ["claude", "codex"], "id": "xmpp-port", "force": false }` | The preview: `ok`, `refused`, each step's command and dry-run output, and a `previewID` when `ok`. |
+| `POST /gui/api/preview` `{ "tree": "<id>", "action": "vendor" \| "init" \| "agents" \| "patch-apply" \| "patch-revert", "mode": "auto", "agents": ["claude", "codex"], "id": "xmpp-port", "force": false }` | The preview: `ok`, `refused`, each step's command and dry-run output, and a `previewID` when `ok`. For the dialog, `blockers` (`refused` as `{ kind }` objects: `server-up`, `dirty`, `no-dry-run`, `failed`, `other`), `checks` (what it passed) and `summary` (`changes`, `next`, `notes`, read from the output). |
 | `POST /gui/api/run` `{ "previewID": "..." }` | Runs the previewed commands; each step's output and exit code. |
 | `GET /gui/api/runs?tree=<id>` | The runs, newest first, each with `result`: `name`, `world`, `startedAtMs`, `stoppedAtMs`, `passed`, `exitCode`, `missing`, `expectations` (a count). |
 | `GET /viewer/timeline?tree=<id>&run=<run>&from=<byte>` | The next chunk of a run's `timeline.jsonl`, as the Runs tab reads it. |
