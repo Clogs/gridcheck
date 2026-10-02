@@ -452,7 +452,8 @@ world, runs setup, watches until a stop condition, shuts the server down and wri
 expected against observed. In attach mode it uses the live server as it is. In auto mode it does
 the first when no server is up and the second when one is. Scenarios are JSON
 files in the tree's `tools/e2e-scenarios/`, in `tools/evejs-e2e/scenarios/` and in each active
-plugin's `plugins/<name>/scenarios/`; `e2e run` lists them all. Pass a name or a path.
+plugin's `plugins/<name>/scenarios/`; `e2e run` lists them all, and `e2e run --json` lists each
+with its world, timeout, expectations and any problem loading it. Pass a name or a path.
 
 ```bash
 node tools/evejs-e2e/bin/e2e.js run                               # list the scenarios

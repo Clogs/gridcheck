@@ -50,7 +50,7 @@
       else if (key.startsWith("on")) node.addEventListener(key.slice(2), value);
       else node.setAttribute(key, value === true ? "" : String(value));
     }
-    for (const child of children.flat()) {
+    for (const child of children.flat(Infinity)) {
       if (child === null || child === undefined || child === false) continue;
       node.append(child instanceof Node ? child : document.createTextNode(String(child)));
     }
@@ -539,7 +539,7 @@
       h("dl", {}, rows.flatMap(([key, value]) => [h("dt", { text: key }), h("dd", {}, value)])),
       update || edited ? h("button", { type: "button", className: "btn sm primary", text: edited ? "Open Install" : "Update…",
         onclick: () => (edited || !checkout ? showTab("install") : preview({ action: "vendor", force: false, from: "" })) }) : null);
-    return [cls, "pkg", "Copy", [v(tree.copy.version || "?"), update || edited ? h("span", { className: "flag" }) : null], tip];
+    return [cls, "pkg", "Copy", [v(tree.copy.version || "?"), update || edited ? h("span", { className: "fdot" }) : null], tip];
   }
 
   function selectTree(id) {
@@ -1167,7 +1167,7 @@
     const steps = tree.config.mode === "attach"
       ? [["Log in to the server you started", `${CLI} login`], ["Run a scenario", `${CLI} run smoke-undock`]]
       : [["Build a test world", `${CLI} world build starter`], ["Run a scenario", `${CLI} run loadout-npc-fight`]];
-    steps.forEach(([why, command], index) => pane.append(h("div", { className: "cmd" },
+    steps.forEach(([why, command], index) => pane.append(h("div", { className: "lcmd" },
       h("span", { className: "n", text: String(index + 1) }), h("code", { text: command }), h("span", { className: "why", text: why }), copyButton(command))));
     pane.append(h("p", { className: "muted" }, "Run these from ", ref("path", tree.root, { dir: true }), ". This tree's copy can't list its scenarios; ",
       "update it to pick one here. For every command, see the Commands tab."));
@@ -1247,8 +1247,8 @@
     $("install-title").textContent = tree.name;
     const root = $("install-root");
     root.textContent = "";
-    root.append(ref("path", tree.root, { dir: true }), tree.evejs ? ref("ver", `EveJS ${tree.evejs}`, { copy: false }) : null,
-      tree.git === false ? h("span", { text: "not a git checkout, so uncommitted changes can't be checked" }) : null);
+    root.append(...[ref("path", tree.root, { dir: true }), tree.evejs ? ref("ver", `EveJS ${tree.evejs}`, { copy: false }) : null,
+      tree.git === false ? h("span", { text: "not a git checkout, so uncommitted changes can't be checked" }) : null].filter(Boolean));
     const rows = tree.problem ? [] : setupRows(tree);
     renderHero(tree, rows);
     const list = $("setup-rows");

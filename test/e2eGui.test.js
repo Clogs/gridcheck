@@ -308,3 +308,42 @@ test("the page needs no token and carries no data; every data route needs it", a
   assert.throws(() => gui.parseGuiArgs(["--port", "nope"]), /--port takes a port number/);
   assert.throws(() => gui.parseGuiArgs(["--bogus"]), /unknown argument/);
 });
+
+test("the Run a test card and the Commands tab read the tree's copy; an older copy gets this one's command list", async (t) => {
+  const s = setup(t);
+  const catalog = { prefix: "node tools/evejs-e2e/bin/e2e.js", groups: [{ id: "tool", title: "This tool" }],
+    commands: [{ name: "help", group: "tool", summary: "Prints every command.", usage: ["help [--json]"], flags: [], examples: [] }], mcpTools: [] };
+  let treeKnowsJson = true;
+  const calls = [];
+  const run = async (step) => {
+    const inTree = step.cwd === s.tree;
+    const args = step.args.slice(1);
+    calls.push([inTree ? "tree" : "own", ...args]);
+    if (args[0] === "run") return { exitCode: 0, output: `${JSON.stringify([{ name: "demo", world: "starter", recipe: "starter", expect: [] }])}\n`, ms: 1 };
+    if (args[0] === "world") return { exitCode: 0, output: `${JSON.stringify([{ name: "starter", state: "built", steps: ["fresh"] }])}\n`, ms: 1 };
+    if (args[0] === "help") {
+      return { exitCode: 0, output: inTree && !treeKnowsJson ? "node tools/evejs-e2e/bin/e2e.js <command>\n  e2e help\n" : JSON.stringify(catalog), ms: 1 };
+    }
+    return { exitCode: 1, output: "unexpected\n", ms: 1 };
+  };
+  const app = gui.createGui({ context: s.context, stateFile: s.stateFile, run });
+  const id = body(await app.handle("GET", "/gui/api/trees")).trees.find((tree) => tree.name === "tree").id;
+
+  const scenarios = body(await app.handle("GET", "/gui/api/scenarios", { tree: id }));
+  assert.deepStrictEqual(scenarios.scenarios.map((row) => row.name), ["demo"]);
+  assert.deepStrictEqual(scenarios.recipes.map((row) => [row.name, row.state]), [["starter", "built"]]);
+  assert.deepStrictEqual(calls.slice(0, 2).sort(), [["tree", "run", "--json"], ["tree", "world", "recipes", "--json"]]);
+
+  const fromTree = body(await app.handle("GET", "/gui/api/commands", { tree: id })).commands;
+  assert.strictEqual(fromTree.source, "tree");
+  assert.deepStrictEqual(fromTree.commands.map((command) => command.name), ["help"]);
+  treeKnowsJson = false;
+  const fromTool = body(await app.handle("GET", "/gui/api/commands", { tree: id })).commands;
+  assert.strictEqual(fromTool.source, "tool");
+  assert.match(fromTool.note, /older than this list/);
+  assert.deepStrictEqual(calls.at(-1), ["own", "help", "--json"], "the fallback is this copy's own help --json");
+
+  const summary = body(await app.handle("GET", "/gui/api/tree", { tree: id })).tree;
+  assert.strictEqual(summary.serverPid, null);
+  assert.ok(summary.prerequisites.every((row) => typeof row.path === "string"), "each prerequisite names its folder");
+});

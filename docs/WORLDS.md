@@ -62,7 +62,7 @@ a fresh game store, in the same syntax as a scenario's setup:
 `loadout` and `wait`: steps that put a character somewhere, but nothing that watches.
 
 ```
-node tools/evejs-e2e/bin/e2e.js world recipes          # each recipe, and whether its world is built and current
+node tools/evejs-e2e/bin/e2e.js world recipes          # each recipe, and whether its world is built and current (--json for data)
 node tools/evejs-e2e/bin/e2e.js world build starter    # boot fresh, run the steps, stop, save
 ```
 

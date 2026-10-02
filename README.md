@@ -153,8 +153,9 @@ run it with `e2e_run_scenario`. [docs/GUIDE.md](docs/GUIDE.md#agent-mcp-tools) l
 
 ### The CLI
 
-`node tools/evejs-e2e/bin/e2e.js help` lists every command. The ones used most, with `e2e` standing
-for `node tools/evejs-e2e/bin/e2e.js` in the tree:
+`node tools/evejs-e2e/bin/e2e.js help` lists every command, and the GUI's **Commands** tab says what
+each one does, with its flags. The ones used most, with `e2e` standing for
+`node tools/evejs-e2e/bin/e2e.js` in the tree:
 
 ```bash
 e2e up --world starter | down | status | doctor | agents
