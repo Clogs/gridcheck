@@ -585,6 +585,8 @@ pre {
 .hero h2 { margin: 0; font-size: 16px; font-weight: 600; }
 .hero p { margin: 2px 0 0; color: var(--muted); }
 .hero .btn { margin-left: auto; }
+.hero > .row { margin-left: auto; flex: none; }
+.hero .row .btn { margin-left: 0; }
 .prog { display: flex; gap: 3px; margin-top: 7px; }
 .prog i { width: 34px; height: 4px; border-radius: 2px; background: var(--line); }
 .prog i.ok { background: var(--ok); } .prog i.need, .prog i.bad { background: var(--warn); } .prog i.optional { background: color-mix(in srgb, var(--accent) 55%, transparent); }

@@ -24,6 +24,15 @@ const GROUPS = [
 ];
 
 const DOCS = {
+  setup: {
+    group: "setup", writes: true, needs: "down",
+    summary: "Everything a tree needs before its first run, one command at a time: install the tool, write the config, connect agents, apply the patches, build starter and run smoke-undock. Skips what is done, so it can run again after a fix.",
+    flags: [["--tree <path>", "the tree you're in", "The tree to set up."], ["--mode auto|attach|managed", "auto, or the config's", "The server mode to write."],
+      ["--agents claude,codex,cli|none", "the agents found", "Which agents to connect."],
+      ["--skip agents,patches,world,smoke", null, "Leave those steps out."], ["--force", null, "Replace a copy whose files were edited."],
+      ["--dry-run", null, "Show each command and what it would change; write nothing."]],
+    examples: [["e2e setup --tree F:/EveJS-0.12.9", null], ["e2e setup --tree F:/EveJS-0.12.9 --dry-run", "see the plan first"]],
+  },
   init: {
     group: "setup", writes: true,
     summary: "Writes the tree's e2e.config.json with its server mode, and probes which listeners the tree's source can move.",

@@ -58,15 +58,30 @@ node --max-old-space-size=8192 tools/DatabaseCreator/database-creator.js \
   --sde-url https://developers.eveonline.com/static-data/tranquility/eve-online-static-data-3396210-jsonl.zip --force
 ```
 
-**3. Install the tool into the tree, from the GUI.** From the evejs-e2e checkout:
+**3. Set the tree up.** From the evejs-e2e checkout, one command does the rest:
+
+```bash
+node bin/e2e.js setup --tree F:/EveJS-0.12.9 --dry-run   # every command it would run, and what each would change
+node bin/e2e.js setup --tree F:/EveJS-0.12.9             # about two minutes on a new tree
+```
+
+It installs the tool into `tools/evejs-e2e/`, writes `e2e.config.json` in auto mode, connects the
+Claude Code and Codex it finds, applies the three optional patches, builds the `starter` world and
+runs `smoke-undock`, printing each command before it runs it. It skips what is already done and
+stops at the first step that fails, so run it again after a fix. `--agents cli` points any other
+agent at [docs/CLI.md](docs/CLI.md) instead, `--agents none` connects none, and `--skip` leaves
+steps out ([docs/TREES.md](docs/TREES.md#setting-a-tree-up)).
+
+**Or set it up from the GUI.** From the evejs-e2e checkout:
 
 ```bash
 node bin/e2e.js gui --tree F:/EveJS-0.12.9 --open
 ```
 
 On Windows, double-clicking `OpenGui.bat` in the checkout does the same without `--tree`: add the
-tree by its path on the Install tab. Open the printed URL if no browser opens. The **Install** tab
-is a checklist, with a banner that says when the tree is ready to run tests:
+tree by its path on the Install tab. Open the printed URL if no browser opens. **Set up everything…**
+on the Install tab runs the same `setup`, previewed first. Or work through the tab's checklist,
+whose banner says when the tree is ready to run tests:
 
 1. "Install…", read what it will copy, then **Run**. That vendors this checkout into
    `tools/evejs-e2e/` and adds a one-file shim the server's loader finds.
@@ -87,7 +102,7 @@ and revert byte for byte. Without them stock reports no NPC decisions and no sla
 outcomes, and two stock trees can't run at once. Each change shows its preview first.
 [docs/GUI.md](docs/GUI.md) describes every tab.
 
-Without the GUI, the same steps are:
+Step by step without the GUI, these are the commands `setup` runs:
 
 ```bash
 node bin/e2e.js vendor update --tree F:/EveJS-0.12.9                     # in the evejs-e2e checkout
@@ -95,14 +110,20 @@ cd F:/EveJS-0.12.9
 node tools/evejs-e2e/bin/e2e.js init                                     # auto mode
 node tools/evejs-e2e/bin/e2e.js agents setup                             # the agents it finds
 node tools/evejs-e2e/bin/e2e.js patch apply last-decision slash-success xmpp-port
+node tools/evejs-e2e/bin/e2e.js world build starter                      # every skill, a fitted Tristan docked in Amamake
+node tools/evejs-e2e/bin/e2e.js run smoke-undock
 ```
 
-**4. Build a starting world and run a fight.** In the tree:
+**4. Run a fight.** From the checkout, `--tree` runs the tree's own copy; in the tree, run the copy
+directly:
 
 ```bash
-node tools/evejs-e2e/bin/e2e.js world build starter        # every skill, a fitted Tristan docked in Amamake
-node tools/evejs-e2e/bin/e2e.js run loadout-npc-fight      # two rats spawn; drones and guns kill one
+node bin/e2e.js --tree F:/EveJS-0.12.9 run loadout-npc-fight   # two rats spawn; drones and guns kill one
+node tools/evejs-e2e/bin/e2e.js run loadout-npc-fight          # the same, in the tree
 ```
+
+`npm link` in the checkout puts `e2e` on your `PATH`, so `e2e --tree <tree> <command>` works from any
+folder, and `e2e <command>` inside a tree ([docs/TREES.md](docs/TREES.md#running-from-a-checkout)).
 
 With no server up, the run boots one, plays the scenario, stops the server, and prints its verdict
 and the path of its `report.md`. If you started the tree's server yourself with

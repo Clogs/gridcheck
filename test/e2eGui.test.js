@@ -34,6 +34,7 @@ const HELP = [
   "  e2e agents [status] [--json] | agents setup [claude] [codex] [--dry-run]",
   "  e2e vendor update [--from <checkout|tag>] [--tree <path>] [--force] [--dry-run] | vendor check [--tree <path>]",
   "  e2e patch list | patch status [<id>] [--json] | patch apply|revert <id>... [--dry-run]",
+  "  e2e setup --tree <path> [--mode auto|attach|managed] [--agents claude,codex,cli|none] [--force] [--dry-run]",
 ].join("\n");
 
 // A runner that records each command and answers help, dry runs and runs.
@@ -219,6 +220,23 @@ test("agent setup is previewed like any change, may run while the server is up, 
   }
   assert.match((await app.handle("POST", "/gui/api/preview", {}, { tree: gui.treeID(s.other), action: "agents", agents: ["claude"] })).body.error,
     /no vendored copy yet/);
+});
+
+test("set up everything previews e2e setup from the checkout, with the mode and agents picked", async (t) => {
+  const s = setup(t);
+  const fake = fakeRun();
+  const app = gui.createGui({ context: s.context, stateFile: s.stateFile, run: fake.run });
+  const id = gui.treeID(s.tree);
+  const previewed = body(await app.handle("POST", "/gui/api/preview", {}, { tree: id, action: "setup", mode: "managed", agents: [] })).preview;
+  assert.strictEqual(previewed.ok, true, JSON.stringify(previewed));
+  const tree = s.tree.split(path.sep).join("/");
+  assert.deepStrictEqual(fake.calls.at(-1), ["setup", "--tree", tree, "--mode", "managed", "--agents", "none", "--dry-run"]);
+  assert.strictEqual(previewed.steps[0].cwd, s.checkout.split(path.sep).join("/"));
+  const ran = body(await app.handle("POST", "/gui/api/run", {}, { previewID: previewed.previewID })).result;
+  assert.strictEqual(ran.ok, true);
+  assert.deepStrictEqual(fake.calls.at(-1), ["setup", "--tree", tree, "--mode", "managed", "--agents", "none"]);
+  const bad = await app.handle("POST", "/gui/api/preview", {}, { tree: id, action: "setup", agents: ["cursor"] });
+  assert.match(JSON.stringify(bad.body), /no agent cursor/);
 });
 
 test("the config is written in auto mode unless another is picked", async (t) => {

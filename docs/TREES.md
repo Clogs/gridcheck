@@ -1,8 +1,39 @@
 # Running evejs-e2e in an EveJS tree
 
-evejs-e2e runs in stock EveJS and in forks of it. This page covers how a tree tells the tool where
-things are, the three ways to run its server, what `e2e doctor` checks, and how the tool itself is
-tested against real trees.
+evejs-e2e runs in stock EveJS and in forks of it. This page covers setting a tree up, how a tree
+tells the tool where things are, the three ways to run its server, what `e2e doctor` checks, and
+how the tool itself is tested against real trees.
+
+## Setting a tree up
+
+`e2e setup --tree <path>`, from a checkout, takes a tree whose own setup is done (its `npm ci` and
+its reference data) to a passing smoke test. It runs six commands, printing each before it runs:
+
+| Step | Command | Skipped when |
+| --- | --- | --- |
+| 1 | `vendor update` from the checkout | the copy is at the checkout's `HEAD` and unedited; always, run from a tree's own copy |
+| 2 | `init --mode <mode>` | `e2e.config.json` is there and valid, and `--mode` doesn't change it |
+| 3 | `agents setup` | every agent asked for is set up; no agent was found and none was named |
+| 4 | `patch apply` with each patch the copy reports absent | every patch is applied or detected |
+| 5 | `world build starter` | `starter` is built and current; attach mode |
+| 6 | `run smoke-undock` | attach mode, where you start the server yourself |
+
+Before step 1 it refuses, changing nothing, while the tree's server is up, or when its
+dependencies or reference data are missing; the message names the fix. A partly applied patch
+stops it at step 4 with the `patch revert` to run. It stops at the first command that fails; run
+it again after the fix, and the steps already done are skipped.
+
+| Flag | Default | |
+| --- | --- | --- |
+| `--tree <path>` | the tree you're in | |
+| `--mode auto\|attach\|managed` | the config's, or `auto` | |
+| `--agents claude,codex,cli\|none` | the Claude Code and Codex found | `cli` adds the pointer to [CLI.md](CLI.md) for any other agent |
+| `--skip agents,patches,world,smoke` | none | |
+| `--force` | | replace a copy whose files were edited |
+| `--dry-run` | | each command's own dry run; world and smoke are only shown |
+
+Setup exits 0 when the tree is ready, 1 when a step failed, and 2 when it refused to start. The
+GUI's **Set up everything…** previews `setup --dry-run` and then runs it ([GUI.md](GUI.md)).
 
 ## The tree's config
 

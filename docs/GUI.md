@@ -139,7 +139,11 @@ tree shows its path and its EveJS version, read from the tree's `server/package.
 filter box appears once there are six trees or more.
 
 For the chosen tree, a banner at the top says whether it can run tests: "Ready to run tests", how
-many things are left to do, or "Not set up yet" with an Install button. A bar under its text has
+many things are left to do, or "Not set up yet". While anything other than the tree's own
+dependencies keeps it from running tests, the banner offers **Set up everything…**, which runs
+[`e2e setup`](TREES.md#setting-a-tree-up): install, config, the agents found, the patches, the
+`starter` world and a smoke test, skipping what is done. A tree with no copy also gets "Install
+only…". A bar under its text has
 one segment per row. Below it is a checklist. Each row has an icon for its topic with a badge for
 its state (done, needed, optional, a problem, or information), one line on its state and at most
 one button. Click a row to open its details. Rows that need you start open. The Install tab's
@@ -162,8 +166,10 @@ colour and icon per kind; the legend above the banner shows them. Click a chip t
 3. **AI agents.** Claude Code and Codex: whether each is on this machine and whether it already
    runs this tree's MCP server. Each agent that isn't connected has its own "Connect…" button
    ("Set up anyway…" when it wasn't found), which runs `e2e agents setup <agent>`. The preview
-   shows the lines it adds to the tree's `.mcp.json` or to Codex's `config.toml`. Setup only adds
-   entries. [GUIDE.md](GUIDE.md#setting-up-agents) has the rules. Agents are optional.
+   shows the lines it adds to the tree's `.mcp.json` or to Codex's `config.toml`. "Other agents
+   (CLI)" has "Add pointer…", which adds a pointer to [CLI.md](CLI.md) to the tree's `AGENTS.md` or
+   `CLAUDE.md`, for agents without MCP. Setup only adds entries.
+   [GUIDE.md](GUIDE.md#setting-up-agents) has the rules. Agents are optional.
 4. **Dependencies and reference data.** Its npm dependencies (`node_modules` at the root and in
    `server/`, where their `package.json` lists any) and the reference data (the data dir's
    `solarSystems/data.json`), each missing one with the command that fixes it. The GUI doesn't run
@@ -223,7 +229,7 @@ revert". [PATCHES.md](PATCHES.md) describes the patches.
 
 ## Every change is previewed
 
-Install, update, config, agent setup, apply and revert all work the same way:
+Set up everything, install, update, config, agent setup, apply and revert all work the same way:
 
 1. The page asks the server for a preview. The server runs the command with `--dry-run` and
    returns the command, the folder it runs in, and the dry run's output: the files a vendor update
@@ -231,7 +237,8 @@ Install, update, config, agent setup, apply and revert all work the same way:
    with their line endings.
 2. The dialog shows it. If the change would be refused, it says why and offers no Run button.
 3. Run asks the server to run that same command, without `--dry-run`, by the preview's ID. A preview
-   runs once and expires after 10 minutes. The output and exit code replace the preview.
+   runs once and expires after 10 minutes. The output and exit code replace the preview. A command
+   gets 5 minutes, and Set up everything 20, since a first setup builds a world and boots twice.
 
 A change is refused when:
 

@@ -35,6 +35,7 @@ const { spawn, spawnSync } = require("node:child_process");
 const vendor = require("./vendor");
 const treeConfig = require("./treeConfig");
 const agents = require("./agents");
+const { prerequisites, serverUpInfo, serverUpReason } = require("./treeState");
 const { createToolRegistry, loadPlugins, treeAt } = require("./plugins");
 const { createAgentBridgeHttp } = require("../bridge/http");
 const { createAgentBridgeViewer, resolveRunDir } = require("../bridge/viewer");
@@ -91,16 +92,6 @@ function readJSON(file) {
     return JSON.parse(fs.readFileSync(file, "utf8"));
   } catch (_error) {
     return null;
-  }
-}
-
-function pidAlive(pid) {
-  if (!pid) return false;
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error) {
-    return Boolean(error && error.code === "EPERM");
   }
 }
 
@@ -231,42 +222,6 @@ function createTreeList({ context, stateFile = null, extra = [] }) {
 }
 
 // The tree's server, if it's up: a live bridge handshake, or a live `e2e up` run.
-function serverUpInfo(root, config = treeConfig.loadTreeConfig(root)) {
-  const handshake = readJSON(config.handshake);
-  if (handshake && handshake.port && pidAlive(Math.trunc(Number(handshake.pid) || 0))) return { pid: Number(handshake.pid), byE2e: false };
-  const run = readJSON(path.join(config.e2eDir, "run.json"));
-  if (run && !run.stoppedAtMs && pidAlive(Math.trunc(Number(run.pid) || 0))) return { pid: Number(run.pid), byE2e: true };
-  return null;
-}
-
-function serverUpReason(root, config = treeConfig.loadTreeConfig(root)) {
-  const up = serverUpInfo(root, config);
-  if (!up) return null;
-  return `the tree's server is up (pid ${up.pid}${up.byE2e ? ", started by e2e up" : ""})`;
-}
-
-function prerequisites(root, config) {
-  const rows = [];
-  for (const dir of [root, config.serverDir]) {
-    const pkg = readJSON(path.join(dir, "package.json"));
-    if (!pkg || !Object.keys(pkg.dependencies || {}).length) continue;
-    const where = slashed(path.relative(root, dir)) || ".";
-    rows.push({
-      name: where === "." ? "the tree's dependencies" : `${where} dependencies`,
-      path: where === "." ? "node_modules/" : `${where}/node_modules/`,
-      ok: exists(path.join(dir, "node_modules")),
-      fix: `npm ci in ${where === "." ? "the tree's root" : where}`,
-    });
-  }
-  rows.push({
-    name: "reference data",
-    path: `${slashed(path.relative(root, config.dataDir))}/`,
-    ok: exists(path.join(config.dataDir, "solarSystems", "data.json")),
-    fix: `build ${slashed(path.relative(root, config.dataDir))}: stock EveJS runs tools/DatabaseCreator/CreateDatabase.bat ` +
-      "(README, Quick start)",
-  });
-  return rows;
-}
 
 // A finished run's verdict never changes, so the tree list, polled every 30 s,
 // reads each result.json once.
@@ -466,6 +421,29 @@ function planAction(action, root, params, context) {
       dirtyTargets: VENDOR_TARGETS,
     };
   }
+  if (action === "setup") {
+    // From a checkout, the checkout's setup installs it first; from a vendored copy, the copy sets up its own tree.
+    if (context.mode !== "vendored" && !context.checkout) {
+      throw new GuiError(`${slashed(OWN_ROOT)} is not a git checkout, so it can't install itself; run e2e gui from an evejs-e2e checkout`);
+    }
+    const args = [path.join(OWN_ROOT, "bin", "e2e.js"), "setup", "--tree", slashed(root)];
+    if (params.mode !== undefined && params.mode !== null && params.mode !== "") {
+      if (!treeConfig.MODES.includes(String(params.mode))) throw new GuiError(`mode is ${treeConfig.MODES.join(", ")}`);
+      args.push("--mode", String(params.mode));
+    }
+    if (Array.isArray(params.agents)) {
+      const chosen = [...new Set(params.agents.map(String))];
+      const unknown = chosen.filter((id) => !agents.AGENT_IDS.includes(id));
+      if (unknown.length) throw new GuiError(`no agent ${unknown.join(", ")}`);
+      args.push("--agents", chosen.length ? chosen.join(",") : "none");
+    }
+    return {
+      steps: [{ cwd: context.checkout || root, args, env: { EVEJS_E2E_TREE: root } }],
+      dirtyTargets: [...VENDOR_TARGETS, treeConfig.CONFIG_NAME],
+      // A first setup builds a world and boots a server twice.
+      timeoutMs: 20 * 60_000,
+    };
+  }
   if (action === "init") {
     requireCopy(root);
     const mode = String(params.mode || treeConfig.DEFAULT_MODE);
@@ -609,7 +587,7 @@ function createGui({ context = ownContext(), stateFile = null, extraTrees = [], 
     const steps = [];
     try {
       for (const step of entry.plan.steps) {
-        const result = await run(step, { timeoutMs: WRITE_TIMEOUT_MS });
+        const result = await run(step, { timeoutMs: entry.plan.timeoutMs || WRITE_TIMEOUT_MS });
         steps.push({ command: displayCommand(step), cwd: slashed(step.cwd), exitCode: result.exitCode, output: result.output, ms: result.ms });
         if (result.exitCode !== 0) break;
       }

@@ -25,6 +25,14 @@ if (require.main === module) {
   }
   process.argv = [...process.argv.slice(0, 2), ...plan.argv];
 }
+// `e2e setup` installs into a tree that may have no copy or config yet.
+if (require.main === module && process.argv[2] === "setup") {
+  require("../core/setup").main(process.argv.slice(3)).then((code) => { process.exitCode = code; }, (error) => {
+    console.error(`e2e: ${error.stack || error.message}`);
+    process.exitCode = 1;
+  });
+  return;
+}
 // `e2e gui` manages trees other than this copy's, so it reads no tree config here.
 if (require.main === module && process.argv[2] === "gui") {
   require("../core/gui").main(process.argv.slice(3)).then((code) => { process.exitCode = code; }, (error) => {
@@ -2261,6 +2269,11 @@ function upUsage() {
 // name -> { usage: [lines], run(positionals, flags) }. Plugin commands
 // (registry.commands) run with pluginIO() and can't take a core name.
 const CORE_COMMANDS = {
+  setup: {
+    usage: ["setup --tree <path> [--mode auto|attach|managed] [--agents claude,codex,cli|none] [--skip agents,patches,world,smoke] [--force] [--dry-run]"],
+    run: (positionals, flags) => require("../core/setup").main([...positionals,
+      ...Object.entries(flags).flatMap(([key, value]) => (value === true ? [`--${key}`] : [`--${key}`, String(value)]))]),
+  },
   init: {
     usage: ["init [--mode auto|attach|managed] [--force] [--dry-run]"],
     run: (_positionals, flags) => cmdInit(flags),

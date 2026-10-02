@@ -941,14 +941,22 @@
     let title;
     let text;
     let button = null;
+    // e2e setup does every step but the tree's own dependencies and reference data.
+    const setupButton = () => h("button", { type: "button", className: "btn primary", text: "Set up everything\u2026",
+      title: "Runs e2e setup: install, config, the agents found, patches, the starter world and a smoke test. You see every command first.",
+      onclick: () => preview({ action: "setup" }) });
+    const setupHelps = blocking.some((row) => row.key !== "prereqs") && !tree.serverUp && state.context.mode !== "vendored";
     if (tree.problem) {
       [cls, mark, title, text] = ["bad", icon("x"), "This folder can't be tested", tree.problem];
     } else if (!tree.copy || !tree.copy.present) {
-      [cls, mark, title, text] = ["new", "+", "Not set up yet", "Install e2e to test this tree. The checklist below shows what else it needs."];
-      button = h("button", { type: "button", className: "btn primary", text: "Install e2e\u2026", onclick: () => preview({ action: "vendor", force: false, from: "" }) });
+      [cls, mark, title, text] = ["new", "+", "Not set up yet",
+        "Set up everything installs e2e and gets the tree to a passing smoke test, one previewed command at a time. Or work through the checklist below."];
+      button = h("div", { className: "row" }, setupButton(),
+        h("button", { type: "button", className: "btn", text: "Install only\u2026", onclick: () => preview({ action: "vendor", force: false, from: "" }) }));
     } else if (blocking.length) {
       [cls, mark, title, text] = ["warn", icon("bang"), `${blocking.length} ${blocking.length === 1 ? "thing" : "things"} to do before you can run tests`,
         `${listed(blocking.map((row) => row.title))}.`];
+      if (setupHelps) button = setupButton();
     } else {
       [cls, mark, title] = ["ok", icon("check"), "Ready to run tests"];
       const extras = [optional.length ? `${optional.length} optional ${optional.length === 1 ? "item" : "items"}` : null,
@@ -1374,7 +1382,7 @@
 
   // ---------- preview and run ----------
 
-  const ACTION_TITLES = { vendor: "Install or update the copy", init: "Write e2e.config.json", agents: "Set up agents",
+  const ACTION_TITLES = { setup: "Set up everything", vendor: "Install or update the copy", init: "Write e2e.config.json", agents: "Set up agents",
     "patch-apply": "Apply a patch", "patch-revert": "Revert a patch" };
 
   async function preview(request) {

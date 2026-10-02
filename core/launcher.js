@@ -73,7 +73,11 @@ function enclosingTree(dir, exists) {
 function planLaunch({ argv, ownRoot, env = process.env, cwd = process.cwd(), exists = fs.existsSync }) {
   const { rest, tree, error } = takeTreeFlag(argv);
   const command = rest.find((token) => !token.startsWith("--")) || "help";
-  if (OWN_TREE_FLAG.has(command)) return { kind: "local", argv };
+  if (OWN_TREE_FLAG.has(command)) {
+    // The command first, so bin/e2e.js finds it; its own --tree stays.
+    const at = argv.findIndex((token, index) => token === command && argv[index - 1] !== "--tree");
+    return { kind: "local", argv: [command, ...argv.filter((_token, index) => index !== at)] };
+  }
   if (error) return { kind: "error", message: error };
   const vendoredCopy = exists(path.join(ownRoot, MANIFEST_NAME));
 
