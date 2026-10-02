@@ -25,20 +25,22 @@ git clone https://github.com/Clogs/gridcheck.git
 cd gridcheck
 ```
 
-**2. Prepare the tree.** Unpack the EveJS zip, for example to `F:/EveJS-0.12.9`, then install its
+**2. Prepare the tree.** Unpack the EveJS zip into a folder of its own, then install its
 dependencies and build its reference data. This is the tree's own setup, which its `SetupEveJS.bat`
 and `StartServer.bat` would otherwise do on first run. The 0.12.9 zip has no wrapper folder: the
-folder you unpack into is the tree, with `server/` directly inside it.
+folder you unpack into is the tree, with `server/` directly inside it. Below, `<tree>` is that
+folder and `<EveJS zip>` is the downloaded zip.
 
 ```powershell
-Expand-Archive G:/Downloads/EveJS-v0.12.9.zip -DestinationPath F:/EveJS-0.12.9   # PowerShell
-C:\Windows\System32\tar.exe -xf G:\Downloads\EveJS-v0.12.9.zip -C F:\EveJS-0.12.9  # or Windows' tar
+Expand-Archive <EveJS zip> -DestinationPath <tree>   # PowerShell
+tar.exe -xf <EveJS zip> -C <tree>                    # or Windows' tar, from PowerShell or cmd
 ```
 
-A `tar` from Git Bash is GNU tar, which reads `G:` as a remote host and can't read zips. Then:
+A `tar` from Git Bash is GNU tar, which reads a drive letter as a remote host and can't read zips.
+Then:
 
 ```bash
-cd F:/EveJS-0.12.9
+cd <tree>
 npm ci
 cd server && npm ci && cd ..
 tools/DatabaseCreator/CreateDatabase.bat        # Windows; downloads the SDE build it names
@@ -61,8 +63,8 @@ node --max-old-space-size=8192 tools/DatabaseCreator/database-creator.js \
 **3. Set the tree up.** From the Gridcheck checkout, one command does the rest:
 
 ```bash
-node bin/gridcheck.js setup --tree F:/EveJS-0.12.9 --dry-run   # every command it would run, and what each would change
-node bin/gridcheck.js setup --tree F:/EveJS-0.12.9             # about two minutes on a new tree
+node bin/gridcheck.js setup --tree <tree> --dry-run   # every command it would run, and what each would change
+node bin/gridcheck.js setup --tree <tree>             # about two minutes on a new tree
 ```
 
 It installs the tool into `tools/gridcheck/`, writes `gridcheck.config.json` in auto mode, connects the
@@ -75,7 +77,7 @@ steps out ([docs/TREES.md](docs/TREES.md#setting-a-tree-up)).
 **Or set it up from the GUI.** From the Gridcheck checkout:
 
 ```bash
-node bin/gridcheck.js gui --tree F:/EveJS-0.12.9 --open
+node bin/gridcheck.js gui --tree <tree> --open
 ```
 
 On Windows, double-clicking `OpenGui.bat` in the checkout does the same without `--tree`: add the
@@ -105,8 +107,8 @@ outcomes, and two stock trees can't run at once. Each change shows its preview f
 Step by step without the GUI, these are the commands `setup` runs:
 
 ```bash
-node bin/gridcheck.js vendor update --tree F:/EveJS-0.12.9                     # in the Gridcheck checkout
-cd F:/EveJS-0.12.9
+node bin/gridcheck.js vendor update --tree <tree>                              # in the Gridcheck checkout
+cd <tree>
 node tools/gridcheck/bin/gridcheck.js init                                     # auto mode
 node tools/gridcheck/bin/gridcheck.js agents setup                             # the agents it finds
 node tools/gridcheck/bin/gridcheck.js patch apply last-decision slash-success xmpp-port
@@ -118,8 +120,8 @@ node tools/gridcheck/bin/gridcheck.js run smoke-undock
 directly:
 
 ```bash
-node bin/gridcheck.js --tree F:/EveJS-0.12.9 run loadout-npc-fight   # two rats spawn; drones and guns kill one
-node tools/gridcheck/bin/gridcheck.js run loadout-npc-fight          # the same, in the tree
+node bin/gridcheck.js --tree <tree> run loadout-npc-fight     # two rats spawn; drones and guns kill one
+node tools/gridcheck/bin/gridcheck.js run loadout-npc-fight   # the same, in the tree
 ```
 
 `npm link` in the checkout puts `gridcheck` on your `PATH`, so `gridcheck --tree <tree> <command>` works from any
@@ -165,7 +167,7 @@ so raise the tool timeout, or use `wait: false` and `report`.
 ```toml
 [mcp_servers.gridcheck]
 command = "node"
-args = ["F:/EveJS-0.12.9/tools/gridcheck/bin/mcp.js"]
+args = ["<tree>/tools/gridcheck/bin/mcp.js"]
 tool_timeout_sec = 600
 ```
 

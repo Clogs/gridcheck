@@ -15,14 +15,14 @@ const ports = require("../core/ports");
 const worlds = require("../core/worlds");
 
 test("a tree's port block is stable, below the ephemeral range and overridable", () => {
-  const a = ports.portsForTree("F:/LU/e2e-grid", {});
-  assert.deepStrictEqual(ports.portsForTree("F:/LU/e2e-grid", {}), a);
+  const a = ports.portsForTree("trees/a", {});
+  assert.deepStrictEqual(ports.portsForTree("trees/a", {}), a);
   assert.strictEqual(a.game, ports.BLOCK_BASE + a.slot * ports.BLOCK_SIZE);
   assert.strictEqual(a.gatewayTls, a.gateway + 1);
   const top = ports.portsForSlot(ports.SLOT_COUNT - 1);
   assert.ok(Math.max(...Object.keys(ports.OFFSETS).map((name) => top[name])) < 49_152);
   assert.ok(Math.max(...Object.values(ports.OFFSETS)) < ports.BLOCK_SIZE);
-  assert.strictEqual(ports.portsForTree("F:/LU/e2e-grid", { GRIDCHECK_PORT_SLOT: "3" }).game, 30_060);
+  assert.strictEqual(ports.portsForTree("trees/a", { GRIDCHECK_PORT_SLOT: "3" }).game, 30_060);
   assert.throws(() => ports.slotForTree("x", { GRIDCHECK_PORT_SLOT: "800" }), /0 to 799/);
 });
 
@@ -56,10 +56,10 @@ test("the market config keeps the tracked file and swaps ports and database", ()
     "[network]", "port = 40110", "", "[rpc]", "enabled = true", "port = 40111", "",
     "[storage]", 'database_path = "data/generated/market.sqlite"', "", "[logging]", 'log_level = "info"',
   ].join("\r\n");
-  const text = ports.marketConfig(tracked, ports.portsForSlot(0), path.join("F:", "t", "market.sqlite"));
+  const text = ports.marketConfig(tracked, ports.portsForSlot(0), path.join("worlds", "t", "market.sqlite"));
   assert.match(text, /\[network\]\nport = 30008\n/);
   assert.match(text, /\[rpc\]\nenabled = true\nport = 30009\n/);
-  assert.match(text, /database_path = "F:\/t\/market.sqlite"/);
+  assert.match(text, /database_path = "worlds\/t\/market.sqlite"/);
   assert.match(text, /log_level = "info"/);
   assert.throws(() => ports.marketConfig("[network]\nport = 1\n", ports.portsForSlot(0), "m"), /no \[network\] port/);
 });

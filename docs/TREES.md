@@ -73,8 +73,8 @@ A tree always runs its own copy, so the CLI and the bridge inside its server are
 checkout's CLI hands each command to that copy:
 
 ```
-node bin/gridcheck.js --tree F:/EveJS-0.12.9 run smoke-undock   # from anywhere
-cd F:/EveJS-0.12.9/server && node <checkout>/bin/gridcheck.js status   # inside a tree, --tree isn't needed
+node bin/gridcheck.js --tree <tree> run smoke-undock          # from anywhere
+cd <tree>/server && node <checkout>/bin/gridcheck.js status   # inside a tree, --tree isn't needed
 ```
 
 `npm link` in the checkout puts `gridcheck` on `PATH`, so `gridcheck --tree <tree> <command>`, or `gridcheck <command>`
@@ -169,7 +169,7 @@ plugin checks for, so the plugins' tool halves load. Two recorded fixtures stand
 encoders. It records `live.json` from the tree's running server, with this checkout vendored into
 the tree, by logging the test character in and undocking it.
 
-`compat` unpacks the zip outside the repo (`F:/LU/_compat` by default, `--scratch` to change it) and
+`compat` unpacks the zip outside the repo (`gridcheck-compat` in your home folder by default, `--scratch` to change it) and
 reuses the unpacked tree while the zip is unchanged. It builds the zip's reference data from an
 extracted SDE (`--sde`, `GRIDCHECK_SDE_DIR`, or the one the LU tree's data comes from) and vendors
 this checkout's HEAD into each tree. Then it runs `init`, `doctor`, `login`, `undock`, `grid`,

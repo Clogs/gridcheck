@@ -31,7 +31,7 @@ const DOCS = {
       ["--agents claude,codex,cli|none", "the agents found", "Which agents to connect."],
       ["--skip agents,patches,world,smoke", null, "Leave those steps out."], ["--force", null, "Replace a copy whose files were edited."],
       ["--dry-run", null, "Show each command and what it would change; write nothing."]],
-    examples: [["gridcheck setup --tree F:/EveJS-0.12.9", null], ["gridcheck setup --tree F:/EveJS-0.12.9 --dry-run", "see the plan first"]],
+    examples: [["gridcheck setup --tree <tree>", null], ["gridcheck setup --tree <tree> --dry-run", "see the plan first"]],
   },
   init: {
     group: "setup", writes: true,

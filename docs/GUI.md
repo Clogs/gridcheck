@@ -6,7 +6,7 @@ before it runs.
 
 ```bash
 node bin/gridcheck.js gui                        # from a Gridcheck checkout: any tree
-node bin/gridcheck.js gui --tree F:/EveJS-0.12.9 --open
+node bin/gridcheck.js gui --tree <tree> --open
 node tools/gridcheck/bin/gridcheck.js gui        # from a tree's vendored copy: that tree only
 ```
 
@@ -15,7 +15,7 @@ It prints a URL such as `http://127.0.0.1:52011/gui#token=<64 hex>` and runs unt
 
 On Windows, `OpenGui.bat` runs `gridcheck gui --open` from the folder it sits in, so double-click it in
 a checkout, or in a tree's `tools/gridcheck/` for that tree. It passes its arguments on
-(`OpenGui.bat --tree F:/EveJS-0.12.9`). It checks for Node 24 first. Closing its window stops the
+(`OpenGui.bat --tree <tree>`). It checks for Node 24 first. Closing its window stops the
 GUI, and the window stays open on an error so you can read it.
 
 ## Which trees
@@ -275,7 +275,7 @@ The page uses a small JSON API, and a script or an agent can call it the same wa
 | --- | --- |
 | `GET /gui/api/context` | Checkout or vendored copy, its version and commit. |
 | `GET /gui/api/trees` | The tree list: `id`, `root`, EveJS version (`evejs`), copy version, mode, server up, and `runs` (`total`, `passed`, `failed` scenario runs). |
-| `POST /gui/api/trees` `{ "path": "F:/EveJS-0.12.9" }` | Add a tree. |
+| `POST /gui/api/trees` `{ "path": "<tree>" }` | Add a tree. |
 | `GET /gui/api/tree?tree=<id>` | The Install tab's summary: `copy`, `shim`, `config`, `prerequisites` (each `{ name, path, ok, fix }`), `serverUp`, `serverPid`, `plugins`, `agents` (each `{ id, name, installed, evidence, file, registered, serverName, problem }`). |
 | `GET /gui/api/scenarios?tree=<id>` | `scenarios` (the copy's `run --json`: each `{ name, file, plugin, description, world, recipe, timeout, expect, problem }`) and `recipes` (`world recipes --json`: each `{ name, description, state, why, savedAt, steps }`); `null` for a copy without them. |
 | `GET /gui/api/commands?tree=<id>` | The copy's `help --json`: `prefix`, `groups`, `commands` (each `{ name, group, summary, usage, needs, managed, writes, mcp, flags, examples, note, plugin }`) and `mcpTools`, with `source` `tree`, or `tool` and a `note` when it's this copy's list. |

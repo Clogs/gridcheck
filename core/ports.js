@@ -66,7 +66,7 @@ function slotForTree(treeRoot, env = process.env) {
     }
     return slot;
   }
-  // Windows paths are case-insensitive, so F:\LU\x and f:/lu/x are one tree.
+  // Windows paths are case-insensitive, so one tree can arrive spelled in either case.
   let normalized = path.resolve(treeRoot);
   if (process.platform === "win32") normalized = normalized.toLowerCase();
   const digest = crypto.createHash("sha256").update(normalized).digest();

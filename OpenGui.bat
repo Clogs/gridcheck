@@ -1,7 +1,7 @@
 @echo off
 rem Opens the Gridcheck GUI in your browser. Close this window, or press Ctrl-C, to stop it.
 rem From a Gridcheck checkout it manages any EveJS tree; from a tree's tools/gridcheck/ it
-rem manages that tree. Arguments go to `gridcheck gui`, e.g. OpenGui.bat --tree F:/EveJS-0.12.9
+rem manages that tree. Arguments go to `gridcheck gui`, e.g. OpenGui.bat --tree <tree>
 setlocal
 where node >nul 2>nul
 if errorlevel 1 (
