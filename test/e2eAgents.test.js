@@ -246,3 +246,12 @@ test("an entry from before the rename, running this tree's tools/evejs-e2e, is r
   assert.strictEqual(codex.serverName, "gridcheck");
   assert.match(codex.after, /^model = "x"\n\n\[mcp_servers\.gridcheck\]\ncommand = "node"\nargs = \[".*tools\/gridcheck\/bin\/mcp\.js"\]\ntool_timeout_sec = 600\n\n\[other\]\nk = 1\n$/);
 });
+
+test("setup cli replaces a pointer from before the rename in place", (t) => {
+  const s = setup(t);
+  write(path.join(s.tree, "AGENTS.md"), "# Agents\n\n<!-- evejs-e2e:cli -->\nold pointer\n<!-- /evejs-e2e:cli -->\n\n## More\n");
+  const [row] = agents.setupAgents(s.tree, ["cli"], { io: s.io });
+  assert.strictEqual(row.plan.change, "replace");
+  assert.strictEqual(fs.readFileSync(path.join(s.tree, "AGENTS.md"), "utf8"),
+    `# Agents\n\n${agents.CLI_POINTER.join("\n")}\n\n## More\n`);
+});

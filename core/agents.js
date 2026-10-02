@@ -288,9 +288,16 @@ function planCli(treeRoot, given) {
   const file = !io.exists(agentsFile) && io.exists(claudeFile) ? claudeFile : agentsFile;
   const text = io.exists(file) ? io.readFile(file) : null;
   const serverName = `a pointer to ${CLI_GUIDE}`;
+  const eol = (text || "").includes("\r\n") ? "\r\n" : "\n";
+  // A pointer from before the rename names the old copy's path: it is replaced in place.
+  const legacy = text === null ? null : /<!-- evejs-e2e:cli -->[\s\S]*?<!-- \/evejs-e2e:cli -->/.exec(text);
+  if (legacy && !text.includes(CLI_MARKER)) {
+    const after = text.slice(0, legacy.index) + CLI_POINTER.join(eol) + text.slice(legacy.index + legacy[0].length);
+    return { agent: "cli", file, change: "replace", serverName, before: text, after, added: [...CLI_POINTER],
+      replaced: legacy[0].split(/\r?\n/) };
+  }
   if (text !== null && text.includes(CLI_MARKER)) return { agent: "cli", file, change: "none", serverName };
   const before = text || "";
-  const eol = before.includes("\r\n") ? "\r\n" : "\n";
   const after = `${before}${before && !before.endsWith("\n") ? eol : ""}${before.trim() ? eol : ""}${CLI_POINTER.join(eol)}${eol}`;
   return { agent: "cli", file, change: "add", serverName, before: text, after, added: [...CLI_POINTER] };
 }
