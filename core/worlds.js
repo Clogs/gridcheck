@@ -36,6 +36,21 @@ function savedWorldDir(treeRoot, name) {
   return path.join(worldPaths(treeRoot).saved, name);
 }
 
+// On Windows a stopped server's files can stay locked for a moment (a virus
+// scanner, a handle the OS hasn't released), so a write to them is retried
+// briefly before it counts as failed.
+const LOCKED = /EBUSY|EPERM|EACCES|database is locked|SQLITE_BUSY/;
+function retryLocked(fn, { tries = 6, delayMs = 250 } = {}) {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      return fn();
+    } catch (error) {
+      if (attempt >= tries || !LOCKED.test(`${error.code || ""} ${error.message || ""}`)) throw error;
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, delayMs * attempt);
+    }
+  }
+}
+
 function removeSqlite(file) {
   for (const suffix of ["", "-wal", "-shm"]) fs.rmSync(`${file}${suffix}`, { force: true });
 }
@@ -148,11 +163,11 @@ function saveWorld(treeRoot, name, { force = false, note = "", hooks = [], recip
   const staging = `${dir}.saving`;
   fs.rmSync(staging, { recursive: true, force: true });
   fs.mkdirSync(staging, { recursive: true });
-  snapshotSqlite(here.world, path.join(staging, "gamestore.sqlite"));
+  retryLocked(() => snapshotSqlite(here.world, path.join(staging, "gamestore.sqlite")));
   clearOwnerLeases(path.join(staging, "gamestore.sqlite"));
   fs.copyFileSync(here.manifest, path.join(staging, "manifest.json"));
   const market = fs.existsSync(here.market);
-  if (market) snapshotSqlite(here.market, path.join(staging, "market.sqlite"));
+  if (market) retryLocked(() => snapshotSqlite(here.market, path.join(staging, "market.sqlite")));
   const info = {
     name,
     savedAt: new Date().toISOString(),
@@ -163,8 +178,8 @@ function saveWorld(treeRoot, name, { force = false, note = "", hooks = [], recip
     ...(Object.keys(ext).length ? { ext } : {}),
   };
   fs.writeFileSync(path.join(staging, "world.json"), `${JSON.stringify(info, null, 2)}\n`);
-  fs.rmSync(dir, { recursive: true, force: true });
-  fs.renameSync(staging, dir);
+  retryLocked(() => fs.rmSync(dir, { recursive: true, force: true }));
+  retryLocked(() => fs.renameSync(staging, dir));
   return { ...info, dir, bytes: dirBytes(dir) };
 }
 
@@ -258,6 +273,7 @@ module.exports = {
   listWorlds,
   liveLeases,
   restoreWorld,
+  retryLocked,
   saveWorld,
   savedWorldDir,
   savedWorldInfo,

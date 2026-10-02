@@ -266,7 +266,9 @@ async function requestJSON(url, { method = "GET", headers = {}, body, timeoutMs 
       : error && error.name === "TimeoutError"
         ? `It didn't answer within ${Math.round(timeoutMs / 1000)} s. \`e2e log\` shows what the server is doing.`
         : "`e2e status` says whether the server is up.";
-    throw new CliError(`${method} ${url} failed: ${cause}. ${next}`);
+    const failure = new CliError(`${method} ${url} failed: ${cause}. ${next}`);
+    failure.transport = true;
+    throw failure;
   }
   const text = await response.text();
   let json;
@@ -1398,11 +1400,29 @@ async function cmdLogout() {
 // Reads the tail of the shared server log. Every process that boots this tree
 // writes to it, tests included, so lines are kept to the running server's pid
 // unless --any-pid. Stock's logger tags no pid, so its lines all stay.
-function selectLogLines(text, { grep, pid, lines }) {
+// pid: keep lines tagged [pid N] for it. sinceMs: keep an untagged line (stock
+// EveJS tags none) only when its timestamp is at or after it; a line with no
+// timestamp, such as a stack trace's, goes with the line before it.
+function selectLogLines(text, { grep, pid, lines, sinceMs = null }) {
   const pattern = grep ? new RegExp(grep, "i") : null;
   const pidTag = pid ? `[pid ${pid}]` : null;
-  const kept = text.split(/\r?\n/).filter((line) =>
-    line && (!pidTag || line.includes(pidTag) || !/^\[[^\]]+\] \[pid \d+\]/.test(line)) && (!pattern || pattern.test(line)));
+  const kept = [];
+  let previous = true;
+  for (const line of text.split(/\r?\n/)) {
+    if (!line) continue;
+    let keep;
+    if (/^\[[^\]]+\] \[pid \d+\]/.test(line)) {
+      keep = !pidTag || line.includes(pidTag);
+    } else if (sinceMs !== null) {
+      const stamp = /^\[([^\]]+)\]/.exec(line);
+      const atMs = stamp ? Date.parse(stamp[1]) : NaN;
+      keep = Number.isFinite(atMs) ? atMs >= sinceMs : previous;
+    } else {
+      keep = true;
+    }
+    previous = keep;
+    if (keep && (!pattern || pattern.test(line))) kept.push(line);
+  }
   return kept.slice(-lines);
 }
 
@@ -1416,6 +1436,11 @@ function cmdLog(flags) {
   }
   const lines = Math.max(1, Math.trunc(Number(flags.lines) || 40));
   const pid = flags["any-pid"] ? null : handshake && handshake.pid;
+  // This server's start (or the last e2e up's, with none up): older untagged lines are another run's.
+  const run = readRun();
+  const since = flags["any-pid"] ? null
+    : handshake ? (handshake.processStartedAtMs || (run && run.pid === handshake.pid ? run.startedAtMs : null))
+      : run && run.startedAtMs ? run.startedAtMs : null;
   const size = fs.statSync(logPath).size;
   const readBytes = Math.min(size, 16 * 1024 * 1024);
   const buffer = Buffer.alloc(readBytes);
@@ -1425,7 +1450,7 @@ function cmdLog(flags) {
   } finally {
     fs.closeSync(fd);
   }
-  for (const line of selectLogLines(buffer.toString("utf8"), { grep: flags.grep, pid, lines })) {
+  for (const line of selectLogLines(buffer.toString("utf8"), { grep: flags.grep, pid, lines, sinceMs: since || null })) {
     console.log(line);
   }
 }
@@ -1799,7 +1824,15 @@ async function cmdDown(flags) {
     const timeoutMs = Math.max(5, Number(flags.timeout) || 120) * 1000;
     const startedAt = Date.now();
     if (handshake) {
-      await bridge("POST", "/shutdown", {});
+      try {
+        await bridge("POST", "/shutdown", {});
+      } catch (error) {
+        // The bridge stops the server 100 ms after it accepts; on a busy machine
+        // the reply can lose that race. Whether the server exits is what counts.
+        if (!error.transport) throw error;
+        console.log(`the shutdown request got no reply (${error.message.split(". ")[0].replace(/^POST \S+ failed: /, "")}); ` +
+          "waiting for the server to exit");
+      }
       console.log(`stopping pid ${serverPid}`);
     } else if (flags.force) {
       stopPid(serverPid);
@@ -2315,6 +2348,61 @@ async function cmdStatus() {
       `  session ${state.bridgeSessionID ? "held" : "released"}`
     : "character  none (e2e login)");
   console.log(describePlugins());
+  const hooks = slowestHook();
+  if (hooks) {
+    console.log(`plugin hooks  slowest in the last watch that ran one (${hooks.runID}): ${hooks.name} ${hooks.msAvg} ms avg, ` +
+      `${hooks.msMax} ms max over ${hooks.runs} call(s)${hooks.others ? `; ${hooks.others} other hook(s) faster` : ""}`);
+  }
+}
+
+// The plugin hook with the highest average cost in the newest watch whose END
+// timed any (bridge/watch.js costs.hooks). A watch's hooks run every scan, so
+// this is the plugins' share of whole-world cost.
+function slowestHook(limit = 10) {
+  let names = [];
+  try {
+    names = fs.readdirSync(RUNS_DIR, { withFileTypes: true }).filter((entry) => entry.isDirectory()).map((entry) => entry.name);
+  } catch (_error) {
+    return null;
+  }
+  const dirs = names.map((name) => {
+    const file = path.join(RUNS_DIR, name, "timeline.jsonl");
+    try {
+      return { name, file, mtimeMs: fs.statSync(file).mtimeMs };
+    } catch (_error) {
+      return null;
+    }
+  }).filter(Boolean).sort((a, b) => b.mtimeMs - a.mtimeMs).slice(0, limit);
+  for (const { name, file } of dirs) {
+    // END is the last line a watch writes; reading the tail is enough.
+    let tail = "";
+    try {
+      const size = fs.statSync(file).size;
+      const fd = fs.openSync(file, "r");
+      const length = Math.min(size, 64 * 1024);
+      const buffer = Buffer.alloc(length);
+      fs.readSync(fd, buffer, 0, length, size - length);
+      fs.closeSync(fd);
+      tail = buffer.toString("utf8");
+    } catch (_error) {
+      continue;
+    }
+    for (const line of tail.split("\n").reverse()) {
+      if (!line.includes("\"END\"")) continue;
+      let event;
+      try {
+        event = JSON.parse(line);
+      } catch (_error) {
+        continue;
+      }
+      const entries = Object.entries((event.costs && event.costs.hooks) || {});
+      if (!entries.length) break;
+      entries.sort((a, b) => b[1].msAvg - a[1].msAvg);
+      const [hookName, cost] = entries[0];
+      return { runID: name, name: hookName, ...cost, others: entries.length - 1 };
+    }
+  }
+  return null;
 }
 
 // ---------- the command table ----------

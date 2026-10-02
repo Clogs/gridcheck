@@ -67,6 +67,19 @@ test("log lines keep the server's pid and the pattern, newest last", () => {
   assert.deepStrictEqual(selectLogLines(text, { pid: 10, lines: 1 }), ["[t4] [pid 10] [LOG] [piratehunt] committed"]);
 });
 
+test("untagged log lines, as stock writes them, are kept from the server's start on, with their stack traces", () => {
+  const text = [
+    "[2026-10-02T11:00:00.000Z] [LOG] the last run's server",
+    "    at an old stack frame",
+    "[2026-10-02T11:41:01.945Z] [LOG] [GameStore] this server",
+    "[2026-10-02T11:41:02.000Z] [ERR] boom",
+    "    at a new stack frame",
+  ].join("\n");
+  const sinceMs = Date.parse("2026-10-02T11:41:00.000Z");
+  assert.deepStrictEqual(selectLogLines(text, { lines: 40, sinceMs }), text.split("\n").slice(2));
+  assert.strictEqual(selectLogLines(text, { lines: 40 }).length, 5, "without a start time, every line");
+});
+
 test("stock's log lines carry no pid, so they all stay, and parse with a null pid", () => {
   const { parseLogLine } = require("../core/timeline");
   const text = [

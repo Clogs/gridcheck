@@ -136,8 +136,10 @@ when no server is up. `--offline` always reads the files; `--json` prints the wh
 
 ## Stock EveJS's differences
 
-- Stock's logger writes no `[pid N]` tag, so `e2e log` and a watch's log lines can't tell this
-  server's lines from another process's.
+- Stock's logger writes no `[pid N]` tag, so `e2e log` keeps an untagged line by its timestamp:
+  only lines written since this server's process started (the bridge's handshake records it), or
+  since the last `e2e up` with no server up. `--any-pid` shows every line. A watch reads only what
+  the log gains while it runs, so it needs neither.
 - Stock's slash commands don't say whether they refused. `e2e slash` prints `done (this tree
   doesn't say whether it refused)` until the `slash-success` patch is applied.
 - Stock's NPCs record no decision, so grid rows have no `decision` and a watch reports no

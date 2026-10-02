@@ -176,3 +176,17 @@ test("plugin world hooks keep their data in world.json and see it again on resto
     fs.rmSync(scratch, { recursive: true, force: true });
   }
 });
+
+test("a world save retries a write a stopped server's lingering lock refuses, and nothing else", () => {
+  const { retryLocked } = require("../core/worlds");
+  let calls = 0;
+  assert.strictEqual(retryLocked(() => {
+    calls += 1;
+    if (calls < 3) throw Object.assign(new Error("resource busy or locked"), { code: "EBUSY" });
+    return "saved";
+  }, { delayMs: 1 }), "saved");
+  assert.strictEqual(calls, 3);
+  let other = 0;
+  assert.throws(() => retryLocked(() => { other += 1; throw new Error("disk full"); }, { delayMs: 1 }), /disk full/);
+  assert.strictEqual(other, 1);
+});
