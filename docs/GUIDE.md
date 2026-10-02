@@ -87,7 +87,7 @@ or with `save: true` to `tools/e2e-scenarios/` to commit with the feature. It al
   timeline, and the paths of the report, timeline and frames. With a progress token it sends one
   progress notification a second with the latest console line;
 - `wait: false` starts the run detached and returns its run ID at once, with the console in
-  `_local/e2e/mcp/<run>.log`. `e2e_report { run, waitSeconds: 600 }` waits for it, up to 600 s a
+  `_local/e2e/background/<run>.log`. `e2e_report { run, waitSeconds: 600 }` waits for it, up to 600 s a
   call. Use this where the client limits a tool call's time (Codex: 60 s by default);
 - cancelling the call kills the CLI and runs `e2e down`, since a killed CLI can't, unless the run
   was using a server that was already up (attach mode, or auto mode with a server up). `e2e_down`
@@ -96,6 +96,10 @@ or with `save: true` to `tools/e2e-scenarios/` to commit with the feature. It al
 `e2e_report` with no `run` lists recent runs and their verdicts; `run: "latest"` is the newest.
 `section` is `summary` (the default), `full` (with the timeline), `result` (`result.json`) or `pr`
 (see [Citing a run in a PR](#citing-a-run-in-a-pr)).
+
+Every tool has a CLI form, for agents that don't use MCP. `e2e run <scenario> --detach` is
+`wait: false`, `e2e report [<run>|latest] [--section ...] [--wait <s>]` is `e2e_report`, and
+`e2e primer` prints these instructions naming CLI commands. [CLI.md](CLI.md) is the reference.
 
 ## What runs where
 

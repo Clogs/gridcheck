@@ -14,11 +14,12 @@ const { spawn } = require("node:child_process");
 const fs = require("node:fs");
 const path = require("node:path");
 
-const { formatOffset, formatTimelineEvent } = require("../core/timeline");
 const { DEFAULT_TREE_ROOT, defaultRegistry } = require("../core/plugins");
 const { kindsOf } = require("../core/conditions");
-const { TREE_SCENARIO_DIR, scenarioDirs } = require("../core/scenario");
+const { DRAFT_SCENARIO_DIR, TREE_SCENARIO_DIR, scenarioPath } = require("../core/scenario");
 const { defaultTreeConfig } = require("../core/treeConfig");
+const { primer } = require("../core/primer");
+const { createRuns, clip, readText, reportSections, reportSummary, runStamp, safeRunID, sleep, tailLines } = require("../core/runs");
 
 const REPO_ROOT = DEFAULT_TREE_ROOT;
 const REGISTRY = defaultRegistry();
@@ -28,8 +29,7 @@ const MANAGED = MODE === "managed";
 const CLI_PATH = path.join(__dirname, "e2e.js");
 const E2E_DIR = CONFIG.e2eDir;
 const RUNS_DIR = CONFIG.runsDir;
-const BACKGROUND_DIR = path.join(E2E_DIR, "mcp");
-const DRAFT_DIR = path.join(E2E_DIR, "scenarios");
+const DRAFT_DIR = DRAFT_SCENARIO_DIR;
 
 const SERVER_INFO = { name: "e2e", version: "1.0.0" };
 const PROTOCOL_VERSIONS = ["2025-06-18", "2025-03-26", "2024-11-05"];
@@ -40,46 +40,15 @@ const WATCH_DEFAULT_SECONDS = 60;
 const MAX_WAIT_SECONDS = 600;
 const NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/;
 
-const MODE_TEXT = Object.freeze({
-  managed: "This tree is in managed mode: the CLI boots and stops its server (e2e_up, e2e_down), and a run boots its own world, so call e2e_down first if the server is up.",
-  attach: "This tree is in attach mode: its server is started by hand with EVEJS_AGENT_BRIDGE=1 set, and the tools work on that live server. e2e_up and e2e_down refuse, and a run uses the server as it is: its world is not restored and the server stays up. If no server is up, ask the user to start one.",
-  auto: "This tree is in auto mode. When its server is up (one the user started with EVEJS_AGENT_BRIDGE=1 set, or one e2e_up started), the tools and runs use it as it is: a run doesn't restore its world, and the server stays up. When none is up, a run boots its own world and stops it after, and e2e_up starts one. e2e_down stops only a server e2e_up started. e2e_status says which applies now.",
-});
-
-// The core's instructions, then each plugin's primer.
+// The core's instructions, then each plugin's primer (core/primer.js).
 function instructions(registry = REGISTRY) {
-  const upKeys = ["market", "timeout", "profile", "profileEvery", ...registry.upFlags.map((flag) => flag.key)].join(", ");
-  const pluginSteps = Object.keys(registry.steps);
-  const kinds = kindsOf(registry).filter((kind) => !["CLIENT", "FX", "DIVERGE"].includes(kind)).join(" ");
-  const pluginTools = registry.mcpTools.map((tool) => tool.name);
-  const core = `End-to-end grid testing for EveJS with no EVE client. A server boots from a saved world; a character logs in through the web gateway, undocks, and you read its grid, run slash commands, act as the player and watch what happens as a timeline. Every tool runs the CLI \`node tools/evejs-e2e/bin/e2e.js\` in this tree; the guide is tools/evejs-e2e/docs/GUIDE.md.
-
-Start with e2e_status: it shows whether this tree's server is up, the saved worlds, the scenarios and the plugins that are active. e2e_doctor says what this tree supports: the gateway calls, the client view, the optional patches and the ports.
-
-${MODE_TEXT[MODE] || MODE_TEXT.auto}
-
-To verify a feature, write a scenario and run it (e2e_run_scenario). A scenario is JSON:
-{ "description": "...", "world": "<a saved world e2e_status lists, or fresh>" (or "recipe": "starter" instead, a world the run builds from worlds/starter.recipe.json: every skill and a fitted Tristan docked in Amamake),
-  "setup": ["undock", { "teleport": "Siseide" }, { "slash": "/gaterats on" }, { "waitFor": "ARRIVE who=npc", "timeout": 120 }],
-  "until": { "any": ["DESTROYED self"], "timeout": 300, "grace": 10 },
-  "expect": ["ARRIVE who=npc", { "match": "TARGET self locked", "note": "why it matters" }, "no DIVERGE status=open"] }
-- up: ${upKeys}.
-- setup steps: "login" (implicit), "undock", "dock", { "slash": "/heal" }, { "teleport": "Amamake" }, { "loadout": { "ship": "Tristan", "modules": ["Light Neutron Blaster II x2"], "drones": ["Hobgoblin II x5"], "charges": ["Antimatter Charge S"] } }, { "wait": 30 }, { "waitFor": "<condition>", "timeout": 300 }${pluginSteps.length ? `, and the plugins' ${pluginSteps.join(", ")}` : ""}.
-- player actions are steps too, in setup and in "during" (a second list that runs after setup, beside the stop conditions, and stops when the run stops): { "lock": "<target>", "as": "mark", "timeout": 30 }, { "activate": "weapons", "target": "$mark", "once": false }, { "deactivate": "weapons" }, { "orbit": "<target>", "range": 5000 }, { "approach": "<target>" }, { "keepAtRange": "<target>", "range": 10000 }, { "warpTo": "<target>", "range": 0 }, "stop", { "unlock": "<target>" }, { "loadAmmo": "weapons", "charge": "EMP S" }, { "launchDrones": "all", "count": 5 }, { "engageDrones": "<target>" }; each also takes "retry". A target is the nearest ball passing every term: "nearest npc", "name~Scout", "type~Rifter", "kind=station", "within=30km", "player", "$mark", an itemID. "as" on a lock binds the ball. Shots show as TARGET sourceLabel=self, FX self (needs "watch": { "client": "fx" }) and DAMAGE itemID=$mark.
-- until: any (stop conditions), timeout (s after setup, required), grace (up to this many s more after a stop; it ends early once every expectation is met and graceMin, default 5, has passed), from ("setup" default: only events after setup count; "start": setup's own events count, e.g. the GRID an undock causes).
-- expect: conditions that should be seen; "no <condition>" expects none. A missing one fails the run (exit 1) but the run keeps watching.
-- Conditions: KIND then field tests. Kinds: ${kinds}, and CLIENT (needs "watch": { "client": "all" }), FX (needs "client": "fx" or "all") and DIVERGE. Tests: field=value, field!=value, field~regex, field>=N (also > < <=), bare field (set), !field (unset). Units: 30km, 90s, 5min. "self" = about your ship. $name = IDs a step bound with "as". A field is looked up on the event, then one level down. Field names are the ones e2e_watch with json:true prints; a check lists a kind's fields when you name a wrong one.
-Write the file with e2e_run_scenario { name, scenario, check: true } first: that validates without booting. save:true writes it to ${relativePath(TREE_SCENARIO_DIR)}/ to commit with the feature; otherwise it goes to ${relativePath(DRAFT_DIR)}/.
-
-Performance: how the server copes with a load. The bridge reads every tick's duration from the runtime (no flag needed); a server booted with the tick profiler (e2e_up { profile: true }, or "up": { "profile": true } in a scenario) also breaks each window down by subsystem (npc, drone, movement and so on). By hand: e2e_up { profile: true }, e2e_login, e2e_undock, e2e_perf { seconds: 10 } for a baseline, e2e_slash "/npctest2 20" (20 NPCs fighting each other; "/npc 20" spawns 20 that attack you), then e2e_perf { seconds: 30 } under load, and compare. In a scenario, "up": { "profile": true } streams PERF (a window of ticks every 5 s: tickAvgMs, tickP95Ms, tickP99Ms, tickMaxMs, overBudget, loopP99Ms, cpuPct, heapMB, entities) and PROFILE (sections with msPerTick) into the timeline; the report splits the ticks at each setup step, so the time before a spawn is the baseline for the time after it. Expect a budget like "no PERF overBudget>=5" (no 5 s window with 5 ticks over the 100 ms a tick has) or "no PERF tickP99Ms>=100". The perf-npc-load scenario does all of this.
-
-Runs take minutes (boot about 25 s, then real-time grid behaviour). wait:false starts one in the background; e2e_report { run, waitSeconds } waits for it and reads the verdict. e2e_report { run, section: "pr" } gives the markdown to cite the run in a PR description.
-
-By hand: e2e_up { world }, e2e_login, e2e_undock, e2e_loadout, e2e_grid, e2e_act, e2e_watch { seconds }, e2e_slash, e2e_teleport, e2e_log, e2e_perf, e2e_down${pluginTools.length ? `, and the plugins' ${pluginTools.join(", ")}` : ""}. A person can replay any run, or follow a live one, in the viewer: \`node tools/evejs-e2e/bin/e2e.js view [<run>]\` prints its URL. Calling e2e_watch and an action in the same turn lets you see its effect. Replies are the CLI's own output, so a message naming a command such as \`e2e login\` means the tool e2e_login.`;
-  return [core, ...registry.primers.map((primer) => primer.text)].join("\n\n");
+  return primer({ registry, mode: MODE, surface: "mcp",
+    scenarioDirs: { tree: relativePath(TREE_SCENARIO_DIR), drafts: relativePath(DRAFT_DIR) } });
 }
 
 const INSTRUCTIONS = instructions();
+const RUNS = createRuns({ treeRoot: REPO_ROOT, runsDir: RUNS_DIR, e2eDir: E2E_DIR, surface: "mcp" });
+const { committedScenario, filesBlock, prCitation, readReport, recentRuns, runState } = RUNS;
 
 // ---------- helpers ----------
 
@@ -90,14 +59,6 @@ function relativePath(file) {
 function readJSON(file) {
   try {
     return JSON.parse(fs.readFileSync(file, "utf8"));
-  } catch (_error) {
-    return null;
-  }
-}
-
-function readText(file) {
-  try {
-    return fs.readFileSync(file, "utf8").replace(/\r\n/g, "\n");
   } catch (_error) {
     return null;
   }
@@ -116,33 +77,6 @@ function pidAlive(pid) {
 function serverUp() {
   const handshake = readJSON(CONFIG.handshake);
   return Boolean(handshake && handshake.port && pidAlive(Math.trunc(Number(handshake.pid) || 0)));
-}
-
-// Same form as the CLI's run IDs.
-function runStamp(ms) {
-  return new Date(ms).toISOString().replace(/[-:]/g, "").replace("T", "-").slice(0, 15);
-}
-
-function safeRunID(text) {
-  return String(text).replace(/[^A-Za-z0-9._-]/g, "_");
-}
-
-function clip(text, limit = OUTPUT_LIMIT, where = "") {
-  if (text.length <= limit) return text;
-  const head = Math.floor(limit * 0.3);
-  return `${text.slice(0, head)}\n... ${text.length - limit} characters cut` +
-    `${where ? `; the full text is in ${where}` : ""} ...\n${text.slice(-(limit - head))}`;
-}
-
-function tailLines(text, count) {
-  return String(text || "").trimEnd().split("\n").slice(-count).join("\n");
-}
-
-function sleep(ms, signal) {
-  return new Promise((resolve) => {
-    const timer = setTimeout(resolve, ms);
-    if (signal) signal.addEventListener("abort", () => { clearTimeout(timer); resolve(); }, { once: true });
-  });
 }
 
 class ToolError extends Error {}
@@ -318,22 +252,11 @@ function cliResult({ code, output, aborted }, where = "") {
 // ---------- scenarios and runs ----------
 
 // A bare name is a tree scenario (the core's, then each plugin's), else a
-// draft the MCP wrote; a path is a path.
+// draft; a path is a path.
 function resolveScenario(name) {
   const text = String(name);
   if (text.endsWith(".json") || text.includes("/") || text.includes("\\")) return path.resolve(REPO_ROOT, text);
-  const tree = scenarioDirs({ registry: REGISTRY }).map(({ dir }) => path.join(dir, `${text}.json`));
-  const found = tree.find((file) => fs.existsSync(file));
-  if (found) return found;
-  const draft = path.join(DRAFT_DIR, `${text}.json`);
-  return fs.existsSync(draft) ? draft : tree[0];
-}
-
-// A scenario committed with the tree or the tool, which a reviewer can rerun by name.
-function committedScenario(scenarioFile) {
-  const file = String(scenarioFile || "");
-  return file.startsWith(`${relativePath(TREE_SCENARIO_DIR)}/`) || file.startsWith("tools/evejs-e2e/scenarios/") ||
-    /^tools\/evejs-e2e\/plugins\/[^/]+\/scenarios\//.test(file);
+  return scenarioPath(text, { registry: REGISTRY });
 }
 
 function writeScenario(name, scenario, { save = false } = {}) {
@@ -348,163 +271,6 @@ function writeScenario(name, scenario, { save = false } = {}) {
   const file = path.join(dir, `${name}.json`);
   fs.writeFileSync(file, `${JSON.stringify(scenario, null, 2)}\n`);
   return file;
-}
-
-function backgroundRecord(runID) {
-  return readJSON(path.join(BACKGROUND_DIR, `${runID}.json`));
-}
-
-function runState(runID) {
-  const dir = path.join(RUNS_DIR, runID);
-  const result = readJSON(path.join(dir, "result.json"));
-  const background = backgroundRecord(runID);
-  return {
-    runID,
-    dir,
-    exists: fs.existsSync(dir),
-    result,
-    background,
-    running: !result && Boolean(background && pidAlive(background.pid)),
-    hasTimeline: fs.existsSync(path.join(dir, "timeline.jsonl")),
-  };
-}
-
-function verdictOf(result) {
-  if (!result) return null;
-  return result.failure ? "DID NOT COMPLETE" : result.exitCode === 1 ? "FAILED" : "PASSED";
-}
-
-function recentRuns(limit = 15) {
-  let names = [];
-  try {
-    names = fs.readdirSync(RUNS_DIR, { withFileTypes: true }).filter((entry) => entry.isDirectory()).map((entry) => entry.name);
-  } catch (_error) {
-    return [];
-  }
-  return names
-    .map((name) => ({ name, mtimeMs: fs.statSync(path.join(RUNS_DIR, name)).mtimeMs }))
-    .sort((left, right) => right.mtimeMs - left.mtimeMs)
-    .slice(0, limit)
-    .map(({ name, mtimeMs }) => {
-      const state = runState(name);
-      const met = state.result ? state.result.expectations.filter((row) => row.met).length : 0;
-      const what = state.result
-        ? `${verdictOf(state.result)} ${met}/${state.result.expectations.length}  ${state.result.name}`
-        : state.running ? "running"
-          : state.hasTimeline ? "watch, no report" : "no timeline";
-      return { name, mtimeMs, text: `${new Date(mtimeMs).toISOString().slice(0, 16)}  ${name.padEnd(36)} ${what}` };
-    });
-}
-
-function frameWhy(frame) {
-  return `${frame.reason}${frame.stop && frame.reason !== "stop" ? " + stop" : ""}`;
-}
-
-function frameLines(state) {
-  const frames = (state.result && Array.isArray(state.result.frames)) ? state.result.frames : [];
-  if (!frames.length) return [];
-  return [`- frames (SVG; render a PNG with headless Chrome, see the guide):`,
-    ...frames.map((frame) => `  - ${path.join(state.dir, frame.file)}  ${frameWhy(frame)}`)];
-}
-
-function filesBlock(state) {
-  return [
-    "Files:",
-    `- report: ${path.join(state.dir, "report.md")}`,
-    `- result: ${path.join(state.dir, "result.json")}`,
-    `- timeline: ${path.join(state.dir, "timeline.jsonl")}`,
-    ...frameLines(state),
-  ].join("\n");
-}
-
-// report.md split at its "## " headings.
-function reportSections(text) {
-  const sections = { head: [] };
-  let current = "head";
-  for (const line of text.split("\n")) {
-    if (line.startsWith("## ")) {
-      current = line.slice(3).trim();
-      sections[current] = [];
-    }
-    sections[current].push(line);
-  }
-  return Object.fromEntries(Object.entries(sections).map(([key, lines]) => [key, lines.join("\n").trim()]));
-}
-
-function reportSummary(report) {
-  const index = report.indexOf("\n## Timeline");
-  return index >= 0 ? `${report.slice(0, index).trimEnd()}\n\n(The timeline is left out; section "full" has it.)` : report;
-}
-
-// Markdown to paste into a PR description: what ran, on what, and what was
-// seen. Frame links in report.md are relative to the run dir, so they are
-// listed as files to attach instead.
-function prCitation(state, report) {
-  const result = state.result;
-  const sections = reportSections(report);
-  const verdictLine = sections.head.split("\n").find((line) => /expectations met\./.test(line)) || "";
-  const scenarioFile = String(result.scenarioFile || "");
-  const inTree = committedScenario(scenarioFile);
-  const reproduce = inTree ? path.basename(scenarioFile, ".json") : scenarioFile || result.name;
-  const commit = result.commit
-    ? `\`${result.commit.sha}\`${result.commit.dirty ? " plus uncommitted changes" : ""}`
-    : "(commit not recorded: run before the CLI recorded it)";
-  const seconds = Math.round((result.stoppedAtMs - result.startedAtMs) / 1000);
-  const frames = (Array.isArray(result.frames) ? result.frames : []);
-  const lines = [
-    `### End-to-end check \`${result.name}\`: ${verdictOf(result)}`,
-    "",
-    `Run \`${state.runID}\` of \`${scenarioFile || result.name}\` on commit ${commit}, ` +
-      `from world \`${result.world}\`, ${seconds} s including boot and shutdown.`,
-    "",
-    verdictLine,
-    "",
-  ];
-  if (sections["Expected against observed"]) lines.push(sections["Expected against observed"].replace(/^## /, "#### "), "");
-  if (frames.length) {
-    lines.push("#### Tactical frames", "");
-    lines.push("| t | Why | Frame |", "| --- | --- | --- |");
-    for (const frame of frames) {
-      lines.push(`| ${formatOffset(frame.t || 0)} | ${frameWhy(frame)} | ${path.basename(frame.file)} (attached) |`);
-    }
-    lines.push("");
-  }
-  lines.push(`Reproduce: \`node tools/evejs-e2e/bin/e2e.js run ${reproduce}\`.`);
-  const attach = frames.map((frame) => path.join(state.dir, frame.file));
-  return [
-    lines.join("\n"),
-    "",
-    "---",
-    ...(inTree ? [] : [`The scenario is not in tools/e2e-scenarios/, so a reviewer can't rerun it. Save it there ` +
-      "(e2e_run_scenario with save: true) and commit it with the feature."]),
-    `Paste the markdown above. Attach these, or PNGs rendered from them, so reviewers see the frames:`,
-    ...(attach.length ? attach.map((file) => `- ${file}`) : ["- (no frames in this run)"]),
-    `Full report: ${path.join(state.dir, "report.md")}. _local/ is not committed, so don't link into it.`,
-  ].join("\n");
-}
-
-function lastTimelineLines(state, count = 60) {
-  const text = readText(path.join(state.dir, "timeline.jsonl")) || "";
-  const events = [];
-  for (const line of text.split("\n")) {
-    if (!line.trim()) continue;
-    try {
-      const event = JSON.parse(line);
-      if (event.kind !== "POS") events.push(event);
-    } catch (_error) {
-      // A line cut off by a watch still writing.
-    }
-  }
-  return events.slice(-count).map((event) => formatTimelineEvent(event)).join("\n");
-}
-
-function describeRunning(state) {
-  const background = state.background;
-  const log = readText(path.join(REPO_ROOT, background.log)) || "";
-  const seconds = Math.round((Date.now() - background.startedAtMs) / 1000);
-  return `run ${state.runID} is still running (pid ${background.pid}, ${seconds} s so far). ` +
-    `Call e2e_report again with waitSeconds to wait for it.\nLast lines of its console (${background.log}):\n` +
-    tailLines(log, 30);
 }
 
 // ---------- tools ----------
@@ -531,13 +297,6 @@ const TOOLS = [
         const reply = await runCli(args, context);
         parts.push(`## ${title}\n${reply.output}`);
       }
-      let drafts = [];
-      try {
-        drafts = fs.readdirSync(DRAFT_DIR).filter((name) => name.endsWith(".json")).map((name) => path.basename(name, ".json"));
-      } catch (_error) {
-        drafts = [];
-      }
-      if (drafts.length) parts.push(`## Draft scenarios (${relativePath(DRAFT_DIR)})\n${drafts.join("\n")}`);
       const runs = recentRuns(10);
       const running = runs.filter((row) => runState(row.name).running);
       if (running.length) parts.push(`## Background runs still going\n${running.map((row) => row.name).join("\n")}`);
@@ -761,23 +520,9 @@ const TOOLS = [
         ...(params.world ? [`--world=${params.world}`] : []), "--", target];
 
       if (params.wait === false) {
-        fs.mkdirSync(BACKGROUND_DIR, { recursive: true });
-        const logPath = path.join(BACKGROUND_DIR, `${runID}.log`);
-        const out = fs.openSync(logPath, "w");
-        const child = spawn(process.execPath, [CLI_PATH, ...args], {
-          cwd: REPO_ROOT,
-          detached: true,
-          stdio: ["ignore", out, out],
-          windowsHide: true,
-        });
-        child.unref();
-        fs.closeSync(out);
-        fs.writeFileSync(path.join(BACKGROUND_DIR, `${runID}.json`), `${JSON.stringify({
-          runID, pid: child.pid, startedAtMs: Date.now(), scenario: relativePath(target), log: relativePath(logPath), args,
-        }, null, 2)}\n`);
-        return textResult(`${prefix}${check.output.split("\n")[0]}\nstarted run ${runID} in the background (pid ${child.pid}); ` +
-          `console in ${relativePath(logPath)}.\nCall e2e_report with run "${runID}" and waitSeconds (up to ${MAX_WAIT_SECONDS}) ` +
-          "to wait for it and read the verdict.");
+        const started = RUNS.startBackground({ cliPath: CLI_PATH, args, runID, scenarioFile: relativePath(target) });
+        return textResult(`${prefix}${check.output.split("\n")[0]}\nstarted run ${runID} in the background (pid ${started.pid}); ` +
+          `console in ${started.log}.\n${RUNS.detachedText(runID, MAX_WAIT_SECONDS)}`);
       }
 
       // Auto mode boots only when no server is up; a server it attached to isn't the run's to stop.
@@ -808,44 +553,9 @@ const TOOLS = [
       waitSeconds: int(`Wait up to this long for a background run to finish (0 to ${MAX_WAIT_SECONDS}).`, { minimum: 0, maximum: MAX_WAIT_SECONDS }),
     }),
     async run(params, context) {
-      if (!params.run) {
-        const runs = recentRuns(15);
-        return textResult(runs.length ? `Recent runs, newest first:\n${runs.map((row) => row.text).join("\n")}` : "no runs yet");
-      }
-      const runID = params.run === "latest" ? (recentRuns(1)[0] || {}).name : safeRunID(params.run);
-      if (!runID) return textResult("no runs yet", true);
-      let state = runState(runID);
-      const deadline = Date.now() + Math.min(MAX_WAIT_SECONDS, Number(params.waitSeconds) || 0) * 1000;
-      let lastLine = "";
-      while (state.running && Date.now() < deadline && !(context.signal && context.signal.aborted)) {
-        await sleep(2000, context.signal);
-        const line = tailLines(readText(path.join(REPO_ROOT, state.background.log)) || "", 1);
-        if (line && line !== lastLine) context.onLine(line);
-        lastLine = line;
-        state = runState(runID);
-      }
-      if (state.running) return textResult(describeRunning(state));
-      if (!state.result) {
-        if (state.background) {
-          const log = readText(path.join(REPO_ROOT, state.background.log)) || "";
-          return textResult(`run ${runID} ended without a report. Last lines of its console (${state.background.log}):\n` +
-            tailLines(log, 40), true);
-        }
-        if (state.hasTimeline) {
-          return textResult(`${runID} is a watch with no report. Last timeline lines:\n${lastTimelineLines(state)}\n\n` +
-            `Timeline: ${path.join(state.dir, "timeline.jsonl")}`);
-        }
-        const runs = recentRuns(10);
-        return textResult(`no run ${runID}. Recent runs:\n${runs.map((row) => row.text).join("\n")}`, true);
-      }
-      const reportPath = path.join(state.dir, "report.md");
-      const report = readText(reportPath) || "";
-      switch (params.section || "summary") {
-        case "full": return textResult(clip(report, OUTPUT_LIMIT, reportPath));
-        case "result": return textResult(clip(JSON.stringify(state.result, null, 2)));
-        case "pr": return textResult(prCitation(state, report));
-        default: return textResult(`${clip(reportSummary(report))}\n\n${filesBlock(state)}`);
-      }
+      const reply = await readReport({ run: params.run, section: params.section || "summary",
+        waitSeconds: Math.min(MAX_WAIT_SECONDS, Number(params.waitSeconds) || 0), signal: context.signal, onLine: context.onLine });
+      return textResult(reply.text, reply.isError);
     },
   },
 ];

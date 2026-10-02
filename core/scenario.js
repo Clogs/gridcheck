@@ -24,6 +24,8 @@ const SCENARIO_DIR = path.join(__dirname, "..", "scenarios");
 // scenariosDir, tools/e2e-scenarios by default). tools/evejs-e2e/ is a
 // vendored copy (core/vendor.js), so a scenario saved there would be drift.
 const TREE_SCENARIO_DIR = defaultTreeConfig().scenariosDir;
+// Drafts an agent wrote while working on a feature, not committed (_local/e2e/scenarios).
+const DRAFT_SCENARIO_DIR = path.join(defaultTreeConfig().e2eDir, "scenarios");
 // "world": "fresh" boots a new game store seeded from the reference data.
 const FRESH_WORLD = "fresh";
 
@@ -536,8 +538,8 @@ function validateScenario(raw, { source = "scenario", defaultName = null, worldE
 }
 
 // The folders scenarios live in: the core's, then each plugin's.
-function scenarioDirs({ dir = SCENARIO_DIR, treeDir = TREE_SCENARIO_DIR, registry = defaultRegistry() } = {}) {
-  return [{ plugin: null, dir: treeDir }, { plugin: null, dir }, ...registry.scenarioDirs];
+function scenarioDirs({ dir = SCENARIO_DIR, treeDir = TREE_SCENARIO_DIR, draftDir = DRAFT_SCENARIO_DIR, registry = defaultRegistry() } = {}) {
+  return [{ plugin: null, dir: treeDir }, { plugin: null, dir }, ...registry.scenarioDirs, { plugin: null, dir: draftDir, draft: true }];
 }
 
 // A bare name is a file in the first folder that has it; a path is a path.
@@ -566,7 +568,7 @@ function loadScenario(nameOrPath, context = {}) {
 function listScenarios(context = {}) {
   const rows = [];
   const seen = new Set();
-  for (const { plugin, dir } of scenarioDirs(context)) {
+  for (const { plugin, dir, draft = false } of scenarioDirs(context)) {
     let names = [];
     try {
       names = fs.readdirSync(dir).filter((name) => name.endsWith(".json")).sort();
@@ -580,10 +582,10 @@ function listScenarios(context = {}) {
       const file = path.join(dir, name);
       try {
         const raw = JSON.parse(fs.readFileSync(file, "utf8"));
-        rows.push({ name: scenarioName, file, plugin, description: String(raw.description || ""),
+        rows.push({ name: scenarioName, file, plugin, draft, description: String(raw.description || ""),
           world: raw.recipe ? `recipe ${raw.recipe}` : raw.world });
       } catch (error) {
-        rows.push({ name: scenarioName, file, plugin, description: `(unreadable: ${error.message})` });
+        rows.push({ name: scenarioName, file, plugin, draft, description: `(unreadable: ${error.message})` });
       }
     }
   }
@@ -1047,6 +1049,7 @@ module.exports = {
   PERF_EVERY_SECONDS,
   PROFILE_EVERY_TICKS,
   FRESH_WORLD,
+  DRAFT_SCENARIO_DIR,
   SCENARIO_DIR,
   TREE_SCENARIO_DIR,
   ScenarioError,

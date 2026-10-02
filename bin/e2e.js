@@ -83,7 +83,7 @@ const MANAGED = MODE === "managed";
 const AUTO = MODE === "auto";
 
 const BOOLEAN_FLAGS = new Set(["all", "json", "any-pid", "force", "fresh", "no-market", "no-log", "help",
-  "check", "keep-up", "reuse", "positions", "once", "serve", "offline", "dry-run", "profile", "perf", "now",
+  "check", "keep-up", "reuse", "positions", "once", "serve", "offline", "dry-run", "profile", "perf", "now", "detach", "mcp",
   ...REGISTRY.booleanFlags]);
 
 class CliError extends Error {}
@@ -1088,6 +1088,43 @@ function describeScenarioRow(row) {
     timeout: raw.until && typeof raw.until.timeout === "number" ? raw.until.timeout : null, expect, problem };
 }
 
+// The tree's runs as the agents read them (core/runs.js), naming CLI commands.
+function cliRuns() {
+  return require("../core/runs").createRuns({ treeRoot: REPO_ROOT, runsDir: RUNS_DIR, e2eDir: E2E_DIR, surface: "cli" });
+}
+
+// run --detach: the same run in a background process, its console in a file.
+function detachRun(file, scenario, flags) {
+  const runID = flags.run ? String(flags.run).replace(/[^A-Za-z0-9._-]/g, "_") : `${runStamp(Date.now())}-${scenario.name}`;
+  if (fs.existsSync(path.join(RUNS_DIR, runID))) throw new CliError(`run ${runID} already exists; pass another --run`);
+  const args = ["run", `--run=${runID}`, ...(flags["keep-up"] ? ["--keep-up"] : []), ...(flags.reuse ? ["--reuse"] : []),
+    ...(flags.world === undefined ? [] : [`--world=${flags.world}`]), "--", file];
+  const runs = cliRuns();
+  const started = runs.startBackground({ cliPath: __filename, args, runID, scenarioFile: relativePath(file) });
+  console.log(`started run ${runID} in the background (pid ${started.pid}); console in ${started.log}`);
+  console.log(runs.detachedText(runID));
+}
+
+// Exit 0 passed, 1 failed, 2 did not complete or no such run, 3 still running.
+async function cmdReport(positionals, flags) {
+  const wait = flags.wait === undefined ? 0 : Number(flags.wait);
+  if (!Number.isFinite(wait) || wait < 0) throw new CliError("--wait takes seconds, e.g. --wait 600");
+  const reply = await cliRuns().readReport({ run: positionals[0] || null, section: flags.section ? String(flags.section) : "summary",
+    waitSeconds: wait, onLine: (line) => process.stderr.write(`  ${line}\n`) });
+  console.log(reply.text);
+  process.exitCode = reply.running ? 3 : reply.isError ? 2 : (reply.exitCode || 0);
+}
+
+function cmdPrimer(flags) {
+  const dir = (file, fallback) => {
+    const relative = relativePath(file);
+    return relative.startsWith("..") ? fallback : relative;
+  };
+  console.log(require("../core/primer").primer({ registry: REGISTRY, mode: MODE, surface: flags.mcp ? "mcp" : "cli",
+    scenarioDirs: { tree: dir(scenarioTools.TREE_SCENARIO_DIR, "tools/e2e-scenarios"),
+      drafts: dir(scenarioTools.DRAFT_SCENARIO_DIR, "_local/e2e/scenarios") } }));
+}
+
 async function cmdRun(positionals, flags) {
   if (!positionals[0]) {
     const rows = scenarioTools.listScenarios({ registry: REGISTRY });
@@ -1096,7 +1133,7 @@ async function cmdRun(positionals, flags) {
       return;
     }
     for (const row of rows) {
-      console.log(`${row.name.padEnd(28)} ${String(row.world || "?").padEnd(16)} ${row.plugin ? `[${row.plugin}] ` : ""}${row.description}`);
+      console.log(`${row.name.padEnd(28)} ${String(row.world || "?").padEnd(16)} ${row.plugin ? `[${row.plugin}] ` : ""}${row.draft ? "[draft] " : ""}${row.description}`);
     }
     if (!rows.length) console.log(`no scenarios in ${relativePath(scenarioTools.SCENARIO_DIR)}`);
     console.log("usage: e2e run <scenario> [--check] [--run <id>] [--world <name>|fresh] [--keep-up | --reuse]");
@@ -1114,6 +1151,10 @@ async function cmdRun(positionals, flags) {
     { anyWorld: !(MANAGED || (AUTO && !running) || reuse) || override !== null });
   if (flags.check) {
     printScenario(file, loaded);
+    return;
+  }
+  if (flags.detach) {
+    detachRun(file, loaded, flags);
     return;
   }
   let reusing = null;
@@ -2256,9 +2297,11 @@ const CORE_COMMANDS = {
     run: (positionals, flags) => require("../core/gui").main([...positionals,
       ...Object.entries(flags).flatMap(([key, value]) => (value === true ? [`--${key}`] : [`--${key}`, String(value)]))]),
   },
-  run: { usage: ["run [<scenario>] [--check] [--run <id>] [--world <name>|fresh] [--keep-up | --reuse] | run --json"], run: cmdRun },
+  run: { usage: ["run [<scenario>] [--check] [--detach] [--run <id>] [--world <name>|fresh] [--keep-up | --reuse] | run --json"], run: cmdRun },
+  report: { usage: ["report [<run>|latest] [--section summary|full|result|pr] [--wait <s>]"], run: cmdReport },
   log: { usage: ["log [--grep NpcController] [--lines 40] [--any-pid]"], run: (_positionals, flags) => cmdLog(flags) },
   perf: { usage: ["perf [--for 10] [--now] [--json]"], run: (_positionals, flags) => cmdPerf(flags) },
+  primer: { usage: ["primer [--mcp]"], run: (_positionals, flags) => cmdPrimer(flags) },
   help: { usage: ["help [--json]"], run: (_positionals, flags) => { console.log(flags.json ? JSON.stringify(commandCatalog(), null, 2) : helpText()); } },
 };
 
@@ -2288,7 +2331,7 @@ function commandCatalog() {
 }
 
 // Commands that run even when e2e.config.json is broken: they fix or report it.
-const CONFIG_EXEMPT = new Set(["init", "doctor", "help", "vendor", "gui", "agents"]);
+const CONFIG_EXEMPT = new Set(["init", "doctor", "help", "vendor", "gui", "agents", "primer"]);
 
 async function main(argv) {
   const { command, positionals, flags } = parseArgs(argv);
