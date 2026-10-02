@@ -270,9 +270,12 @@ function cmdEconomy(positionals, _flags, io) {
   if (!result.ok) io.setExitCode(1);
 }
 
+// summary and needs feed `e2e help --json` and the GUI's Commands tab.
 const COMMANDS = {
-  scouts: { usage: ["scouts [--all]"], run: cmdScouts },
+  scouts: { usage: ["scouts [--all]"], summary: "Lists the scout flights, with their phase and where each one is.", needs: "up", run: cmdScouts },
   trigger: {
+    summary: "Starts a scout, hunt, fleet, materialization or skirmish now, instead of waiting for the Living Universe to.",
+    needs: "up",
     usage: [
       "trigger scout [<system>] [--flight <id>] | trigger hunt [--flight <id>] [--phase stalking|committed]",
       "trigger fleet <family> [--doctrine <key>] [--to self|<system>] [--count 1-8] | trigger materialize <flightID> [--go]",
@@ -281,13 +284,18 @@ const COMMANDS = {
     booleanFlags: ["go"],
     run: cmdTrigger,
   },
-  clock: { usage: ["clock [--stages] [--json]"], booleanFlags: ["stages"], run: cmdClock },
-  warp: { usage: ["warp --for 24h [--step 1000] [--real] [--run <id>]"], booleanFlags: ["real"], run: cmdWarp },
-  economy: { usage: ["economy compare <reference run> <candidate run>"], run: cmdEconomy },
+  clock: { usage: ["clock [--stages] [--json]"], summary: "The Living Universe clock and its offset; --stages adds its stages.", needs: "up",
+    booleanFlags: ["stages"], run: cmdClock },
+  warp: { usage: ["warp --for 24h [--step 1000] [--real] [--run <id>]"],
+    summary: "Runs the Living Universe forward, e.g. 24 h, and writes the run's economy.md.", needs: "up", writes: true,
+    booleanFlags: ["real"], run: cmdWarp },
+  economy: { usage: ["economy compare <reference run> <candidate run>"], summary: "Compares the economy reports of two warp runs.",
+    run: cmdEconomy },
 };
 
 const HANDLES = {
-  teleport: { flags: ["flight"], usage: ["teleport <system> --flight <flightID>  (pins the flight to stand up there)"], run: teleportWithFlight },
+  teleport: { flags: ["flight"], usage: ["teleport <system> --flight <flightID>  (pins the flight to stand up there)"],
+    summary: "Teleports, and pins a flight to stand up in that system.", needs: "up", run: teleportWithFlight },
 };
 
 module.exports = {
