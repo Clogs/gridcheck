@@ -273,7 +273,9 @@ A change is refused when:
 - a file it would change has uncommitted changes: `tools/gridcheck/` and the shim for a vendor
   update, `gridcheck.config.json` for config, `.mcp.json` for Claude Code's setup, a patch's targets for
   an apply. A tree that isn't a git
-  checkout, such as an unpacked zip, can't be checked, and the preview says so;
+  checkout, such as an unpacked zip, can't be checked, and the preview says so. For an install or
+  update, a file of the copy or the shim that's untracked or changed but still has the hash
+  `VENDOR.json` recorded doesn't count: it's as Gridcheck wrote it, so nothing of yours is lost;
 - the dry run fails, for example `vendor update` on a drifted copy without `--force`, or a patch
   whose anchor is missing;
 - the copy's own `gridcheck help` doesn't list `--dry-run` for the command. An older copy would ignore

@@ -335,6 +335,31 @@ test("a failed dry run, a running server or uncommitted changes to the targets r
   assert.deepStrictEqual(fake.calls.at(-1).slice(0, 4), ["init", "--mode", "managed", "--force"], "an existing config is replaced with --force");
 });
 
+test("a copy installed but never committed doesn't block an update, but a hand edit in it does", async (t) => {
+  const s = setup(t);
+  const id = gui.treeID(s.tree);
+  const sha = (text) => require("node:crypto").createHash("sha256").update(text).digest("hex");
+  const shimPath = "server/src/_secondary/agentBridge/server.js";
+  write(s.tree, shimPath, "// the shim\n");
+  write(s.tree, "tools/gridcheck/VENDOR.json", JSON.stringify({ name: "gridcheck", version: "9.9.9", commit: "c0ffee",
+    files: { "bin/gridcheck.js": sha("// the vendored CLI\n") }, shim: { path: shimPath, sha256: sha("// the shim\n") } }));
+  // Stock is committed; the copy and the shim are untracked.
+  git(s.tree, "init", "-q");
+  git(s.tree, "add", "server/src/server.js", "server/package.json");
+  git(s.tree, "commit", "-q", "-m", "stock");
+  const app = gui.createGui({ context: s.context, stateFile: s.stateFile, run: fakeRun().run });
+  const untouched = body(await app.handle("POST", "/gui/api/preview", {}, { tree: id, action: "vendor" })).preview;
+  assert.deepStrictEqual(untouched.blockers, []);
+  assert.strictEqual(untouched.ok, true);
+  assert.deepStrictEqual(untouched.checks.find((row) => row.kind === "as-vendored"), { kind: "as-vendored", files: 3 },
+    "the CLI, VENDOR.json and the shim are as installed");
+
+  write(s.tree, "tools/gridcheck/bin/gridcheck.js", "// edited by hand\n");
+  write(s.tree, "tools/gridcheck/notes.txt", "mine\n");
+  const edited = body(await app.handle("POST", "/gui/api/preview", {}, { tree: id, action: "vendor" })).preview;
+  assert.deepStrictEqual(edited.blockers, [{ kind: "dirty", files: ["tools/gridcheck/bin/gridcheck.js", "tools/gridcheck/notes.txt"] }]);
+});
+
 test("the page needs no token and carries no data; every data route needs it", async () => {
   let checked = false;
   const lines = [];

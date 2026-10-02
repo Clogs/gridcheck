@@ -119,12 +119,36 @@ function git(cwd, args, { trim = true } = {}) {
 
 // -> { git: false } | { git: true, dirty: [path] } for the given tree-relative paths.
 function gitDirty(root, relativePaths) {
-  if (git(root, ["rev-parse", "--show-toplevel"]) === null) return { git: false };
+  const top = git(root, ["rev-parse", "--show-toplevel"]);
+  if (top === null) return { git: false };
   // Porcelain lines start with two status columns, so the output isn't trimmed.
   const out = git(root, ["status", "--porcelain", "--untracked-files=all", "--", ...relativePaths.map((file) => path.join(root, file))],
     { trim: false });
   if (out === null) return { git: true, dirty: [], error: "git status failed" };
-  return { git: true, dirty: out.split(/\r?\n/).map((line) => line.slice(3).trim()).filter(Boolean) };
+  // git prints paths from the repository's top, which may be above the tree.
+  return { git: true, dirty: out.split(/\r?\n/).map((line) => line.slice(3).trim()).filter(Boolean)
+    .map((file) => slashed(path.relative(root, path.resolve(top, file)))) };
+}
+
+// The files that aren't exactly as `vendor update` wrote them, by the copy's VENDOR.json.
+// A copy that was installed but never committed is all untracked, yet overwriting a file
+// that still has its recorded hash loses nothing. A hand edit doesn't match, so it stays.
+function notAsVendored(root, files) {
+  const manifest = readJSON(path.join(root, vendor.VENDOR_DIR, vendor.MANIFEST_NAME));
+  if (!manifest || !manifest.files || typeof manifest.files !== "object") return files;
+  const dir = `${slashed(vendor.VENDOR_DIR)}/`;
+  const shim = slashed(vendor.SHIM_PATH);
+  return files.filter((file) => {
+    if (file === `${dir}${vendor.MANIFEST_NAME}`) return false;
+    const expected = file.startsWith(dir) ? manifest.files[file.slice(dir.length)]
+      : file === shim && manifest.shim ? manifest.shim.sha256 : null;
+    if (typeof expected !== "string") return true;
+    try {
+      return crypto.createHash("sha256").update(fs.readFileSync(path.join(root, file))).digest("hex") !== expected;
+    } catch (_error) {
+      return true;
+    }
+  });
 }
 
 // What this copy is: a checkout (manages any tree) or a vendored copy (its tree only).
@@ -468,6 +492,7 @@ function planAction(action, root, params, context) {
       steps: [{ cwd: checkout, args: [cli, "vendor", "update", "--from", checkout, "--tree", root, ...(force ? ["--force"] : [])],
         env: { GRIDCHECK_TREE: root } }],
       dirtyTargets: VENDOR_TARGETS,
+      overwritesVendored: true,
     };
   }
   if (action === "setup") {
@@ -489,6 +514,7 @@ function planAction(action, root, params, context) {
     return {
       steps: [{ cwd: context.checkout || root, args, env: { GRIDCHECK_TREE: root } }],
       dirtyTargets: [...VENDOR_TARGETS, treeConfig.CONFIG_NAME],
+      overwritesVendored: true,
       // A first setup builds a world and boots a server twice.
       timeoutMs: 20 * 60_000,
     };
@@ -536,12 +562,20 @@ function checkGuards(root, plan) {
   }
   if (plan.dirtyTargets.length) {
     const status = gitDirty(root, plan.dirtyTargets);
+    let asVendored = 0;
+    if (status.git && plan.overwritesVendored) {
+      const left = notAsVendored(root, status.dirty);
+      asVendored = status.dirty.length - left.length;
+      status.dirty = left;
+    }
     if (!status.git) {
       checks.push({ kind: "not-git" });
     } else if (status.dirty.length) {
       refused.push(`uncommitted changes in ${status.dirty.slice(0, 10).join(", ")}${status.dirty.length > 10 ? ", ..." : ""}; ` +
         "commit or discard them first");
       blockers.push({ kind: "dirty", files: status.dirty });
+    } else if (asVendored) {
+      checks.push({ kind: "as-vendored", files: asVendored });
     } else {
       checks.push({ kind: "clean", files: plan.dirtyTargets.map(slashed) });
     }

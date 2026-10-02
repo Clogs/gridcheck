@@ -1831,11 +1831,13 @@
         " Edits made by hand to those files would be lost."));
   }
 
-  function checkRow(check) {
+  function previewCheck(check) {
     const rows = {
       "server-stopped": ["ok", "check", ["The server is stopped."]],
       "server-up-ok": ["na", "dash", ["The server is running. That's fine: this doesn't touch the server."]],
       clean: ["ok", "check", ["No uncommitted edits in ", ...codeList(check.files || []), ", so nothing of yours gets overwritten."]],
+      "as-vendored": ["ok", "check", ["Gridcheck's files aren't committed in this Eve.js instance's git, but every one is as it was installed, ",
+        "so nothing of yours gets overwritten."]],
       "not-git": ["warn", "alert", ["This Eve.js instance isn't a git checkout, so uncommitted edits couldn't be checked."]],
     };
     const [kind, mark, text] = rows[check.kind] || ["na", "dash", [check.kind]];
@@ -1998,7 +2000,7 @@
     }
     const notes = summary.notes.filter((text) => !/isn't a git checkout/.test(text));
     if (notes.length) parts.push(section("Also", null, h("ul", { className: "pv-notes" }, notes.map((text) => h("li", { text })))));
-    if ((p.checks || []).length) parts.push(section("Checked before showing this", null, h("ul", { className: "pv-checks" }, p.checks.map(checkRow))));
+    if ((p.checks || []).length) parts.push(section("Checked before showing this", null, h("ul", { className: "pv-checks" }, p.checks.map(previewCheck))));
     if (p.ok && summary.next.length) parts.push(section("After this", null, nextList(nextSteps(summary, p.root))));
     parts.push(techDetails(p.steps || [], { open: !summary.changes.length || blockers.some((row) => row.kind === "failed") }));
     return parts;
