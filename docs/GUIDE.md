@@ -678,7 +678,8 @@ A scenario is the final check for a feature you built: it starts the feature the
 would, and states what a person watching the grid should see.
 
 1. **Start from a world** where the feature can happen: `starter`, a recipe of your own, or a
-   saved world.
+   saved world. `e2e scenario new <name>` writes a draft that checks out as it stands, and
+   `--from <scenario>` copies one that is close to what you need instead.
 2. **Set the feature off in setup**, with a slash command, a teleport, `/npc`, a player action or
    a plugin's step. If nothing reaches your feature on demand, add a slash command or a plugin
    step that calls its entry point. Don't copy the feature's rules into the test. Bind the IDs a

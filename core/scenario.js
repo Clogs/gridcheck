@@ -565,6 +565,50 @@ function loadScenario(nameOrPath, context = {}) {
 
 // Every scenario in every folder; a name the tree has hides the core's, and
 // the core's hides a plugin's.
+const SCENARIO_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/;
+// What `scenario new` writes without --from: valid as it stands, so the first
+// `run --check` passes, with notes saying what to replace.
+const SCENARIO_TEMPLATE = Object.freeze({
+  description: "What this checks, in one sentence: the feature, and what a player should see.",
+  world: FRESH_WORLD,
+  setup: [
+    "undock",
+    { waitFor: "GRID", timeout: 30, note: "the watch's first grid, taken before anything the steps below spawn" },
+  ],
+  until: { any: ["GRID"], from: "start", timeout: 60, grace: 10 },
+  expect: [
+    { match: "GRID", note: "replace with what the feature should make happen, e.g. ARRIVE who=npc" },
+    { match: "no DIVERGE status=open", note: "the client view agrees with the server" },
+  ],
+});
+
+// Writes a new scenario: a copy of `from` (a scenario name or path) or the
+// template, to the drafts, or with save to the tree's scenarios to commit.
+// -> { file, from }. Throws an Error that says what to do instead.
+function newScenario(name, { from = null, save = false, force = false, treeDir = TREE_SCENARIO_DIR,
+  draftDir = DRAFT_SCENARIO_DIR, ...context } = {}) {
+  if (!SCENARIO_NAME.test(String(name || ""))) {
+    throw new Error("scenario new needs a name: letters, digits, '.', '_' or '-', e.g. `e2e scenario new fleet-arrives`");
+  }
+  let raw = SCENARIO_TEMPLATE;
+  let source = null;
+  if (from) {
+    source = scenarioPath(from, { ...context, treeDir, draftDir });
+    try {
+      raw = JSON.parse(fs.readFileSync(source, "utf8"));
+    } catch (error) {
+      throw new Error(error.code === "ENOENT" ? `no scenario ${from} to copy (\`e2e run\` lists them)` : `${source}: ${error.message}`);
+    }
+    raw = { ...raw };
+    delete raw.name;
+  }
+  const file = path.join(save ? treeDir : draftDir, `${name}.json`);
+  if (fs.existsSync(file) && !force) throw new Error(`${file} already exists; pick another name, or pass --force to replace it`);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, `${JSON.stringify(raw, null, 2)}\n`);
+  return { file, from: source };
+}
+
 function listScenarios(context = {}) {
   const rows = [];
   const seen = new Set();
@@ -1056,8 +1100,10 @@ module.exports = {
   bindStep,
   describeStep,
   exitCodeFor,
+  SCENARIO_TEMPLATE,
   listScenarios,
   loadScenario,
+  newScenario,
   renderReport,
   resultRecord,
   runScenario,

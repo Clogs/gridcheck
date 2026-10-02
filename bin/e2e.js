@@ -83,7 +83,7 @@ const MANAGED = MODE === "managed";
 const AUTO = MODE === "auto";
 
 const BOOLEAN_FLAGS = new Set(["all", "json", "any-pid", "force", "fresh", "no-market", "no-log", "help",
-  "check", "keep-up", "reuse", "positions", "once", "serve", "offline", "dry-run", "profile", "perf", "now", "detach", "mcp",
+  "check", "keep-up", "reuse", "positions", "once", "serve", "offline", "dry-run", "profile", "perf", "now", "detach", "mcp", "save",
   ...REGISTRY.booleanFlags]);
 
 class CliError extends Error {}
@@ -1089,6 +1089,29 @@ function describeScenarioRow(row) {
 }
 
 // The tree's runs as the agents read them (core/runs.js), naming CLI commands.
+// scenario new: a draft (or with --save, a tree scenario) to edit, checked as written.
+function cmdScenario(positionals, flags) {
+  const [sub, name] = positionals;
+  if (sub !== "new") throw new CliError("usage: e2e scenario new <name> [--from <scenario>] [--save] [--force]");
+  let written;
+  try {
+    written = scenarioTools.newScenario(name, { from: flags.from ? String(flags.from) : null, save: Boolean(flags.save),
+      force: Boolean(flags.force), registry: REGISTRY });
+  } catch (error) {
+    throw new CliError(error.message);
+  }
+  console.log(`wrote ${relativePath(written.file)}${written.from ? ` from ${relativePath(written.from)}` : " from the template"}`);
+  try {
+    loadScenarioOrFail(written.file, { anyWorld: true });
+    console.log("it checks out as written.");
+  } catch (error) {
+    console.log(`it doesn't check out yet:\n${error.message}`);
+  }
+  console.log(`Edit it, then \`e2e run ${name} --check\` to check it and \`e2e run ${name}\` to run it.` +
+    (flags.save ? "" : ` It's a draft; \`e2e scenario new ${name} --from ${relativePath(written.file)} --save\` copies it to ` +
+      `${relativePath(scenarioTools.TREE_SCENARIO_DIR)}/ to commit with the feature.`));
+}
+
 function cliRuns() {
   return require("../core/runs").createRuns({ treeRoot: REPO_ROOT, runsDir: RUNS_DIR, e2eDir: E2E_DIR, surface: "cli" });
 }
@@ -2299,6 +2322,7 @@ const CORE_COMMANDS = {
   },
   run: { usage: ["run [<scenario>] [--check] [--detach] [--run <id>] [--world <name>|fresh] [--keep-up | --reuse] | run --json"], run: cmdRun },
   report: { usage: ["report [<run>|latest] [--section summary|full|result|pr] [--wait <s>]"], run: cmdReport },
+  scenario: { usage: ["scenario new <name> [--from <scenario>] [--save] [--force]"], run: cmdScenario },
   log: { usage: ["log [--grep NpcController] [--lines 40] [--any-pid]"], run: (_positionals, flags) => cmdLog(flags) },
   perf: { usage: ["perf [--for 10] [--now] [--json]"], run: (_positionals, flags) => cmdPerf(flags) },
   primer: { usage: ["primer [--mcp]"], run: (_positionals, flags) => cmdPrimer(flags) },

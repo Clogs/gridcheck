@@ -201,6 +201,14 @@ const DOCS = {
     examples: [["e2e run", "list the scenarios"], ["e2e run loadout-npc-fight", null], ["e2e run loadout-npc-fight --check", null],
       ["e2e run loadout-npc-fight --detach", "then e2e report <run> --wait 600"]],
   },
+  scenario: {
+    group: "scenarios", writes: true,
+    summary: "Writes a new scenario to edit: a copy of another, or a template that checks out as it stands. Drafts go in _local/e2e/scenarios.",
+    flags: [["--from <scenario>", "the template", "Copy this scenario (a name `e2e run` lists, or a path)."],
+      ["--save", null, "Write it to the tree's tools/e2e-scenarios/, to commit with the feature."],
+      ["--force", null, "Replace a scenario of that name."]],
+    examples: [["e2e scenario new fleet-arrives", null], ["e2e scenario new my-fight --from loadout-npc-fight", null]],
+  },
   report: {
     group: "scenarios", mcp: "e2e_report",
     summary: "Prints a run's report: its verdict, expected against observed, and its files. With no run, lists the recent runs. Exits 0 passed, 1 failed, 2 did not complete or no such run, 3 still running.",
