@@ -1835,7 +1835,7 @@
     const rows = {
       "server-stopped": ["ok", "check", ["The server is stopped."]],
       "server-up-ok": ["na", "dash", ["The server is running. That's fine: this doesn't touch the server."]],
-      clean: ["ok", "check", ["No uncommitted edits in ", ...codeList(check.files || []), ", so nothing of yours gets overwritten."]],
+      clean: ["ok", "check", ["No uncommitted edits in ", ...codeList(Array.isArray(check.files) ? check.files : []), ", so nothing of yours gets overwritten."]],
       "as-vendored": ["ok", "check", ["Gridcheck's files aren't committed in this Eve.js instance's git, but every one is as it was installed, ",
         "so nothing of yours gets overwritten."]],
       "not-git": ["warn", "alert", ["This Eve.js instance isn't a git checkout, so uncommitted edits couldn't be checked."]],

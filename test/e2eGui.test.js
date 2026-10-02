@@ -351,7 +351,7 @@ test("a copy installed but never committed doesn't block an update, but a hand e
   const untouched = body(await app.handle("POST", "/gui/api/preview", {}, { tree: id, action: "vendor" })).preview;
   assert.deepStrictEqual(untouched.blockers, []);
   assert.strictEqual(untouched.ok, true);
-  assert.deepStrictEqual(untouched.checks.find((row) => row.kind === "as-vendored"), { kind: "as-vendored", files: 3 },
+  assert.deepStrictEqual(untouched.checks.find((row) => row.kind === "as-vendored"), { kind: "as-vendored", count: 3 },
     "the CLI, VENDOR.json and the shim are as installed");
 
   write(s.tree, "tools/gridcheck/bin/gridcheck.js", "// edited by hand\n");

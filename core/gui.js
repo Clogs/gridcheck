@@ -575,7 +575,7 @@ function checkGuards(root, plan) {
         "commit or discard them first");
       blockers.push({ kind: "dirty", files: status.dirty });
     } else if (asVendored) {
-      checks.push({ kind: "as-vendored", files: asVendored });
+      checks.push({ kind: "as-vendored", count: asVendored });
     } else {
       checks.push({ kind: "clean", files: plan.dirtyTargets.map(slashed) });
     }
