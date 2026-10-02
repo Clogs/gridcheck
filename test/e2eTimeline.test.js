@@ -1,6 +1,6 @@
 "use strict";
 
-// core/timeline.js: the text `e2e watch` prints, the log line parser and
+// core/timeline.js: the text `gridcheck watch` prints, the log line parser and
 // the reorder buffer that merges log lines into the bridge stream.
 
 const test = require("node:test");

@@ -7,13 +7,13 @@ saves it, so a scenario can name the recipe and the tool builds the world for it
 ## Loadouts
 
 ```
-node tools/evejs-e2e/bin/e2e.js loadout Tristan \
+node tools/gridcheck/bin/gridcheck.js loadout Tristan \
   --modules "Light Neutron Blaster II x2, 1MN Afterburner II" \
   --drones "Hobgoblin II x5" --cargo "Antimatter Charge S x400" --charges "Antimatter Charge S"
-node tools/evejs-e2e/bin/e2e.js loadout --file my-ship.json     # the JSON below
+node tools/gridcheck/bin/gridcheck.js loadout --file my-ship.json     # the JSON below
 ```
 
-As a scenario step, and as the MCP tool `e2e_loadout`, it's the same object:
+As a scenario step, and as the MCP tool `loadout`, it's the same object:
 
 ```json
 { "loadout": {
@@ -41,7 +41,7 @@ As a scenario step, and as the MCP tool `e2e_loadout`, it's the same object:
   CPU, power and calibration used.
 
 The bridge builds the ship with stock's own helpers, the ones the `/ship`-style dev commands use
-(`services/ship/devCommandShipRuntime.js` and the modules it reads). `e2e doctor` says whether a
+(`services/ship/devCommandShipRuntime.js` and the modules it reads). `gridcheck doctor` says whether a
 tree has them. The bridge loads its own charges, because stock's preload fills only the first
 module of a type.
 
@@ -62,8 +62,8 @@ a fresh game store, in the same syntax as a scenario's setup:
 `loadout` and `wait`: steps that put a character somewhere, but nothing that watches.
 
 ```
-node tools/evejs-e2e/bin/e2e.js world recipes          # each recipe, and whether its world is built and current (--json for data)
-node tools/evejs-e2e/bin/e2e.js world build starter    # boot fresh, run the steps, stop, save
+node tools/gridcheck/bin/gridcheck.js world recipes          # each recipe, and whether its world is built and current (--json for data)
+node tools/gridcheck/bin/gridcheck.js world build starter    # boot fresh, run the steps, stop, save
 ```
 
 `world build` needs managed mode. It saves the world under the recipe's name, and its `world.json`
@@ -78,7 +78,7 @@ A scenario names a recipe instead of a world:
 { "recipe": "starter", "setup": ["undock"], "until": { "timeout": 60 }, "expect": ["GRID"] }
 ```
 
-In managed mode, `e2e run` builds the world first when it isn't built or the fingerprint changed,
+In managed mode, `gridcheck run` builds the world first when it isn't built or the fingerprint changed,
 so a new tree goes from nothing to a fitted ship in one command. `--world` still overrides it. In
 attach mode the recipe isn't applied, as a saved world isn't.
 

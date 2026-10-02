@@ -1,6 +1,6 @@
 "use strict";
 
-// bin/mcp.js: the MCP server over the e2e CLI. Covers the CLI argument
+// bin/mcp.js: the MCP server over the gridcheck CLI. Covers the CLI argument
 // mapping, argument checks, the JSON-RPC protocol, the PR citation, and one
 // real stdio session that spawns the CLI without booting anything. Live runs
 // through the tools are in docs/GUIDE.md "Agent MCP tools".
@@ -22,7 +22,7 @@ const LU = needsPlugin("lu");
 
 test("the spec's tools are listed, plugin tools named for their plugin, each with an object schema", LU, () => {
   const names = mcp.TOOLS.map((tool) => tool.name);
-  for (const name of ["e2e_up", "e2e_down", "e2e_grid", "e2e_slash", "e2e_watch", "e2e_lu_trigger", "e2e_run_scenario", "e2e_report"]) {
+  for (const name of ["up", "down", "grid", "slash", "watch", "lu_trigger", "run_scenario", "report"]) {
     assert.ok(names.includes(name), `${name} is listed`);
   }
   for (const tool of mcp.TOOLS) {
@@ -32,52 +32,52 @@ test("the spec's tools are listed, plugin tools named for their plugin, each wit
 });
 
 test("tools map onto CLI arguments; free text goes after --", LU, () => {
-  assert.deepStrictEqual(mcp.cliArgs("e2e_up", { world: "lowsec-docked", realClock: true, market: false, offgridTravel: 5 }),
+  assert.deepStrictEqual(mcp.cliArgs("up", { world: "lowsec-docked", realClock: true, market: false, offgridTravel: 5 }),
     ["up", "--world=lowsec-docked", "--no-market", "--real-clock", "--offgrid-travel=5"], "the lu plugin's up flags too");
-  assert.deepStrictEqual(mcp.cliArgs("e2e_up", {}), ["up"]);
-  assert.deepStrictEqual(mcp.cliArgs("e2e_slash", { command: "/tr me --weird Amamake" }), ["slash", "--", "/tr me --weird Amamake"]);
-  assert.deepStrictEqual(mcp.cliArgs("e2e_teleport", { system: "New Caldari" }), ["teleport", "--", "New Caldari"]);
-  assert.deepStrictEqual(mcp.cliArgs("e2e_watch", {}), ["watch", "--for=60"], "a shorter default than the CLI's 600 s");
-  assert.deepStrictEqual(mcp.cliArgs("e2e_watch", { seconds: 30, log: false, client: "diverge", grep: "--x" }),
+  assert.deepStrictEqual(mcp.cliArgs("up", {}), ["up"]);
+  assert.deepStrictEqual(mcp.cliArgs("slash", { command: "/tr me --weird Amamake" }), ["slash", "--", "/tr me --weird Amamake"]);
+  assert.deepStrictEqual(mcp.cliArgs("teleport", { system: "New Caldari" }), ["teleport", "--", "New Caldari"]);
+  assert.deepStrictEqual(mcp.cliArgs("watch", {}), ["watch", "--for=60"], "a shorter default than the CLI's 600 s");
+  assert.deepStrictEqual(mcp.cliArgs("watch", { seconds: 30, log: false, client: "diverge", grep: "--x" }),
     ["watch", "--for=30", "--grep=--x", "--no-log", "--client=diverge"]);
-  assert.deepStrictEqual(mcp.cliArgs("e2e_grid", { range: 100, json: true }), ["grid", "--range=100", "--json"]);
-  assert.deepStrictEqual(mcp.cliArgs("e2e_log", { grep: "PirateHunt", lines: 5, anyPid: true }),
+  assert.deepStrictEqual(mcp.cliArgs("grid", { range: 100, json: true }), ["grid", "--range=100", "--json"]);
+  assert.deepStrictEqual(mcp.cliArgs("log", { grep: "PirateHunt", lines: 5, anyPid: true }),
     ["log", "--grep=PirateHunt", "--lines=5", "--any-pid"]);
-  assert.deepStrictEqual(mcp.cliArgs("e2e_down", { force: true }), ["down", "--force"]);
+  assert.deepStrictEqual(mcp.cliArgs("down", { force: true }), ["down", "--force"]);
 });
 
 test("the lu plugin's trigger tool uses the scenario step's names", LU, () => {
-  assert.deepStrictEqual(mcp.cliArgs("e2e_lu_trigger", { name: "scout", system: "Amamake", flight: "f1" }),
+  assert.deepStrictEqual(mcp.cliArgs("lu_trigger", { name: "scout", system: "Amamake", flight: "f1" }),
     ["trigger", "--flight=f1", "--", "scout", "Amamake"]);
-  assert.deepStrictEqual(mcp.cliArgs("e2e_lu_trigger", { name: "hunt", phase: "committed" }),
+  assert.deepStrictEqual(mcp.cliArgs("lu_trigger", { name: "hunt", phase: "committed" }),
     ["trigger", "--phase=committed", "--", "hunt"]);
-  assert.deepStrictEqual(mcp.cliArgs("e2e_lu_trigger", { name: "fleet", family: "pirate", doctrine: "sanshas", to: "self", count: 2 }),
+  assert.deepStrictEqual(mcp.cliArgs("lu_trigger", { name: "fleet", family: "pirate", doctrine: "sanshas", to: "self", count: 2 }),
     ["trigger", "--doctrine=sanshas", "--to=self", "--count=2", "--", "fleet", "pirate"]);
-  assert.deepStrictEqual(mcp.cliArgs("e2e_lu_trigger", { name: "materialize", flight: "f7", go: true }),
+  assert.deepStrictEqual(mcp.cliArgs("lu_trigger", { name: "materialize", flight: "f7", go: true }),
     ["trigger", "--go", "--", "materialize", "f7"], "materialize takes the flight as its positional");
-  assert.deepStrictEqual(mcp.cliArgs("e2e_lu_trigger", { name: "skirmish", count: 5, shipClass: "cruiser", gap: 10000 }),
+  assert.deepStrictEqual(mcp.cliArgs("lu_trigger", { name: "skirmish", count: 5, shipClass: "cruiser", gap: 10000 }),
     ["trigger", "--count=5", "--class=cruiser", "--gap=10000", "--", "skirmish"]);
-  assert.throws(() => mcp.cliArgs("e2e_trigger", {}), /no CLI command for e2e_trigger/, "no core trigger tool");
+  assert.throws(() => mcp.cliArgs("trigger", {}), /no CLI command for trigger/, "no core trigger tool");
 });
 
 test("the instructions are the core's, then each plugin's primer", LU, () => {
   const { emptyRegistry } = require("../core/plugins");
   const core = mcp.instructions(emptyRegistry());
-  assert.match(core, /e2e_run_scenario/);
+  assert.match(core, /run_scenario/);
   assert.doesNotMatch(core, /Living Universe|trigger|HUNT/);
-  assert.match(mcp.INSTRUCTIONS, /Living Universe \(plugin lu\)[\s\S]*e2e_lu_trigger/);
+  assert.match(mcp.INSTRUCTIONS, /Living Universe \(plugin lu\)[\s\S]*lu_trigger/);
   assert.match(mcp.INSTRUCTIONS, /Kinds: GRID PRESENT .*SIGHTING HUNT/);
 });
 
 test("player actions use the scenario step's names, and the CLI reads them back as the same action", () => {
-  const { parseArgs } = require("../bin/e2e");
+  const { parseArgs } = require("../bin/gridcheck");
   const { actionFromArgs } = require("../core/actions");
   const roundTrip = (params) => {
-    const parsed = parseArgs(mcp.cliArgs("e2e_act", params));
+    const parsed = parseArgs(mcp.cliArgs("act", params));
     assert.strictEqual(parsed.command, "act");
     return actionFromArgs(parsed.positionals[0], parsed.positionals.slice(1), parsed.flags);
   };
-  assert.deepStrictEqual(mcp.cliArgs("e2e_act", { action: "orbit", target: "nearest npc", range: 2000 }),
+  assert.deepStrictEqual(mcp.cliArgs("act", { action: "orbit", target: "nearest npc", range: 2000 }),
     ["act", "--range=2000", "--", "orbit", "nearest npc"]);
   assert.deepStrictEqual(roundTrip({ action: "orbit", target: "nearest npc", range: 2000 }),
     { type: "orbit", target: "nearest npc", range: 2000 });
@@ -88,27 +88,27 @@ test("player actions use the scenario step's names, and the CLI reads them back 
   assert.deepStrictEqual(roundTrip({ action: "launchDrones", drones: "name~Warrior", count: 2 }),
     { type: "launchDrones", drones: "name~Warrior", count: 2 });
   assert.deepStrictEqual(roundTrip({ action: "stop" }), { type: "stop" });
-  assert.deepStrictEqual(mcp.cliArgs("e2e_watch", { client: "fx", positions: true }),
+  assert.deepStrictEqual(mcp.cliArgs("watch", { client: "fx", positions: true }),
     ["watch", "--for=60", "--client=fx", "--positions"]);
 });
 
 test("arguments are checked against each tool's schema before the CLI runs", LU, () => {
   const tool = (name) => mcp.TOOLS.find((row) => row.name === name);
-  assert.deepStrictEqual(mcp.checkParams(tool("e2e_slash"), {}), ["command is required"]);
-  assert.match(mcp.checkParams(tool("e2e_grid"), { range: "far" })[0], /range must be a number/);
-  assert.match(mcp.checkParams(tool("e2e_grid"), { radius: 5 })[0], /unknown argument radius; e2e_grid takes range, all, json/);
-  assert.match(mcp.checkParams(tool("e2e_lu_trigger"), { name: "nuke" })[0], /name must be one of scout, hunt/);
-  assert.match(mcp.checkParams(tool("e2e_watch"), { seconds: 1.5 })[0], /seconds must be an integer/);
-  assert.match(mcp.checkParams(tool("e2e_watch"), { seconds: 4000 })[0], /at most 3000/);
-  assert.match(mcp.checkParams(tool("e2e_up"), { offgridTravel: 0 })[0], /at least 1/);
-  assert.deepStrictEqual(mcp.checkParams(tool("e2e_report"), { run: "latest", section: "pr", waitSeconds: 0 }), []);
+  assert.deepStrictEqual(mcp.checkParams(tool("slash"), {}), ["command is required"]);
+  assert.match(mcp.checkParams(tool("grid"), { range: "far" })[0], /range must be a number/);
+  assert.match(mcp.checkParams(tool("grid"), { radius: 5 })[0], /unknown argument radius; grid takes range, all, json/);
+  assert.match(mcp.checkParams(tool("lu_trigger"), { name: "nuke" })[0], /name must be one of scout, hunt/);
+  assert.match(mcp.checkParams(tool("watch"), { seconds: 1.5 })[0], /seconds must be an integer/);
+  assert.match(mcp.checkParams(tool("watch"), { seconds: 4000 })[0], /at most 3000/);
+  assert.match(mcp.checkParams(tool("up"), { offgridTravel: 0 })[0], /at least 1/);
+  assert.deepStrictEqual(mcp.checkParams(tool("report"), { run: "latest", section: "pr", waitSeconds: 0 }), []);
 });
 
 test("a bad scenario name is refused before anything is written", async () => {
-  const result = await mcp.callTool("e2e_run_scenario", { name: "../escape", scenario: { world: "x" }, check: true });
+  const result = await mcp.callTool("run_scenario", { name: "../escape", scenario: { world: "x" }, check: true });
   assert.strictEqual(result.isError, true);
   assert.match(result.content[0].text, /name: a file name for the scenario/);
-  const missing = await mcp.callTool("e2e_run_scenario", {});
+  const missing = await mcp.callTool("run_scenario", {});
   assert.match(missing.content[0].text, /pass name \(a scenario file\), or name and scenario/);
 });
 
@@ -118,11 +118,13 @@ test("a bare scenario name is the tree's file, the core's or a plugin's; a path 
   assert.strictEqual(mcp.resolveScenario("fleet-to-grid"),
     path.resolve(__dirname, "..", "plugins", "lu", "scenarios", "fleet-to-grid.json"));
   const { DEFAULT_TREE_ROOT } = require("../core/plugins");
-  assert.strictEqual(mcp.resolveScenario("tools/evejs-e2e/scenarios/x.json"),
-    path.join(DEFAULT_TREE_ROOT, "tools", "evejs-e2e", "scenarios", "x.json"), "a path is from the tree's root");
-  assert.ok(mcp.committedScenario("tools/evejs-e2e/plugins/lu/scenarios/fleet-to-grid.json"));
-  assert.ok(mcp.committedScenario("tools/e2e-scenarios/fleet-arrives.json"), "the tree's own scenarios");
-  assert.ok(!mcp.committedScenario("_local/e2e/scenarios/fleet-to-grid.json"));
+  assert.strictEqual(mcp.resolveScenario("tools/gridcheck/scenarios/x.json"),
+    path.join(DEFAULT_TREE_ROOT, "tools", "gridcheck", "scenarios", "x.json"), "a path is from the tree's root");
+  assert.ok(mcp.committedScenario("tools/gridcheck/plugins/lu/scenarios/fleet-to-grid.json"));
+  // The tree's configured folder: tools/gridcheck-scenarios by default, tools/e2e-scenarios in trees set up before the rename.
+  const treeScenarios = path.relative(DEFAULT_TREE_ROOT, require("../core/scenario").TREE_SCENARIO_DIR).split(path.sep).join("/");
+  assert.ok(mcp.committedScenario(`${treeScenarios}/fleet-arrives.json`), "the tree's own scenarios");
+  assert.ok(!mcp.committedScenario("_local/gridcheck/scenarios/fleet-to-grid.json"));
 });
 
 function protocol() {
@@ -136,7 +138,7 @@ test("JSON-RPC: initialize, tools/list, ping and the errors", async () => {
   receive({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-03-26" } });
   assert.strictEqual(sent[0].result.protocolVersion, "2025-03-26", "a version both sides know is kept");
   assert.deepStrictEqual(sent[0].result.capabilities, { tools: {} });
-  assert.match(sent[0].result.instructions, /e2e_run_scenario/);
+  assert.match(sent[0].result.instructions, /run_scenario/);
   receive({ jsonrpc: "2.0", id: 2, method: "initialize", params: { protocolVersion: "1999-01-01" } });
   assert.strictEqual(sent[1].result.protocolVersion, "2025-06-18", "an unknown version gets the newest");
   receive({ jsonrpc: "2.0", method: "notifications/initialized" });
@@ -150,10 +152,10 @@ test("JSON-RPC: initialize, tools/list, ping and the errors", async () => {
   assert.strictEqual(sent[4].error.code, -32601);
   receive("{not json");
   assert.strictEqual(sent[5].error.code, -32700);
-  await receive({ jsonrpc: "2.0", id: 6, method: "tools/call", params: { name: "e2e_nothing" } });
+  await receive({ jsonrpc: "2.0", id: 6, method: "tools/call", params: { name: "nothing" } });
   assert.strictEqual(sent[6].error.code, -32602);
-  await receive({ jsonrpc: "2.0", id: 7, method: "tools/call", params: { name: "e2e_slash", arguments: {} } });
-  assert.deepStrictEqual(sent[7].result, { content: [{ type: "text", text: "e2e_slash: command is required" }], isError: true },
+  await receive({ jsonrpc: "2.0", id: 7, method: "tools/call", params: { name: "slash", arguments: {} } });
+  assert.deepStrictEqual(sent[7].result, { content: [{ type: "text", text: "slash: command is required" }], isError: true },
     "a bad argument is a tool error the agent can read, not a protocol error");
 });
 
@@ -182,25 +184,25 @@ function citationRun({ scenarioFile, commit }) {
 }
 
 test("the report names the commit the run ran on", () => {
-  const { report } = citationRun({ scenarioFile: "tools/evejs-e2e/scenarios/fleet-to-grid.json", commit: { sha: "56559e01f27a", dirty: true } });
+  const { report } = citationRun({ scenarioFile: "tools/gridcheck/scenarios/fleet-to-grid.json", commit: { sha: "56559e01f27a", dirty: true } });
   assert.match(report, /\| Commit \| `56559e01f27a` plus uncommitted changes \|/);
   assert.doesNotMatch(renderReport({ ...citationRun({ scenarioFile: null }).state.result }, { runID: "r1" }), /\| Commit/);
 });
 
 test("the PR citation carries the verdict, commit, expectations and frames to attach", () => {
-  const { state, report } = citationRun({ scenarioFile: "tools/evejs-e2e/plugins/lu/scenarios/fleet-to-grid.json",
+  const { state, report } = citationRun({ scenarioFile: "tools/gridcheck/plugins/lu/scenarios/fleet-to-grid.json",
     commit: { sha: "abc123", dirty: false } });
   const text = mcp.prCitation(state, report);
   assert.match(text, /^### End-to-end check `fleet-to-grid`: PASSED/);
-  assert.match(text, /Run `r1` of `tools\/evejs-e2e\/plugins\/lu\/scenarios\/fleet-to-grid\.json` on commit `abc123`, from world `lowsec-docked`, 61 s/);
+  assert.match(text, /Run `r1` of `tools\/gridcheck\/plugins\/lu\/scenarios\/fleet-to-grid\.json` on commit `abc123`, from world `lowsec-docked`, 61 s/);
   assert.match(text, /1 of 1 expectations met\./);
   assert.match(text, /#### Expected against observed\n\n\| Result \| Expected \| Observed \|/);
   assert.match(text, /\| t\+00:00:30 \| stop \| 01-stop-arrive\.svg \(attached\) \|/);
-  assert.match(text, /Reproduce: `node tools\/evejs-e2e\/bin\/e2e\.js run fleet-to-grid`/);
+  assert.match(text, /Reproduce: `node tools\/gridcheck\/bin\/gridcheck\.js run fleet-to-grid`/);
   assert.ok(text.includes(path.join("runs", "r1", "frames", "01-stop-arrive.svg")), "the frame file to attach");
   assert.doesNotMatch(text, /can't rerun it/);
 
-  const draft = citationRun({ scenarioFile: "_local/e2e/scenarios/fleet-to-grid.json", commit: null });
+  const draft = citationRun({ scenarioFile: "_local/gridcheck/scenarios/fleet-to-grid.json", commit: null });
   const draftText = mcp.prCitation(draft.state, draft.report);
   assert.match(draftText, /commit not recorded/);
   assert.match(draftText, /a reviewer can't rerun it\. Save it there/);
@@ -231,10 +233,10 @@ test("over stdio, a tool runs the CLI and returns what it printed", async () => 
   });
   try {
     const init = await call(1, "initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "test", version: "0" } });
-    assert.strictEqual(init.result.serverInfo.name, "e2e");
-    const checked = await call(2, "tools/call", { name: "e2e_run_scenario", arguments: { name: "no-such-scenario-here", check: true } });
+    assert.strictEqual(init.result.serverInfo.name, "gridcheck");
+    const checked = await call(2, "tools/call", { name: "run_scenario", arguments: { name: "no-such-scenario-here", check: true } });
     assert.strictEqual(checked.result.isError, true);
-    assert.match(checked.result.content[0].text, /no-such-scenario-here\.json:\n {2}no such scenario file\n\(exit 1\)/,
+    assert.match(checked.result.content[0].text, /no-such-scenario-here\.json:\n {2}no such scenario file\. `gridcheck run` lists the scenarios.*\n\(exit 1\)/,
       "the CLI's own refusal and exit code");
   } finally {
     child.stdin.end();

@@ -1,6 +1,6 @@
 "use strict";
 
-// Pure text formatting for `e2e grid`. No IO, so tests can pin the output.
+// Pure text formatting for `gridcheck grid`. No IO, so tests can pin the output.
 
 const AU_METERS = 149_597_870_700;
 const DEFAULT_RANGE_KM = 10_000;

@@ -1,6 +1,6 @@
 "use strict";
 
-// Tactical frames for `e2e run` (core/frames.js) and the POS events the
+// Tactical frames for `gridcheck run` (core/frames.js) and the POS events the
 // bridge watch writes for them (agentBridgeWatch positionFrame). The live
 // path is in docs/GUIDE.md "Tactical frames".
 

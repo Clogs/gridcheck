@@ -100,7 +100,7 @@ function scratchWorld() {
   return { dir, file };
 }
 
-test("a restored world is marked as an e2e world and told where to resume", (t) => {
+test("a restored world is marked as a gridcheck world and told where to resume", (t) => {
   const { dir, file } = scratchWorld();
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   assert.equal(worlds.readSimClock(file), null);

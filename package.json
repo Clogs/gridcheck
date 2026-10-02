@@ -1,5 +1,5 @@
 {
-  "name": "evejs-e2e",
+  "name": "gridcheck",
   "version": "0.1.0",
   "description": "Boot an EveJS server, fly a headless character and read the grid as a timeline.",
   "private": true,
@@ -8,8 +8,8 @@
     "node": ">=24"
   },
   "bin": {
-    "e2e": "bin/e2e.js",
-    "e2e-mcp": "bin/mcp.js"
+    "gridcheck": "bin/gridcheck.js",
+    "gridcheck-mcp": "bin/mcp.js"
   },
   "scripts": {
     "test": "node test/run.js",

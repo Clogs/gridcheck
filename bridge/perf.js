@@ -17,7 +17,7 @@
 // logs one [TickProfile] info line every EVEJS_TICK_PROFILE_EVERY ticks
 // (default 100). With the variable set the monitor wraps the logger's info to
 // keep each block, parsed, in a ring of the last 720; the line is still
-// logged. Without it nothing is wrapped. `e2e up --profile` sets both.
+// logged. Without it nothing is wrapped. `gridcheck up --profile` sets both.
 //
 // A sampler also runs a perf_hooks event-loop delay histogram while it is
 // open (20 ms resolution), so a watch without perf, or no watch, costs nothing.

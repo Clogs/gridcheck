@@ -1,6 +1,6 @@
 "use strict";
 
-// Player actions for `e2e act` and for scenario steps: fly, lock, switch
+// Player actions for `gridcheck act` and for scenario steps: fly, lock, switch
 // modules on and off, load ammo and launch drones, each through a call the web
 // gateway already allows (server/src/_secondary/express/webCallPolicies.js).
 // The server owns every rule (range, capacitor, lock time, slots); this only
@@ -31,18 +31,18 @@ const ACTIONS = Object.freeze({
 const ACTION_TYPES = Object.freeze(Object.keys(ACTIONS));
 
 const ACTION_USAGE = [
-  "e2e act approach <target>",
-  "e2e act orbit <target> [--range 5000]",
-  "e2e act keepAtRange <target> [--range 10000]",
-  "e2e act warpTo <target> [--range 0]",
-  "e2e act stop",
-  "e2e act lock <target> [--timeout 30]",
-  "e2e act unlock <target>",
-  "e2e act activate [<modules>] [--target <target>] [--once]",
-  "e2e act deactivate [<modules>]",
-  "e2e act loadAmmo [<modules>] --charge <charge>",
-  "e2e act launchDrones [<drones>] [--count N]",
-  "e2e act engageDrones <target>",
+  "gridcheck act approach <target>",
+  "gridcheck act orbit <target> [--range 5000]",
+  "gridcheck act keepAtRange <target> [--range 10000]",
+  "gridcheck act warpTo <target> [--range 0]",
+  "gridcheck act stop",
+  "gridcheck act lock <target> [--timeout 30]",
+  "gridcheck act unlock <target>",
+  "gridcheck act activate [<modules>] [--target <target>] [--once]",
+  "gridcheck act deactivate [<modules>]",
+  "gridcheck act loadAmmo [<modules>] --charge <charge>",
+  "gridcheck act launchDrones [<drones>] [--count N]",
+  "gridcheck act engageDrones <target>",
 ].join("\n  ");
 
 // Inventory flags (inventoryConst): the slot ranges, the drone bay and cargo.
@@ -482,7 +482,7 @@ async function lockedTargets(io) {
   return list.map(Number).filter((id) => id > 0);
 }
 
-// `e2e act <type> [<what>] [--flags]` -> an action.
+// `gridcheck act <type> [<what>] [--flags]` -> an action.
 function actionFromArgs(type, positionals, flags) {
   const spec = ACTIONS[type];
   if (!spec) throw new Error(`usage:\n  ${ACTION_USAGE}`);

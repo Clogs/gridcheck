@@ -1,8 +1,8 @@
 "use strict";
 
-// The e2e viewer: draws a run's timeline.jsonl as a top-down tactical view
+// The gridcheck viewer: draws a run's timeline.jsonl as a top-down tactical view
 // with a replay scrubber, live while the run writes it. Served by the agent
-// bridge (bridge/viewer.js), by `e2e view` or by `e2e gui`. Positions come from the
+// bridge (bridge/viewer.js), by `gridcheck view` or by `gridcheck gui`. Positions come from the
 // watch's POS events, the rest from the timeline's own events; DIVERGE events
 // (what the client was sent disagreeing with the server) are marked on the
 // map, the scrubber and their own list. Guide: docs/GUIDE.md "Viewer".
@@ -29,7 +29,7 @@
   const params = new URLSearchParams(location.hash.slice(1));
   const token = params.get("token") || sessionStorage.getItem("e2eViewerToken") || "";
   if (params.get("token")) sessionStorage.setItem("e2eViewerToken", token);
-  // `e2e gui` serves runs from several trees and names one; the bridge serves its own.
+  // `gridcheck gui` serves runs from several trees and names one; the bridge serves its own.
   const tree = params.get("tree") || "";
 
   const state = {
@@ -412,7 +412,7 @@
     if (!frame) {
       const text = el("text", { x: 20, y: 40 });
       text.textContent = state.positions.length ? "no position sample near this time" :
-        "no positions in this run: watch with --positions, or use e2e run";
+        "no positions in this run: watch with --positions, or use gridcheck run";
       svg.append(text);
       foot.textContent = "";
       $("where").textContent = "";
@@ -666,7 +666,7 @@
     const zoom = params.get("zoom");
     if (zoom && [...$("zoom").options].some((option) => option.value === zoom)) $("zoom").value = zoom;
     if (!token) {
-      message("no token: open the URL `e2e view` prints");
+      message("no token: open the URL `gridcheck view` prints");
       return;
     }
     try {
@@ -678,7 +678,7 @@
     }
     if (!state.runID && state.runs.length) state.runID = state.runs[0].runID;
     if (!state.runID) {
-      message("no runs with a timeline yet: `e2e run <scenario>` or `e2e watch --positions`");
+      message("no runs with a timeline yet: `gridcheck run <scenario>` or `gridcheck watch --positions`");
       return;
     }
     $("run").value = state.runID;

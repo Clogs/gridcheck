@@ -1,6 +1,6 @@
 "use strict";
 
-// evejs-e2e phase 2: per-tree port blocks, the market daemon's generated
+// Gridcheck phase 2: per-tree port blocks, the market daemon's generated
 // config, and saved worlds. The live boot is checked by
 // docs/GUIDE.md.
 
@@ -22,8 +22,8 @@ test("a tree's port block is stable, below the ephemeral range and overridable",
   const top = ports.portsForSlot(ports.SLOT_COUNT - 1);
   assert.ok(Math.max(...Object.keys(ports.OFFSETS).map((name) => top[name])) < 49_152);
   assert.ok(Math.max(...Object.values(ports.OFFSETS)) < ports.BLOCK_SIZE);
-  assert.strictEqual(ports.portsForTree("F:/LU/e2e-grid", { EVEJS_E2E_PORT_SLOT: "3" }).game, 30_060);
-  assert.throws(() => ports.slotForTree("x", { EVEJS_E2E_PORT_SLOT: "800" }), /0 to 799/);
+  assert.strictEqual(ports.portsForTree("F:/LU/e2e-grid", { GRIDCHECK_PORT_SLOT: "3" }).game, 30_060);
+  assert.throws(() => ports.slotForTree("x", { GRIDCHECK_PORT_SLOT: "800" }), /0 to 799/);
 });
 
 test("the server environment moves every configurable listener onto the block, plugin listeners included", () => {
@@ -175,4 +175,18 @@ test("plugin world hooks keep their data in world.json and see it again on resto
   } finally {
     fs.rmSync(scratch, { recursive: true, force: true });
   }
+});
+
+test("a world save retries a write a stopped server's lingering lock refuses, and nothing else", () => {
+  const { retryLocked } = require("../core/worlds");
+  let calls = 0;
+  assert.strictEqual(retryLocked(() => {
+    calls += 1;
+    if (calls < 3) throw Object.assign(new Error("resource busy or locked"), { code: "EBUSY" });
+    return "saved";
+  }, { delayMs: 1 }), "saved");
+  assert.strictEqual(calls, 3);
+  let other = 0;
+  assert.throws(() => retryLocked(() => { other += 1; throw new Error("disk full"); }, { delayMs: 1 }), /disk full/);
+  assert.strictEqual(other, 1);
 });

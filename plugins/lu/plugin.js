@@ -1,6 +1,6 @@
 "use strict";
 
-// The X-Eve Living Universe mod's half of the e2e tool. Nothing here loads the
+// The X-Eve Living Universe mod's half of the gridcheck tool. Nothing here loads the
 // mod until server(ctx) runs, and that runs only in a tree that has it.
 
 // What a tree needs for this plugin; none of these exist in stock EveJS.

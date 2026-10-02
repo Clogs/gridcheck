@@ -7,7 +7,7 @@
 //
 // Static reference data (the data dir, usually a link into another tree) and
 // content-pack state (content-packs beside it, files only) are not part of a
-// world and are never touched. Where each lives is the tree's e2e.config.json
+// world and are never touched. Where each lives is the tree's gridcheck.config.json
 // (treeConfig.js).
 
 const fs = require("node:fs");
@@ -34,6 +34,21 @@ function savedWorldDir(treeRoot, name) {
     throw new Error(`world names are letters, digits, '.', '_' and '-' (got ${JSON.stringify(name)})`);
   }
   return path.join(worldPaths(treeRoot).saved, name);
+}
+
+// On Windows a stopped server's files can stay locked for a moment (a virus
+// scanner, a handle the OS hasn't released), so a write to them is retried
+// briefly before it counts as failed.
+const LOCKED = /EBUSY|EPERM|EACCES|database is locked|SQLITE_BUSY/;
+function retryLocked(fn, { tries = 6, delayMs = 250 } = {}) {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      return fn();
+    } catch (error) {
+      if (attempt >= tries || !LOCKED.test(`${error.code || ""} ${error.message || ""}`)) throw error;
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, delayMs * attempt);
+    }
+  }
 }
 
 function removeSqlite(file) {
@@ -123,7 +138,7 @@ function copyWorld(treeRoot, fromTree, { force = false } = {}) {
 //   onSave({ world, name }) -> data kept in world.json at ext.<plugin>
 //   onRestore({ world, source, name, saved, options }) -> a note for the user, or null
 // `world` is this tree's game store, `source` the saved copy, `saved` the
-// saved world.json, `options` the `e2e up` flags the plugins declared.
+// saved world.json, `options` the `gridcheck up` flags the plugins declared.
 function runHook(hook, method, ctx) {
   if (typeof hook[method] !== "function") return null;
   try {
@@ -148,11 +163,11 @@ function saveWorld(treeRoot, name, { force = false, note = "", hooks = [], recip
   const staging = `${dir}.saving`;
   fs.rmSync(staging, { recursive: true, force: true });
   fs.mkdirSync(staging, { recursive: true });
-  snapshotSqlite(here.world, path.join(staging, "gamestore.sqlite"));
+  retryLocked(() => snapshotSqlite(here.world, path.join(staging, "gamestore.sqlite")));
   clearOwnerLeases(path.join(staging, "gamestore.sqlite"));
   fs.copyFileSync(here.manifest, path.join(staging, "manifest.json"));
   const market = fs.existsSync(here.market);
-  if (market) snapshotSqlite(here.market, path.join(staging, "market.sqlite"));
+  if (market) retryLocked(() => snapshotSqlite(here.market, path.join(staging, "market.sqlite")));
   const info = {
     name,
     savedAt: new Date().toISOString(),
@@ -163,8 +178,8 @@ function saveWorld(treeRoot, name, { force = false, note = "", hooks = [], recip
     ...(Object.keys(ext).length ? { ext } : {}),
   };
   fs.writeFileSync(path.join(staging, "world.json"), `${JSON.stringify(info, null, 2)}\n`);
-  fs.rmSync(dir, { recursive: true, force: true });
-  fs.renameSync(staging, dir);
+  retryLocked(() => fs.rmSync(dir, { recursive: true, force: true }));
+  retryLocked(() => fs.renameSync(staging, dir));
   return { ...info, dir, bytes: dirBytes(dir) };
 }
 
@@ -211,7 +226,7 @@ function freshWorld(treeRoot) {
   const here = worldPaths(treeRoot);
   if (!fs.existsSync(here.manifest)) {
     throw new Error(`--fresh needs the tree's generated reference data (${here.manifest}); ` +
-      "run the tree's database setup first, or copy a world with `e2e world copy --from <tree>`");
+      "run the tree's database setup first, or copy a world with `gridcheck world copy --from <tree>`");
   }
   removeSqlite(here.world);
 }
@@ -258,6 +273,7 @@ module.exports = {
   listWorlds,
   liveLeases,
   restoreWorld,
+  retryLocked,
   saveWorld,
   savedWorldDir,
   savedWorldInfo,

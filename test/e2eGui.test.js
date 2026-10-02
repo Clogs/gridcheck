@@ -1,6 +1,6 @@
 "use strict";
 
-// `e2e gui` (core/gui.js): the trees it offers, the runs it shows, and the
+// `gridcheck gui` (core/gui.js): the trees it offers, the runs it shows, and the
 // preview-then-run rule for every write, against scratch trees and a fake
 // command runner, so no EveJS tree or CLI child process is needed. The last
 // test goes through HTTP for the token and the page policy.
@@ -29,11 +29,12 @@ function git(cwd, ...args) {
 }
 
 const HELP = [
-  "node tools/evejs-e2e/bin/e2e.js <command>",
-  "  e2e init [--mode auto|attach|managed] [--force] [--dry-run]",
-  "  e2e agents [status] [--json] | agents setup [claude] [codex] [--dry-run]",
-  "  e2e vendor update [--from <checkout|tag>] [--tree <path>] [--force] [--dry-run] | vendor check [--tree <path>]",
-  "  e2e patch list | patch status [<id>] [--json] | patch apply|revert <id>... [--dry-run]",
+  "node tools/gridcheck/bin/gridcheck.js <command>",
+  "  gridcheck init [--mode auto|attach|managed] [--force] [--dry-run]",
+  "  gridcheck agents [status] [--json] | agents setup [claude] [codex] [--dry-run]",
+  "  gridcheck vendor update [--from <checkout|tag>] [--tree <path>] [--force] [--dry-run] | vendor check [--tree <path>]",
+  "  gridcheck patch list | patch status [<id>] [--json] | patch apply|revert <id>... [--dry-run]",
+  "  gridcheck setup --tree <path> [--mode auto|attach|managed] [--agents claude,codex,cli|none] [--force] [--dry-run]",
 ].join("\n");
 
 // A runner that records each command and answers help, dry runs and runs.
@@ -47,19 +48,19 @@ function fakeRun({ help = HELP, exitCode = 0 } = {}) {
   return { run, calls };
 }
 
-// <dir>/evejs-e2e (the checkout), <dir>/tree (an EveJS tree with a copy and a
+// <dir>/Gridcheck (the checkout), <dir>/tree (an EveJS tree with a copy and a
 // run), <dir>/other (another tree), <dir>/notatree.
 function setup(t) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "e2e-gui-"));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
-  const checkout = path.join(dir, "evejs-e2e");
+  const checkout = path.join(dir, "gridcheck");
   fs.mkdirSync(checkout);
   const tree = path.join(dir, "tree");
   write(tree, "server/src/server.js", "// a tree\n");
   write(tree, "server/package.json", JSON.stringify({ name: "eve.js", version: "0.12.9" }));
-  write(tree, "tools/evejs-e2e/bin/e2e.js", "// the vendored CLI\n");
-  write(tree, "tools/evejs-e2e/VENDOR.json", JSON.stringify({ name: "evejs-e2e", version: "9.9.9", commit: "c0ffee", files: {} }));
-  const run = path.join(tree, "_local", "e2e", "runs", "20261001-120000-demo");
+  write(tree, "tools/gridcheck/bin/gridcheck.js", "// the vendored CLI\n");
+  write(tree, "tools/gridcheck/VENDOR.json", JSON.stringify({ name: "gridcheck", version: "9.9.9", commit: "c0ffee", files: {} }));
+  const run = path.join(tree, "_local", "gridcheck", "runs", "20261001-120000-demo");
   write(run, "timeline.jsonl", `${JSON.stringify({ kind: "START", atMs: 1 })}\n`);
   write(run, "result.json", JSON.stringify({ name: "demo", passed: true, exitCode: 0, missing: 0, expectations: [1, 2] }));
   write(run, "report.md", "# Scenario demo: PASSED\n\n![Stop frame](frames/01-stop.svg)\n");
@@ -93,7 +94,7 @@ test("from a checkout it offers trees beside it, adds a typed one and remembers 
   assert.deepStrictEqual(JSON.parse(fs.readFileSync(s.stateFile, "utf8")).trees, [path.resolve(elsewhere)]);
 
   for (const [text, error] of [[path.join(s.dir, "notatree"), /not an EveJS tree/], [path.join(s.dir, "nowhere"), /doesn't exist/],
-    ["", /type the path/], [s.checkout, /not an EveJS tree|this evejs-e2e checkout/]]) {
+    ["", /type the path/], [s.checkout, /not an EveJS tree|this Gridcheck checkout/]]) {
     const refused = await app.handle("POST", "/gui/api/trees", {}, { path: text });
     assert.strictEqual(refused.statusCode, 400, text);
     assert.match(refused.body.error, error);
@@ -111,7 +112,7 @@ test("the tree list gives each tree's EveJS version and its scenario runs, passe
   const s = setup(t);
   write(s.tree, "server/package.json", JSON.stringify({ name: "eve.js", version: "0.12.9" }));
   write(s.other, "package.json", JSON.stringify({ name: "evejs-repo", version: "0.12.6" }));
-  const runs = path.join(s.tree, "_local", "e2e", "runs");
+  const runs = path.join(s.tree, "_local", "gridcheck", "runs");
   write(runs, "20261001-130000-demo/result.json", JSON.stringify({ name: "demo", passed: false, exitCode: 1 }));
   write(runs, "20261001-130000-watch/timeline.jsonl", "\n");
   const app = gui.createGui({ context: s.context, stateFile: s.stateFile, run: fakeRun().run });
@@ -169,7 +170,7 @@ test("a write is previewed with --dry-run and then runs exactly that command onc
   const previewed = body(await app.handle("POST", "/gui/api/preview", {}, { tree: id, action: "patch-apply", id: "xmpp-port" })).preview;
   assert.strictEqual(previewed.ok, true);
   assert.deepStrictEqual(previewed.refused, []);
-  assert.strictEqual(previewed.steps[0].command, "node tools/evejs-e2e/bin/e2e.js patch apply xmpp-port");
+  assert.strictEqual(previewed.steps[0].command, "node tools/gridcheck/bin/gridcheck.js patch apply xmpp-port");
   assert.match(previewed.steps[0].output, /^would patch apply xmpp-port --dry-run/);
   assert.deepStrictEqual(fake.calls, [["help"], ["patch", "apply", "xmpp-port", "--dry-run"]]);
 
@@ -198,7 +199,7 @@ test("agent setup is previewed like any change, may run while the server is up, 
   const app = gui.createGui({ context: s.context, stateFile: s.stateFile, run: fake.run });
   const id = gui.treeID(s.tree);
   const summary = body(await app.handle("GET", "/gui/api/tree", { tree: id })).tree;
-  assert.deepStrictEqual(summary.agents.map((row) => row.id), ["claude", "codex"]);
+  assert.deepStrictEqual(summary.agents.map((row) => row.id), ["claude", "codex", "cli"]);
   assert.ok(summary.agents.every((row) => typeof row.installed === "boolean" && Array.isArray(row.evidence)), JSON.stringify(summary.agents));
 
   write(s.tree, "_local/agentBridge/bridge.json", JSON.stringify({ port: 1, token: "t", pid: process.pid }));
@@ -219,6 +220,23 @@ test("agent setup is previewed like any change, may run while the server is up, 
   }
   assert.match((await app.handle("POST", "/gui/api/preview", {}, { tree: gui.treeID(s.other), action: "agents", agents: ["claude"] })).body.error,
     /no vendored copy yet/);
+});
+
+test("set up everything previews gridcheck setup from the checkout, with the mode and agents picked", async (t) => {
+  const s = setup(t);
+  const fake = fakeRun();
+  const app = gui.createGui({ context: s.context, stateFile: s.stateFile, run: fake.run });
+  const id = gui.treeID(s.tree);
+  const previewed = body(await app.handle("POST", "/gui/api/preview", {}, { tree: id, action: "setup", mode: "managed", agents: [] })).preview;
+  assert.strictEqual(previewed.ok, true, JSON.stringify(previewed));
+  const tree = s.tree.split(path.sep).join("/");
+  assert.deepStrictEqual(fake.calls.at(-1), ["setup", "--tree", tree, "--mode", "managed", "--agents", "none", "--dry-run"]);
+  assert.strictEqual(previewed.steps[0].cwd, s.checkout.split(path.sep).join("/"));
+  const ran = body(await app.handle("POST", "/gui/api/run", {}, { previewID: previewed.previewID })).result;
+  assert.strictEqual(ran.ok, true);
+  assert.deepStrictEqual(fake.calls.at(-1), ["setup", "--tree", tree, "--mode", "managed", "--agents", "none"]);
+  const bad = await app.handle("POST", "/gui/api/preview", {}, { tree: id, action: "setup", agents: ["cursor"] });
+  assert.match(JSON.stringify(bad.body), /no agent cursor/);
 });
 
 test("the config is written in auto mode unless another is picked", async (t) => {
@@ -265,13 +283,13 @@ test("a failed dry run, a running server or uncommitted changes to the targets r
   fs.rmSync(path.join(s.tree, "_local", "agentBridge"), { recursive: true });
 
   git(s.tree, "init", "-q");
-  write(s.tree, "e2e.config.json", "{}\n");
+  write(s.tree, "gridcheck.config.json", "{}\n");
   git(s.tree, "add", "-A");
   git(s.tree, "commit", "-q", "-m", "tree");
-  fs.writeFileSync(path.join(s.tree, "e2e.config.json"), "{ \"edited\": true }\n");
+  fs.writeFileSync(path.join(s.tree, "gridcheck.config.json"), "{ \"edited\": true }\n");
   const dirty = body(await app.handle("POST", "/gui/api/preview", {}, { tree: id, action: "init", mode: "managed" })).preview;
   assert.strictEqual(dirty.ok, false);
-  assert.match(dirty.refused.join("\n"), /uncommitted changes in e2e\.config\.json/);
+  assert.match(dirty.refused.join("\n"), /uncommitted changes in gridcheck\.config\.json/);
   assert.deepStrictEqual(fake.calls.at(-1).slice(0, 4), ["init", "--mode", "managed", "--force"], "an existing config is replaced with --force");
 });
 
@@ -311,7 +329,7 @@ test("the page needs no token and carries no data; every data route needs it", a
 
 test("the Run a test card and the Commands tab read the tree's copy; an older copy gets this one's command list", async (t) => {
   const s = setup(t);
-  const catalog = { prefix: "node tools/evejs-e2e/bin/e2e.js", groups: [{ id: "tool", title: "This tool" }],
+  const catalog = { prefix: "node tools/gridcheck/bin/gridcheck.js", groups: [{ id: "tool", title: "This tool" }],
     commands: [{ name: "help", group: "tool", summary: "Prints every command.", usage: ["help [--json]"], flags: [], examples: [] }], mcpTools: [] };
   let treeKnowsJson = true;
   const calls = [];
@@ -322,7 +340,7 @@ test("the Run a test card and the Commands tab read the tree's copy; an older co
     if (args[0] === "run") return { exitCode: 0, output: `${JSON.stringify([{ name: "demo", world: "starter", recipe: "starter", expect: [] }])}\n`, ms: 1 };
     if (args[0] === "world") return { exitCode: 0, output: `${JSON.stringify([{ name: "starter", state: "built", steps: ["fresh"] }])}\n`, ms: 1 };
     if (args[0] === "help") {
-      return { exitCode: 0, output: inTree && !treeKnowsJson ? "node tools/evejs-e2e/bin/e2e.js <command>\n  e2e help\n" : JSON.stringify(catalog), ms: 1 };
+      return { exitCode: 0, output: inTree && !treeKnowsJson ? "node tools/gridcheck/bin/gridcheck.js <command>\n  gridcheck help\n" : JSON.stringify(catalog), ms: 1 };
     }
     return { exitCode: 1, output: "unexpected\n", ms: 1 };
   };

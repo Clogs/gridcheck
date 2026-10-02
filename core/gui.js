@@ -1,15 +1,15 @@
 "use strict";
 
-// `e2e gui`: a loopback web page for installing the tool into EveJS trees,
+// `gridcheck gui`: a loopback web page for installing the tool into EveJS trees,
 // applying its patches and replaying runs. Three tabs:
 //
 //   Runs     a tree's runs grouped by scenario, with the replay, verdict,
 //            expectations, frames and report.md of one; a workbench view or a
 //            trace view with a lane per ball (gui/runs.js, gui/replay.js)
 //   Install  known trees or a typed path; for each, the vendored copy and its
-//            drift check, the shim, e2e.config.json, the agents on this machine
+//            drift check, the shim, gridcheck.config.json, the agents on this machine
 //            (Claude Code, Codex) and whether each runs the tree's MCP server,
-//            what the tree still needs, the plugins and `e2e doctor`. Installs,
+//            what the tree still needs, the plugins and `gridcheck doctor`. Installs,
 //            updates, writes config and sets the agents up (core/agents.js).
 //   Patches  each optional stock edit's state, a preview, apply and revert
 //
@@ -20,12 +20,12 @@
 // uncommitted changes. Reads that need the tree's own code (doctor, patch
 // status) run its CLI too, so this process never loads a tree's modules.
 //
-// Run from an evejs-e2e checkout it manages any tree and vendors from that
+// Run from a Gridcheck checkout it manages any tree and vendors from that
 // checkout. Run from a vendored copy it manages that copy's tree only.
 //
 // The page carries no data and needs no token; every /gui/api and /viewer data
 // route needs the bearer token, which reaches the page in the URL's fragment
-// (`e2e gui` prints it), as the viewer's does. Guide: docs/GUI.md.
+// (`gridcheck gui` prints it), as the viewer's does. Guide: docs/GUI.md.
 
 const crypto = require("node:crypto");
 const fs = require("node:fs");
@@ -35,6 +35,7 @@ const { spawn, spawnSync } = require("node:child_process");
 const vendor = require("./vendor");
 const treeConfig = require("./treeConfig");
 const agents = require("./agents");
+const { prerequisites, serverUpInfo, serverUpReason } = require("./treeState");
 const { createToolRegistry, loadPlugins, treeAt } = require("./plugins");
 const { createAgentBridgeHttp } = require("../bridge/http");
 const { createAgentBridgeViewer, resolveRunDir } = require("../bridge/viewer");
@@ -42,8 +43,8 @@ const { createAgentBridgeViewer, resolveRunDir } = require("../bridge/viewer");
 const OWN_ROOT = path.resolve(__dirname, "..");
 const PAGE_DIR = path.join(OWN_ROOT, "gui");
 const VIEWER_DIR = path.join(OWN_ROOT, "bridge", "viewer");
-const CLI_IN_TREE = ["tools", "evejs-e2e", "bin", "e2e.js"];
-const VENDOR_TARGETS = ["tools/evejs-e2e", "server/src/_secondary/agentBridge/server.js"];
+const CLI_IN_TREE = ["tools", "gridcheck", "bin", "gridcheck.js"];
+const VENDOR_TARGETS = ["tools/gridcheck", "server/src/_secondary/agentBridge/server.js"];
 const PREVIEW_TTL_MS = 10 * 60_000;
 const READ_TIMEOUT_MS = 90_000;
 const WRITE_TIMEOUT_MS = 5 * 60_000;
@@ -53,7 +54,7 @@ const MAX_FRAME_BYTES = 4 * 1024 * 1024;
 const MAX_TREES = 50;
 const FRAME_FILE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}\.svg$/;
 const PATCH_ID = /^[a-z0-9][a-z0-9-]{0,63}$/;
-const USAGE = "usage: e2e gui [--port N] [--tree <path>]... [--open]";
+const USAGE = "usage: gridcheck gui [--port N] [--tree <path>]... [--open]";
 
 const PAGES = Object.freeze({
   "/": [PAGE_DIR, "index.html", "text/html; charset=utf-8"],
@@ -94,16 +95,6 @@ function readJSON(file) {
   }
 }
 
-function pidAlive(pid) {
-  if (!pid) return false;
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error) {
-    return Boolean(error && error.code === "EPERM");
-  }
-}
-
 function samePath(a, b) {
   const norm = (value) => path.resolve(value);
   return process.platform === "win32" ? norm(a).toLowerCase() === norm(b).toLowerCase() : norm(a) === norm(b);
@@ -139,7 +130,7 @@ function ownContext(env = process.env) {
   const manifest = readJSON(path.join(OWN_ROOT, vendor.MANIFEST_NAME));
   const pkg = readJSON(path.join(OWN_ROOT, "package.json")) || {};
   if (manifest) {
-    const tree = String(env.EVEJS_E2E_TREE || "").trim() ? path.resolve(env.EVEJS_E2E_TREE.trim()) : path.resolve(OWN_ROOT, "..", "..");
+    const tree = String(env.GRIDCHECK_TREE || "").trim() ? path.resolve(env.GRIDCHECK_TREE.trim()) : path.resolve(OWN_ROOT, "..", "..");
     return { mode: "vendored", version: manifest.version || pkg.version || null, commit: manifest.commit || null, checkout: null, tree };
   }
   const top = git(OWN_ROOT, ["rev-parse", "--show-toplevel"]);
@@ -210,7 +201,7 @@ function createTreeList({ context, stateFile = null, extra = [] }) {
     const root = path.resolve(raw);
     if (!exists(root)) throw new GuiError(`${slashed(root)} doesn't exist`);
     if (!isTree(root)) throw new GuiError(`${slashed(root)} is not an EveJS tree: it has no server/src`);
-    if (context.checkout && samePath(root, context.checkout)) throw new GuiError("that's this evejs-e2e checkout, not an EveJS tree");
+    if (context.checkout && samePath(root, context.checkout)) throw new GuiError("that's this Gridcheck checkout, not an EveJS tree");
     if (!stateFile) return root;
     const list = remembered();
     if (!list.some((entry) => samePath(entry, root))) list.push(root);
@@ -230,43 +221,7 @@ function createTreeList({ context, stateFile = null, extra = [] }) {
   return { roots, find, add, forget, sourceOf };
 }
 
-// The tree's server, if it's up: a live bridge handshake, or a live `e2e up` run.
-function serverUpInfo(root, config = treeConfig.loadTreeConfig(root)) {
-  const handshake = readJSON(config.handshake);
-  if (handshake && handshake.port && pidAlive(Math.trunc(Number(handshake.pid) || 0))) return { pid: Number(handshake.pid), byE2e: false };
-  const run = readJSON(path.join(config.e2eDir, "run.json"));
-  if (run && !run.stoppedAtMs && pidAlive(Math.trunc(Number(run.pid) || 0))) return { pid: Number(run.pid), byE2e: true };
-  return null;
-}
-
-function serverUpReason(root, config = treeConfig.loadTreeConfig(root)) {
-  const up = serverUpInfo(root, config);
-  if (!up) return null;
-  return `the tree's server is up (pid ${up.pid}${up.byE2e ? ", started by e2e up" : ""})`;
-}
-
-function prerequisites(root, config) {
-  const rows = [];
-  for (const dir of [root, config.serverDir]) {
-    const pkg = readJSON(path.join(dir, "package.json"));
-    if (!pkg || !Object.keys(pkg.dependencies || {}).length) continue;
-    const where = slashed(path.relative(root, dir)) || ".";
-    rows.push({
-      name: where === "." ? "the tree's dependencies" : `${where} dependencies`,
-      path: where === "." ? "node_modules/" : `${where}/node_modules/`,
-      ok: exists(path.join(dir, "node_modules")),
-      fix: `npm ci in ${where === "." ? "the tree's root" : where}`,
-    });
-  }
-  rows.push({
-    name: "reference data",
-    path: `${slashed(path.relative(root, config.dataDir))}/`,
-    ok: exists(path.join(config.dataDir, "solarSystems", "data.json")),
-    fix: `build ${slashed(path.relative(root, config.dataDir))}: stock EveJS runs tools/DatabaseCreator/CreateDatabase.bat ` +
-      "(README, Quick start)",
-  });
-  return rows;
-}
+// The tree's server, if it's up: a live bridge handshake, or a live `gridcheck up` run.
 
 // A finished run's verdict never changes, so the tree list, polled every 30 s,
 // reads each result.json once.
@@ -438,7 +393,7 @@ function treeCli(root) {
 }
 
 function treeStep(root, args) {
-  return { cwd: root, args: [treeCli(root), ...args], env: { EVEJS_E2E_TREE: root } };
+  return { cwd: root, args: [treeCli(root), ...args], env: { GRIDCHECK_TREE: root } };
 }
 
 function requireCopy(root) {
@@ -451,19 +406,42 @@ function planAction(action, root, params, context) {
   if (action === "vendor") {
     const force = params.force === true;
     let checkout = context.checkout;
-    let cli = path.join(OWN_ROOT, "bin", "e2e.js");
+    let cli = path.join(OWN_ROOT, "bin", "gridcheck.js");
     if (context.mode === "vendored") {
       checkout = String(params.from || "").trim() ? path.resolve(String(params.from).trim()) : null;
-      if (!checkout) throw new GuiError("this GUI runs from a vendored copy: type the evejs-e2e checkout to update from");
-      cli = path.join(checkout, "bin", "e2e.js");
-      if (!exists(cli)) throw new GuiError(`${slashed(checkout)} is not an evejs-e2e checkout (no bin/e2e.js)`);
+      if (!checkout) throw new GuiError("this GUI runs from a vendored copy: type the Gridcheck checkout to update from");
+      cli = path.join(checkout, "bin", "gridcheck.js");
+      if (!exists(cli)) throw new GuiError(`${slashed(checkout)} is not a Gridcheck checkout (no bin/gridcheck.js)`);
     } else if (!checkout) {
-      throw new GuiError(`${slashed(OWN_ROOT)} is not a git checkout, so it can't vendor itself; run e2e gui from an evejs-e2e checkout`);
+      throw new GuiError(`${slashed(OWN_ROOT)} is not a git checkout, so it can't vendor itself; run gridcheck gui from a Gridcheck checkout`);
     }
     return {
       steps: [{ cwd: checkout, args: [cli, "vendor", "update", "--from", checkout, "--tree", root, ...(force ? ["--force"] : [])],
-        env: { EVEJS_E2E_TREE: root } }],
+        env: { GRIDCHECK_TREE: root } }],
       dirtyTargets: VENDOR_TARGETS,
+    };
+  }
+  if (action === "setup") {
+    // From a checkout, the checkout's setup installs it first; from a vendored copy, the copy sets up its own tree.
+    if (context.mode !== "vendored" && !context.checkout) {
+      throw new GuiError(`${slashed(OWN_ROOT)} is not a git checkout, so it can't install itself; run gridcheck gui from a Gridcheck checkout`);
+    }
+    const args = [path.join(OWN_ROOT, "bin", "gridcheck.js"), "setup", "--tree", slashed(root)];
+    if (params.mode !== undefined && params.mode !== null && params.mode !== "") {
+      if (!treeConfig.MODES.includes(String(params.mode))) throw new GuiError(`mode is ${treeConfig.MODES.join(", ")}`);
+      args.push("--mode", String(params.mode));
+    }
+    if (Array.isArray(params.agents)) {
+      const chosen = [...new Set(params.agents.map(String))];
+      const unknown = chosen.filter((id) => !agents.AGENT_IDS.includes(id));
+      if (unknown.length) throw new GuiError(`no agent ${unknown.join(", ")}`);
+      args.push("--agents", chosen.length ? chosen.join(",") : "none");
+    }
+    return {
+      steps: [{ cwd: context.checkout || root, args, env: { GRIDCHECK_TREE: root } }],
+      dirtyTargets: [...VENDOR_TARGETS, treeConfig.CONFIG_NAME],
+      // A first setup builds a world and boots a server twice.
+      timeoutMs: 20 * 60_000,
     };
   }
   if (action === "init") {
@@ -487,7 +465,8 @@ function planAction(action, root, params, context) {
     const unknown = chosen.filter((id) => !agents.AGENT_IDS.includes(id));
     if (unknown.length) throw new GuiError(`no agent ${unknown.join(", ")}; the agents are ${agents.AGENT_IDS.join(" and ")}`);
     // An agent's config doesn't touch the server, so this may run while it's up.
-    return { steps: [treeStep(root, ["agents", "setup", ...chosen])], dirtyTargets: chosen.includes("claude") ? [".mcp.json"] : [],
+    return { steps: [treeStep(root, ["agents", "setup", ...chosen])],
+      dirtyTargets: [...(chosen.includes("claude") ? [".mcp.json"] : []), ...(chosen.includes("cli") ? ["AGENTS.md", "CLAUDE.md"] : [])],
       serverMayRun: true };
   }
   throw new GuiError(`unknown action ${action}`);
@@ -496,7 +475,7 @@ function planAction(action, root, params, context) {
 function guards(root, plan) {
   const reasons = [];
   const up = plan.serverMayRun ? null : serverUpReason(root);
-  if (up) reasons.push(`${up}; stop it first (e2e down, or stop the server you started)`);
+  if (up) reasons.push(`${up}; stop it first (gridcheck down, or stop the server you started)`);
   if (plan.dirtyTargets.length) {
     const status = gitDirty(root, plan.dirtyTargets);
     if (status.git && status.dirty.length) {
@@ -560,7 +539,7 @@ function createGui({ context = ownContext(), stateFile = null, extraTrees = [], 
       const result = await run({ ...step, args: [cli, "help"] }, { timeoutMs: READ_TIMEOUT_MS });
       usageCache.set(key, result.output.split(/\r?\n/).map((line) => line.trim()));
     }
-    const usage = usageCache.get(key).filter((line) => line.startsWith(`e2e ${command} `));
+    const usage = usageCache.get(key).filter((line) => line.startsWith(`gridcheck ${command} `));
     if (usage.some((line) => line.includes("--dry-run"))) return null;
     return `${displayCommand(step)} has no --dry-run in this copy (${slashed(cli)}), so it can't be previewed; ` +
       "update the copy first (Install tab)";
@@ -608,7 +587,7 @@ function createGui({ context = ownContext(), stateFile = null, extraTrees = [], 
     const steps = [];
     try {
       for (const step of entry.plan.steps) {
-        const result = await run(step, { timeoutMs: WRITE_TIMEOUT_MS });
+        const result = await run(step, { timeoutMs: entry.plan.timeoutMs || WRITE_TIMEOUT_MS });
         steps.push({ command: displayCommand(step), cwd: slashed(step.cwd), exitCode: result.exitCode, output: result.output, ms: result.ms });
         if (result.exitCode !== 0) break;
       }
@@ -656,7 +635,7 @@ function createGui({ context = ownContext(), stateFile = null, extraTrees = [], 
   }
 
   // The Commands tab: the tree's copy's own `help --json`. A copy too old for it,
-  // or no copy, gets this copy of e2e's list, read for that tree's plugins.
+  // or no copy, gets this copy of gridcheck's list, read for that tree's plugins.
   async function commands(root) {
     let read = null;
     try {
@@ -665,7 +644,7 @@ function createGui({ context = ownContext(), stateFile = null, extraTrees = [], 
       read = null;
     }
     if (read && read.json && Array.isArray(read.json.commands)) return { ...read.json, source: "tree", command: read.command };
-    const own = await run({ cwd: OWN_ROOT, args: [path.join(OWN_ROOT, "bin", "e2e.js"), "help", "--json"], env: { EVEJS_E2E_TREE: root } },
+    const own = await run({ cwd: OWN_ROOT, args: [path.join(OWN_ROOT, "bin", "gridcheck.js"), "help", "--json"], env: { GRIDCHECK_TREE: root } },
       { timeoutMs: READ_TIMEOUT_MS });
     let json = null;
     try {
@@ -674,8 +653,8 @@ function createGui({ context = ownContext(), stateFile = null, extraTrees = [], 
       throw new GuiError(`couldn't read the command list: ${own.output.slice(0, 300)}`, 500);
     }
     return { ...json, source: "tool", note: read
-      ? "This tree's copy of e2e is older than this list, so it shows the commands of the e2e running this page. Update the copy for its own."
-      : "e2e isn't installed in this tree, so this is the list of the e2e running this page." };
+      ? "This tree's copy of gridcheck is older than this list, so it shows the commands of the gridcheck running this page. Update the copy for its own."
+      : "gridcheck isn't installed in this tree, so this is the list of the gridcheck running this page." };
   }
 
   // The Run a test card: the tree's scenarios and world recipes, from its copy.
@@ -775,33 +754,33 @@ function parseGuiArgs(argv) {
   return options;
 }
 
-// bin/e2e.js runs this before it loads a tree's config: from a checkout there
+// bin/gridcheck.js runs this before it loads a tree's config: from a checkout there
 // is no tree of its own.
 async function main(argv, { stdout = process.stdout, stderr = process.stderr, waitForStop = null } = {}) {
   let options;
   try {
     options = parseGuiArgs(argv);
   } catch (error) {
-    stderr.write(`e2e: ${error.message}\n`);
+    stderr.write(`gridcheck: ${error.message}\n`);
     return 1;
   }
   const context = ownContext();
   if (context.mode === "vendored" && options.trees.length) {
-    stderr.write("e2e: this GUI runs from a vendored copy and manages its own tree only; run e2e gui from an evejs-e2e checkout for others\n");
+    stderr.write("gridcheck: this GUI runs from a vendored copy and manages its own tree only; run gridcheck gui from a Gridcheck checkout for others\n");
     return 1;
   }
   for (const root of options.trees) {
     if (!isTree(root)) {
-      stderr.write(`e2e: ${slashed(root)} is not an EveJS tree (no server/src)\n`);
+      stderr.write(`gridcheck: ${slashed(root)} is not an EveJS tree (no server/src)\n`);
       return 1;
     }
   }
   const stateFile = context.checkout ? path.join(context.checkout, "_local", "gui.json") : null;
   const gui = createGui({ context, stateFile, extraTrees: options.trees });
-  const server = createAgentBridgeHttp({ routes: gui, port: options.port, handshakePath: null, serviceName: "e2e-gui" });
+  const server = createAgentBridgeHttp({ routes: gui, port: options.port, handshakePath: null, serviceName: "gridcheck-gui" });
   const port = await server.start();
   const url = `http://127.0.0.1:${port}/gui#token=${server.token}`;
-  stdout.write(`${context.mode === "vendored" ? `e2e gui for ${slashed(context.tree)}` : `e2e gui from ${slashed(OWN_ROOT)}`}. ` +
+  stdout.write(`${context.mode === "vendored" ? `gridcheck gui for ${slashed(context.tree)}` : `gridcheck gui from ${slashed(OWN_ROOT)}`}. ` +
     `Ctrl-C stops it:\n${url}\n`);
   if (options.open) openBrowser(url);
   await (waitForStop ? waitForStop(server) : new Promise((resolve) => process.once("SIGINT", resolve)));

@@ -1,6 +1,6 @@
 "use strict";
 
-// Pure pieces of `e2e watch`: one text line per timeline event, the server
+// Pure pieces of `gridcheck watch`: one text line per timeline event, the server
 // log line parser, and a short reorder buffer that merges the bridge stream
 // with log lines by server time. No IO, so tests can pin the output. Plugin
 // kinds are formatted by their plugin (core/plugins.js registry.formatters).

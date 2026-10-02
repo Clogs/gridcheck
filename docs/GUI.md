@@ -1,20 +1,20 @@
 # The GUI
 
-`e2e gui` serves a page on loopback for installing the tool into EveJS trees, applying its patches
+`gridcheck gui` serves a page on loopback for installing the tool into EveJS trees, applying its patches
 and replaying runs. Everything it does is a CLI command you could type, and the page shows each one
 before it runs.
 
 ```bash
-node bin/e2e.js gui                        # from an evejs-e2e checkout: any tree
-node bin/e2e.js gui --tree F:/EveJS-0.12.9 --open
-node tools/evejs-e2e/bin/e2e.js gui        # from a tree's vendored copy: that tree only
+node bin/gridcheck.js gui                        # from a Gridcheck checkout: any tree
+node bin/gridcheck.js gui --tree F:/EveJS-0.12.9 --open
+node tools/gridcheck/bin/gridcheck.js gui        # from a tree's vendored copy: that tree only
 ```
 
 It prints a URL such as `http://127.0.0.1:52011/gui#token=<64 hex>` and runs until Ctrl-C.
 `--open` opens it in the default browser, and `--port N` fixes the port (default: a free one).
 
-On Windows, `OpenGui.bat` runs `e2e gui --open` from the folder it sits in, so double-click it in
-a checkout, or in a tree's `tools/evejs-e2e/` for that tree. It passes its arguments on
+On Windows, `OpenGui.bat` runs `gridcheck gui --open` from the folder it sits in, so double-click it in
+a checkout, or in a tree's `tools/gridcheck/` for that tree. It passes its arguments on
 (`OpenGui.bat --tree F:/EveJS-0.12.9`). It checks for Node 24 first. Closing its window stops the
 GUI, and the window stays open on an error so you can read it.
 
@@ -28,7 +28,7 @@ committed `HEAD`. Its tree list holds:
 - the checkout's sibling folders that are EveJS trees (they have `server/src`).
 
 The **Tree** picker in the header lists, in columns, each tree with its path, its EveJS version (from
-`server/package.json`; each version gets its own colour), whether e2e is installed, and its scenario
+`server/package.json`; each version gets its own colour), whether gridcheck is installed, and its scenario
 runs with a pass bar and passed and failed counts. Trees with the most runs come first. Arrow keys,
 Enter and Escape work in the list. The tag beside the picker (installed or not installed) opens the
 Install tab.
@@ -112,7 +112,7 @@ Ctrl + wheel and the + and − keys. Shift + wheel pans a zoomed timeline.
 ### Perf
 
 A run has the server's ticks when its scenario has `"up": { "profile": true }` or
-`"watch": { "perf": true }`, or when `e2e watch --perf` wrote it
+`"watch": { "perf": true }`, or when `gridcheck watch --perf` wrote it
 ([GUIDE.md](GUIDE.md#performance-testing)). The tab computes its figures with the same code as the
 report's "Server performance" section (`core/perf.js`, served as `/gui/perf.js`), so the two agree.
 
@@ -133,13 +133,17 @@ report's "Server performance" section (`core/perf.js`, served as `/gui/perf.js`)
 
 ## Install
 
-The tree list on the left is split into trees with e2e installed ("Set up") and the rest. Each
+The tree list on the left is split into trees with gridcheck installed ("Set up") and the rest. Each
 tree shows its path and its EveJS version, read from the tree's `server/package.json` (or its root
 `package.json`). Set-up trees also show the copy's version, the mode and whether the server is up. A
 filter box appears once there are six trees or more.
 
 For the chosen tree, a banner at the top says whether it can run tests: "Ready to run tests", how
-many things are left to do, or "Not set up yet" with an Install button. A bar under its text has
+many things are left to do, or "Not set up yet". While anything other than the tree's own
+dependencies keeps it from running tests, the banner offers **Set up everything…**, which runs
+[`gridcheck setup`](TREES.md#setting-a-tree-up): install, config, the agents found, the patches, the
+`starter` world and a smoke test, skipping what is done. A tree with no copy also gets "Install
+only…". A bar under its text has
 one segment per row. Below it is a checklist. Each row has an icon for its topic with a badge for
 its state (done, needed, optional, a problem, or information), one line on its state and at most
 one button. Click a row to open its details. Rows that need you start open. The Install tab's
@@ -148,45 +152,47 @@ count is the number of rows that keep the tree from running tests.
 Paths, commands, commits, versions and environment variables on this tab are coloured chips, one
 colour and icon per kind; the legend above the banner shows them. Click a chip to copy it.
 
-1. **e2e is installed.** Not installed, or its version and commit, and whether it still matches
+1. **gridcheck is installed.** Not installed, or its version and commit, and whether it still matches
    its `VENDOR.json` (the drift check, with every edited, added or missing file in the details).
    From a checkout it also says whether the copy is that checkout's commit, and offers "Update…"
    when it isn't. "Install…", "Update…" and "Replace edited files…" run `vendor update`. The last
    adds `--force`, as does replacing a folder that was never vendored. The shim's state is in the
    details.
-2. **Server mode.** The mode from `e2e.config.json`, or "Choose a server mode" when there's no
+2. **Server mode.** The mode from `gridcheck.config.json`, or "Choose a server mode" when there's no
    file. The details have the three modes side by side, and "Write config…" runs
-   `e2e init --mode <mode>`, with `--force` when the file exists. Auto mode uses the tree's
+   `gridcheck init --mode <mode>`, with `--force` when the file exists. Auto mode uses the tree's
    server when it's up and starts its own when it isn't. Managed mode always starts its own; attach
    mode only uses a server you start.
 3. **AI agents.** Claude Code and Codex: whether each is on this machine and whether it already
    runs this tree's MCP server. Each agent that isn't connected has its own "Connect…" button
-   ("Set up anyway…" when it wasn't found), which runs `e2e agents setup <agent>`. The preview
-   shows the lines it adds to the tree's `.mcp.json` or to Codex's `config.toml`. Setup only adds
-   entries. [GUIDE.md](GUIDE.md#setting-up-agents) has the rules. Agents are optional.
+   ("Set up anyway…" when it wasn't found), which runs `gridcheck agents setup <agent>`. The preview
+   shows the lines it adds to the tree's `.mcp.json` or to Codex's `config.toml`. "Other agents
+   (CLI)" has "Add pointer…", which adds a pointer to [CLI.md](CLI.md) to the tree's `AGENTS.md` or
+   `CLAUDE.md`, for agents without MCP. Setup only adds entries.
+   [GUIDE.md](GUIDE.md#setting-up-agents) has the rules. Agents are optional.
 4. **Dependencies and reference data.** Its npm dependencies (`node_modules` at the root and in
    `server/`, where their `package.json` lists any) and the reference data (the data dir's
    `solarSystems/data.json`), each missing one with the command that fixes it. The GUI doesn't run
    these; they are the tree's own setup.
 5. **Plugins.** The plugins that apply to the tree and the ones skipped, with the reason. "Run
-   health check" runs the tree's `e2e doctor --json` and shows its report in the row.
+   health check" runs the tree's `gridcheck doctor --json` and shows its report in the row.
 6. **The game server.** Whether it's up, and what that means in the tree's mode. It never blocks
    the banner.
 
 Under the checklist, **Run a test** shows how to run one once the tree is ready, in two steps:
 
-1. **The world.** For a scenario that names a recipe, `e2e world build <recipe>` with a label under
+1. **The world.** For a scenario that names a recipe, `gridcheck world build <recipe>` with a label under
    each part, whether that world is built and current, what each recipe step does, where it's
    saved, and that it needs the server down. The step is optional, since a run builds a missing or
    stale recipe world itself. A scenario on a fresh or saved world has nothing to build. In attach
-   mode this step is `e2e login` on the server you started.
+   mode this step is `gridcheck login` on the server you started.
 2. **The scenario.** Pick one of the tree's scenarios (its own, the core's, each plugin's; a chip's
    colour is its last run's verdict, and one that doesn't load is struck through). The card shows
    the command, the scenario's description, what it checks, where it starts and when it stops, its
    last run and the scenario file. `--check`, `--keep-up` and `--reuse` change the command.
 
 A note under the steps says how many of the Patches tab's patches are on. The scenarios and
-recipes come from the tree's own copy (`e2e run --json`, `e2e world recipes --json`). A copy too
+recipes come from the tree's own copy (`gridcheck run --json`, `gridcheck world recipes --json`). A copy too
 old for them gets the two fixed commands instead, with a note to update it.
 
 The second tab, **Ask your agent**, names the connected agents, offers requests to copy and lists
@@ -194,7 +200,7 @@ the MCP tools they have.
 
 ## Commands
 
-Every command the tree's copy has, from its `e2e help --json`, in groups: set up, worlds, server,
+Every command the tree's copy has, from its `gridcheck help --json`, in groups: set up, worlds, server,
 character and ship, watch and read, scenarios, this tool, and one group per active plugin. Each row
 has the command, a one-line summary, its usage and tags:
 
@@ -209,21 +215,21 @@ has the command, a one-line summary, its usage and tags:
 Open a row for every usage line, its flags with their defaults, its choices (such as `act`'s
 actions), examples and notes. The search box matches names, summaries, usage and flags; **Works
 now** keeps the commands the tree can run with its server as it is. The copy button on each row
-copies `node tools/evejs-e2e/bin/e2e.js <command>`. A copy older than `help --json`, or a tree
-without one, shows the list of the e2e running the page, and says so. The summaries live in
+copies `node tools/gridcheck/bin/gridcheck.js <command>`. A copy older than `help --json`, or a tree
+without one, shows the list of the gridcheck running the page, and says so. The summaries live in
 `core/commandDocs.js` beside the command table's usage lines; a test fails when a command has
 none.
 
 ## Patches
 
-Each optional patch in the tree's copy with its state, from `e2e patch status --json`: `absent`
+Each optional patch in the tree's copy with its state, from `gridcheck patch status --json`: `absent`
 (with whether it applies cleanly), `applied`, `detected` (the tree already has equivalent code),
 `partial` or `no-target`. An absent patch offers "Preview apply" and an applied one "Preview
 revert". [PATCHES.md](PATCHES.md) describes the patches.
 
 ## Every change is previewed
 
-Install, update, config, agent setup, apply and revert all work the same way:
+Set up everything, install, update, config, agent setup, apply and revert all work the same way:
 
 1. The page asks the server for a preview. The server runs the command with `--dry-run` and
    returns the command, the folder it runs in, and the dry run's output: the files a vendor update
@@ -231,19 +237,20 @@ Install, update, config, agent setup, apply and revert all work the same way:
    with their line endings.
 2. The dialog shows it. If the change would be refused, it says why and offers no Run button.
 3. Run asks the server to run that same command, without `--dry-run`, by the preview's ID. A preview
-   runs once and expires after 10 minutes. The output and exit code replace the preview.
+   runs once and expires after 10 minutes. The output and exit code replace the preview. A command
+   gets 5 minutes, and Set up everything 20, since a first setup builds a world and boots twice.
 
 A change is refused when:
 
-- the tree's server is up (a live bridge handshake, or a live `e2e up` run). Agent setup is the
+- the tree's server is up (a live bridge handshake, or a live `gridcheck up` run). Agent setup is the
   exception: it doesn't touch the server;
-- a file it would change has uncommitted changes: `tools/evejs-e2e/` and the shim for a vendor
-  update, `e2e.config.json` for config, `.mcp.json` for Claude Code's setup, a patch's targets for
+- a file it would change has uncommitted changes: `tools/gridcheck/` and the shim for a vendor
+  update, `gridcheck.config.json` for config, `.mcp.json` for Claude Code's setup, a patch's targets for
   an apply. A tree that isn't a git
   checkout, such as an unpacked zip, can't be checked, and the preview says so;
 - the dry run fails, for example `vendor update` on a drifted copy without `--force`, or a patch
   whose anchor is missing;
-- the copy's own `e2e help` doesn't list `--dry-run` for the command. An older copy would ignore
+- the copy's own `gridcheck help` doesn't list `--dry-run` for the command. An older copy would ignore
   the flag and make the change during the preview, so the GUI asks you to update the copy first.
 
 The checks run again when you press Run, so a server started after the preview still stops the
@@ -272,8 +279,8 @@ The page uses a small JSON API, and a script or an agent can call it the same wa
 | `GET /gui/api/tree?tree=<id>` | The Install tab's summary: `copy`, `shim`, `config`, `prerequisites` (each `{ name, path, ok, fix }`), `serverUp`, `serverPid`, `plugins`, `agents` (each `{ id, name, installed, evidence, file, registered, serverName, problem }`). |
 | `GET /gui/api/scenarios?tree=<id>` | `scenarios` (the copy's `run --json`: each `{ name, file, plugin, description, world, recipe, timeout, expect, problem }`) and `recipes` (`world recipes --json`: each `{ name, description, state, why, savedAt, steps }`); `null` for a copy without them. |
 | `GET /gui/api/commands?tree=<id>` | The copy's `help --json`: `prefix`, `groups`, `commands` (each `{ name, group, summary, usage, needs, managed, writes, mcp, flags, examples, note, plugin }`) and `mcpTools`, with `source` `tree`, or `tool` and a `note` when it's this copy's list. |
-| `GET /gui/api/doctor?tree=<id>` | `e2e doctor --json`, parsed. |
-| `GET /gui/api/patches?tree=<id>` | `e2e patch status --json`, parsed. |
+| `GET /gui/api/doctor?tree=<id>` | `gridcheck doctor --json`, parsed. |
+| `GET /gui/api/patches?tree=<id>` | `gridcheck patch status --json`, parsed. |
 | `POST /gui/api/preview` `{ "tree": "<id>", "action": "vendor" \| "init" \| "agents" \| "patch-apply" \| "patch-revert", "mode": "auto", "agents": ["claude", "codex"], "id": "xmpp-port", "force": false }` | The preview: `ok`, `refused`, each step's command and dry-run output, and a `previewID` when `ok`. |
 | `POST /gui/api/run` `{ "previewID": "..." }` | Runs the previewed commands; each step's output and exit code. |
 | `GET /gui/api/runs?tree=<id>` | The runs, newest first, each with `result`: `name`, `world`, `startedAtMs`, `stoppedAtMs`, `passed`, `exitCode`, `missing`, `expectations` (a count). |

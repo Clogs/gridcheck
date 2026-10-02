@@ -1,6 +1,6 @@
 "use strict";
 
-// `e2e watch`, server side. Samples one character's grid every few seconds and
+// `gridcheck watch`, server side. Samples one character's grid every few seconds and
 // reports only what changed. Plugins add to it through three hooks
 // (plugins.js): annotate joins each row to the plugin's own state, onGrid
 // reads each sample's rows and adds events of its own, and offGrid adds
@@ -171,7 +171,7 @@ function groupEvent(kind, entries, extra = {}) {
 }
 
 // One compact POS event: where every ball near the ship is, for the tactical
-// frames `e2e run` draws. Nearest first (readGrid sorts), capped, positions
+// frames `gridcheck run` draws. Nearest first (readGrid sorts), capped, positions
 // rounded to the metre; fields that are empty are left out.
 function positionFrame(grid, { rangeMeters = POSITIONS.rangeMeters, maxBalls = POSITIONS.maxBalls } = {}) {
   const rows = Array.isArray(grid && grid.entities) ? grid.entities : [];

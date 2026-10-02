@@ -17,7 +17,7 @@
 //     detect({ read }) {},                     // equivalent code without the marker
 //   };
 //
-// Every hunk is written as a marker line (`// evejs-e2e:patch <id> v<n>`)
+// Every hunk is written as a marker line (`// gridcheck:patch <id> v<n>`)
 // followed by its lines, each ending as the anchor line ends, so a file's mixed
 // line endings stay as they were. Revert removes exactly those lines and then
 // re-applies the patch to what's left: if that doesn't give the file back byte
@@ -28,7 +28,10 @@ const path = require("node:path");
 const { spawnSync } = require("node:child_process");
 
 const PATCHES_DIR = path.join(__dirname, "..", "patches");
-const PATCH_MARKER = "evejs-e2e:patch";
+const PATCH_MARKER = "gridcheck:patch";
+// Copies from before the rename to Gridcheck wrote this. Status reads it and
+// revert removes it, so a tree patched then reverts byte for byte.
+const LEGACY_MARKERS = Object.freeze(["evejs-e2e:patch"]);
 
 class PatchError extends Error {}
 
@@ -55,11 +58,17 @@ function normalizePatch(patch) {
 }
 
 function markerText(patch) {
-  return `${PATCH_MARKER} ${String(patch.id).replace(/[^a-z0-9-]/gi, "")} v${Number(patch.version) || 1}`;
+  return `${patch.markerPrefix || PATCH_MARKER} ${String(patch.id).replace(/[^a-z0-9-]/gi, "")} v${Number(patch.version) || 1}`;
 }
 
 function markerPattern(patch) {
-  return new RegExp(`${PATCH_MARKER} ${String(patch.id).replace(/[^a-z0-9-]/gi, "")} v(\\d+)`, "g");
+  return new RegExp(`(?:${[PATCH_MARKER, ...LEGACY_MARKERS].join("|")}) ${String(patch.id).replace(/[^a-z0-9-]/gi, "")} v(\\d+)`, "g");
+}
+
+// The marker prefix a file's applied copy of this patch was written with.
+function markerPrefixIn(patch, text) {
+  const id = String(patch.id).replace(/[^a-z0-9-]/gi, "");
+  return [PATCH_MARKER, ...LEGACY_MARKERS].find((prefix) => String(text || "").includes(`${prefix} ${id} v`)) || PATCH_MARKER;
 }
 
 // -> [{ text, eol }]. The last line's eol is "" when the file doesn't end in one.
@@ -276,7 +285,9 @@ function planRevert(patch, read) {
     const lines = splitLines(current);
     const remove = new Set();
     let unmatched = 0;
-    const marker = `// ${markerText(patch)}`;
+    // Remove and re-apply with the marker this file was patched with.
+    const applied = { ...patch, markerPrefix: markerPrefixIn(patch, current) };
+    const marker = `// ${markerText(applied)}`;
     for (const hunk of hunks) {
       const block = [marker, ...hunk.lines.map((line) => line.trimEnd())];
       let found = -1;
@@ -302,7 +313,7 @@ function planRevert(patch, read) {
       continue;
     }
     const after = joinLines(lines.filter((_line, index) => !remove.has(index)));
-    const again = planFile(patch, hunks, after);
+    const again = planFile(applied, hunks, after);
     if (!again.ok || again.after !== current) {
       problems.push(`${file}: changed since the patch was applied, so revert can't give the file back exactly; revert it by hand`);
       continue;
@@ -354,7 +365,7 @@ function previewLines(plan, { removing = false } = {}) {
 
 function findPatch(patches, id) {
   const patch = patches.find((candidate) => candidate.id === id);
-  if (!patch) throw new PatchError(`no patch ${id}; e2e patch list shows them (${patches.map((row) => row.id).join(", ")})`);
+  if (!patch) throw new PatchError(`no patch ${id}; gridcheck patch list shows them (${patches.map((row) => row.id).join(", ")})`);
   if (patch.broken) throw new PatchError(`patch ${id} ${patch.title}`);
   if (!patch.hunks.length) throw new PatchError(`patch ${id} has no hunks to apply`);
   return patch;
@@ -380,7 +391,7 @@ function changePatch(action, id, { treeRoot, serverRoot, patches = loadPatches()
   // What would stop the real change. A dry run reports them, so a preview
   // says up front that the change would be refused.
   const blockers = [];
-  if (serverUp) blockers.push(`${serverUp}. Stop it first (e2e down)`);
+  if (serverUp) blockers.push(`${serverUp}. Stop it first (gridcheck down)`);
   if (action === "apply") {
     const status = dirtyCheck(treeRoot, plan.files.map((entry) => read.absolute(entry.file)));
     if (!status.git) notes.push("this tree isn't a git checkout, so uncommitted changes to the targets weren't checked");
@@ -394,6 +405,7 @@ function changePatch(action, id, { treeRoot, serverRoot, patches = loadPatches()
 }
 
 module.exports = {
+  LEGACY_MARKERS,
   PATCH_MARKER,
   PATCHES_DIR,
   PatchError,

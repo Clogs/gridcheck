@@ -32,7 +32,7 @@ function parseRunArgs(argv) {
 
 // -> exit code. extraEnv is for the compatibility script (fixture recording).
 function runTests({ tree = null, files = testFiles(), extraEnv = {}, stdio = "inherit" } = {}) {
-  const env = { ...process.env, ...extraEnv, EVEJS_E2E_TREE: tree || FIXTURE_TREE };
+  const env = { ...process.env, ...extraEnv, GRIDCHECK_TREE: tree || FIXTURE_TREE };
   const result = spawnSync(process.execPath, ["--test", ...files], { env, stdio, encoding: "utf8" });
   return { code: result.status === null ? 1 : result.status, stdout: result.stdout || "", stderr: result.stderr || "" };
 }

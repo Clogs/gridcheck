@@ -1,15 +1,15 @@
 "use strict";
 
-// `e2e trigger` and the scenario step of the same name: argument parsing and
+// `gridcheck trigger` and the scenario step of the same name: argument parsing and
 // the line each trigger prints. The bridge owns every rule; this only shapes
 // requests and replies. Guide: docs/E2E-GRID-TESTING.md "Triggers".
 
 const TRIGGER_USAGE = [
-  "e2e trigger scout [<system>] [--flight <flightID>]",
-  "e2e trigger hunt [--flight <flightID>] [--phase stalking|committed]",
-  "e2e trigger fleet <family> [--doctrine <key>] [--to self|<system>] [--anchor <itemID>] [--count 1-8]",
-  "e2e trigger materialize <flightID> [--go]",
-  "e2e trigger skirmish [--count 1-20] [--class <shipClass>] [--gap <meters>]",
+  "gridcheck trigger scout [<system>] [--flight <flightID>]",
+  "gridcheck trigger hunt [--flight <flightID>] [--phase stalking|committed]",
+  "gridcheck trigger fleet <family> [--doctrine <key>] [--to self|<system>] [--anchor <itemID>] [--count 1-8]",
+  "gridcheck trigger materialize <flightID> [--go]",
+  "gridcheck trigger skirmish [--count 1-20] [--class <shipClass>] [--gap <meters>]",
 ].join("\n  ");
 
 // The bridge body for one trigger. `resolveSystemID` turns a name or ID into an ID.
@@ -66,7 +66,7 @@ function formatTriggerReply(reply) {
         `${reply.jumps} jump${reply.jumps === 1 ? "" : "s"} to ${reply.systemID}; holds until ` +
         `${new Date(reply.holdsUntilMs).toISOString()}` +
         (reply.canHunt ? "" : "\n  it can't lead a hunt there: its way home leaves hunting grounds (pirateHuntCoordinator viable). " +
-          "It still reports you; start a hunt with another pirate flight on the system (e2e trigger hunt).");
+          "It still reports you; start a hunt with another pirate flight on the system (gridcheck trigger hunt).");
     case "hunt":
       return `hunt ${reply.huntID}\n  leader ${f(reply.flight)}, phase ${reply.phase}, from a ${reply.report.source} report; ` +
         `trace ${reply.trace.join(" > ")}`;
@@ -119,7 +119,7 @@ function triggerIDs(reply) {
 }
 
 // raw: { "trigger": "fleet", "family": "pirate", ... } -> { name, positionals, flags },
-// the same arguments `e2e trigger` takes. ctx (scenario.js): problem(key, message),
+// the same arguments `gridcheck trigger` takes. ctx (scenario.js): problem(key, message),
 // bound(value, key), resolveSystemID(text).
 function parseTriggerStep(raw, ctx) {
   const name = raw.trigger;
@@ -170,7 +170,7 @@ function describeTriggerStep(step) {
   return `trigger ${step.name}${args.length ? ` ${args.join(" ")}` : ""}`;
 }
 
-// The e2e_lu_trigger MCP tool's arguments, in the scenario step's names.
+// The lu_trigger MCP tool's arguments, in the scenario step's names.
 function triggerCliArgs(p) {
   const args = ["trigger"];
   const flag = (name, value) => {

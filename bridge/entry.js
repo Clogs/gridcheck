@@ -1,10 +1,10 @@
 /**
- * Agent bridge: lets the e2e CLI run slash commands on a character's session
+ * Agent bridge: lets the gridcheck CLI run slash commands on a character's session
  * and read that character's grid, so an agent can check on-grid behaviour
  * without an EVE client. Loopback only, bearer token from the handshake
- * (e2e.config.json handshake, _local/agentBridge/bridge.json by default), and
+ * (gridcheck.config.json handshake, _local/agentBridge/bridge.json by default), and
  * off unless EVEJS_AGENT_BRIDGE=1 -- the shipped mod never listens on it.
- * `e2e up` sets the variable; in attach mode you set it yourself. The
+ * `gridcheck up` sets the variable; in attach mode you set it yourself. The
  * handshake also carries this server's ports, log and data dir, which is how
  * the CLI finds a server it didn't start.
  *

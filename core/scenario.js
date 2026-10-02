@@ -1,9 +1,9 @@
 "use strict";
 
-// `e2e run <scenario>`: scenario files, their checks, the run itself and its
+// `gridcheck run <scenario>`: scenario files, their checks, the run itself and its
 // report. A scenario names a saved world, setup steps, stop conditions and
-// expectations (the tree's tools/e2e-scenarios/*.json, the core's
-// tools/evejs-e2e/scenarios/ and each plugin's plugins/<name>/scenarios/).
+// expectations (the tree's tools/gridcheck-scenarios/*.json, the core's
+// tools/gridcheck/scenarios/ and each plugin's plugins/<name>/scenarios/).
 // Plugins add steps and `up` options through the registry (core/plugins.js).
 // The server calls come in as `ops`, so the run can be tested without a
 // server. Guide: docs/GUIDE.md "Scenarios".
@@ -20,10 +20,12 @@ const loadoutTools = require("./loadout");
 const perfTools = require("./perf");
 
 const SCENARIO_DIR = path.join(__dirname, "..", "scenarios");
-// The tree's own scenarios, committed with its features (e2e.config.json
-// scenariosDir, tools/e2e-scenarios by default). tools/evejs-e2e/ is a
+// The tree's own scenarios, committed with its features (gridcheck.config.json
+// scenariosDir, tools/gridcheck-scenarios by default). tools/gridcheck/ is a
 // vendored copy (core/vendor.js), so a scenario saved there would be drift.
 const TREE_SCENARIO_DIR = defaultTreeConfig().scenariosDir;
+// Drafts an agent wrote while working on a feature, not committed (_local/gridcheck/scenarios).
+const DRAFT_SCENARIO_DIR = path.join(defaultTreeConfig().e2eDir, "scenarios");
 // "world": "fresh" boots a new game store seeded from the reference data.
 const FRESH_WORLD = "fresh";
 
@@ -175,12 +177,12 @@ function validateScenario(raw, { source = "scenario", defaultName = null, worldE
   const recipe = raw.recipe === undefined ? null : raw.recipe;
   if (recipe !== null) {
     if (raw.world !== undefined) problem("recipe", "a scenario starts from a world or a recipe, not both");
-    else if (typeof recipe !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(recipe)) problem("recipe", "a world recipe's name (e2e world recipes)");
-    else if (!recipeExists(recipe)) problem("recipe", `no world recipe "${recipe}" (e2e world recipes)`);
+    else if (typeof recipe !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(recipe)) problem("recipe", "a world recipe's name (gridcheck world recipes)");
+    else if (!recipeExists(recipe)) problem("recipe", `no world recipe "${recipe}" (gridcheck world recipes)`);
   } else if (typeof raw.world !== "string" || !raw.world) {
-    problem("world", `the saved world to start from (e2e world list), "${FRESH_WORLD}", or a "recipe" instead`);
+    problem("world", `the saved world to start from (gridcheck world list), "${FRESH_WORLD}", or a "recipe" instead`);
   } else if (raw.world !== FRESH_WORLD && !worldExists(raw.world)) {
-    problem("world", `no saved world "${raw.world}" (e2e world list)`);
+    problem("world", `no saved world "${raw.world}" (gridcheck world list)`);
   }
 
   const up = upDefaults(registry);
@@ -536,8 +538,8 @@ function validateScenario(raw, { source = "scenario", defaultName = null, worldE
 }
 
 // The folders scenarios live in: the core's, then each plugin's.
-function scenarioDirs({ dir = SCENARIO_DIR, treeDir = TREE_SCENARIO_DIR, registry = defaultRegistry() } = {}) {
-  return [{ plugin: null, dir: treeDir }, { plugin: null, dir }, ...registry.scenarioDirs];
+function scenarioDirs({ dir = SCENARIO_DIR, treeDir = TREE_SCENARIO_DIR, draftDir = DRAFT_SCENARIO_DIR, registry = defaultRegistry() } = {}) {
+  return [{ plugin: null, dir: treeDir }, { plugin: null, dir }, ...registry.scenarioDirs, { plugin: null, dir: draftDir, draft: true }];
 }
 
 // A bare name is a file in the first folder that has it; a path is a path.
@@ -563,10 +565,54 @@ function loadScenario(nameOrPath, context = {}) {
 
 // Every scenario in every folder; a name the tree has hides the core's, and
 // the core's hides a plugin's.
+const SCENARIO_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/;
+// What `scenario new` writes without --from: valid as it stands, so the first
+// `run --check` passes, with notes saying what to replace.
+const SCENARIO_TEMPLATE = Object.freeze({
+  description: "What this checks, in one sentence: the feature, and what a player should see.",
+  world: FRESH_WORLD,
+  setup: [
+    "undock",
+    { waitFor: "GRID", timeout: 30, note: "the watch's first grid, taken before anything the steps below spawn" },
+  ],
+  until: { any: ["GRID"], from: "start", timeout: 60, grace: 10 },
+  expect: [
+    { match: "GRID", note: "replace with what the feature should make happen, e.g. ARRIVE who=npc" },
+    { match: "no DIVERGE status=open", note: "the client view agrees with the server" },
+  ],
+});
+
+// Writes a new scenario: a copy of `from` (a scenario name or path) or the
+// template, to the drafts, or with save to the tree's scenarios to commit.
+// -> { file, from }. Throws an Error that says what to do instead.
+function newScenario(name, { from = null, save = false, force = false, treeDir = TREE_SCENARIO_DIR,
+  draftDir = DRAFT_SCENARIO_DIR, ...context } = {}) {
+  if (!SCENARIO_NAME.test(String(name || ""))) {
+    throw new Error("scenario new needs a name: letters, digits, '.', '_' or '-', e.g. `gridcheck scenario new fleet-arrives`");
+  }
+  let raw = SCENARIO_TEMPLATE;
+  let source = null;
+  if (from) {
+    source = scenarioPath(from, { ...context, treeDir, draftDir });
+    try {
+      raw = JSON.parse(fs.readFileSync(source, "utf8"));
+    } catch (error) {
+      throw new Error(error.code === "ENOENT" ? `no scenario ${from} to copy (\`gridcheck run\` lists them)` : `${source}: ${error.message}`);
+    }
+    raw = { ...raw };
+    delete raw.name;
+  }
+  const file = path.join(save ? treeDir : draftDir, `${name}.json`);
+  if (fs.existsSync(file) && !force) throw new Error(`${file} already exists; pick another name, or pass --force to replace it`);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, `${JSON.stringify(raw, null, 2)}\n`);
+  return { file, from: source };
+}
+
 function listScenarios(context = {}) {
   const rows = [];
   const seen = new Set();
-  for (const { plugin, dir } of scenarioDirs(context)) {
+  for (const { plugin, dir, draft = false } of scenarioDirs(context)) {
     let names = [];
     try {
       names = fs.readdirSync(dir).filter((name) => name.endsWith(".json")).sort();
@@ -580,10 +626,10 @@ function listScenarios(context = {}) {
       const file = path.join(dir, name);
       try {
         const raw = JSON.parse(fs.readFileSync(file, "utf8"));
-        rows.push({ name: scenarioName, file, plugin, description: String(raw.description || ""),
+        rows.push({ name: scenarioName, file, plugin, draft, description: String(raw.description || ""),
           world: raw.recipe ? `recipe ${raw.recipe}` : raw.world });
       } catch (error) {
-        rows.push({ name: scenarioName, file, plugin, description: `(unreadable: ${error.message})` });
+        rows.push({ name: scenarioName, file, plugin, draft, description: `(unreadable: ${error.message})` });
       }
     }
   }
@@ -1047,14 +1093,17 @@ module.exports = {
   PERF_EVERY_SECONDS,
   PROFILE_EVERY_TICKS,
   FRESH_WORLD,
+  DRAFT_SCENARIO_DIR,
   SCENARIO_DIR,
   TREE_SCENARIO_DIR,
   ScenarioError,
   bindStep,
   describeStep,
   exitCodeFor,
+  SCENARIO_TEMPLATE,
   listScenarios,
   loadScenario,
+  newScenario,
   renderReport,
   resultRecord,
   runScenario,

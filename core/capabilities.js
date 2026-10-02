@@ -1,15 +1,15 @@
 "use strict";
 
-// What a tree can do for this tool. `e2e doctor` reads it without the
+// What a tree can do for this tool. `gridcheck doctor` reads it without the
 // server running; GET /capabilities answers the same from inside a running
-// server. Every check returns plain data; bin/e2e.js prints it.
+// server. Every check returns plain data; bin/gridcheck.js prints it.
 //
 //   gateway    which of the gateway calls the CLI makes the tree allows
 //   destiny    whether the decoder reads the tree's ball layout (else the
 //              client view stays off)
 //   patches    which optional stock edits are applied, detected or absent
 //   plugins    active, and skipped with the reason
-//   listeners  which ports `e2e up` can move (e2e.config.json)
+//   listeners  which ports `gridcheck up` can move (gridcheck.config.json)
 //   loadout    whether the stock exports POST /loadout builds a ship from are there
 
 const fs = require("node:fs");

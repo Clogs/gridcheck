@@ -1,20 +1,51 @@
-# Running evejs-e2e in an EveJS tree
+# Running Gridcheck in an EveJS tree
 
-evejs-e2e runs in stock EveJS and in forks of it. This page covers how a tree tells the tool where
-things are, the three ways to run its server, what `e2e doctor` checks, and how the tool itself is
-tested against real trees.
+Gridcheck runs in stock EveJS and in forks of it. This page covers setting a tree up, how a tree
+tells the tool where things are, the three ways to run its server, what `gridcheck doctor` checks, and
+how the tool itself is tested against real trees.
+
+## Setting a tree up
+
+`gridcheck setup --tree <path>`, from a checkout, takes a tree whose own setup is done (its `npm ci` and
+its reference data) to a passing smoke test. It runs six commands, printing each before it runs:
+
+| Step | Command | Skipped when |
+| --- | --- | --- |
+| 1 | `vendor update` from the checkout | the copy is at the checkout's `HEAD` and unedited; always, run from a tree's own copy |
+| 2 | `init --mode <mode>` | `gridcheck.config.json` is there and valid, and `--mode` doesn't change it |
+| 3 | `agents setup` | every agent asked for is set up; no agent was found and none was named |
+| 4 | `patch apply` with each patch the copy reports absent | every patch is applied or detected |
+| 5 | `world build starter` | `starter` is built and current; attach mode |
+| 6 | `run smoke-undock` | attach mode, where you start the server yourself |
+
+Before step 1 it refuses, changing nothing, while the tree's server is up, or when its
+dependencies or reference data are missing; the message names the fix. A partly applied patch
+stops it at step 4 with the `patch revert` to run. It stops at the first command that fails; run
+it again after the fix, and the steps already done are skipped.
+
+| Flag | Default | |
+| --- | --- | --- |
+| `--tree <path>` | the tree you're in | |
+| `--mode auto\|attach\|managed` | the config's, or `auto` | |
+| `--agents claude,codex,cli\|none` | the Claude Code and Codex found | `cli` adds the pointer to [CLI.md](CLI.md) for any other agent |
+| `--skip agents,patches,world,smoke` | none | |
+| `--force` | | replace a copy whose files were edited |
+| `--dry-run` | | each command's own dry run; world and smoke are only shown |
+
+Setup exits 0 when the tree is ready, 1 when a step failed, and 2 when it refused to start. The
+GUI's **Set up everything…** previews `setup --dry-run` and then runs it ([GUI.md](GUI.md)).
 
 ## The tree's config
 
-`e2e init` probes the tree and writes `e2e.config.json` at its root. Every path the CLI, the MCP
+`gridcheck init` probes the tree and writes `gridcheck.config.json` at its root. Every path the CLI, the MCP
 server and the agent bridge use comes from that file. Paths are relative to the tree root, so the
 file can be committed with the tree.
 
 ```
-node tools/evejs-e2e/bin/e2e.js init                  # auto mode, the default
-node tools/evejs-e2e/bin/e2e.js init --mode managed   # the CLI always starts and stops the server
-node tools/evejs-e2e/bin/e2e.js init --mode attach    # you always start the server
-node tools/evejs-e2e/bin/e2e.js init --force          # replace an existing file
+node tools/gridcheck/bin/gridcheck.js init                  # auto mode, the default
+node tools/gridcheck/bin/gridcheck.js init --mode managed   # the CLI always starts and stops the server
+node tools/gridcheck/bin/gridcheck.js init --mode attach    # you always start the server
+node tools/gridcheck/bin/gridcheck.js init --force          # replace an existing file
 ```
 
 | Key | What it is | Default |
@@ -24,10 +55,10 @@ node tools/evejs-e2e/bin/e2e.js init --force          # replace an existing file
 | `dataDir` | the generated reference data | `_local/gameStore/data` |
 | `gameStore`, `manifest` | the world and its manifest, beside the data dir | `_local/gameStore/` |
 | `dataRoot`, `logFile` | the server's data root and its log | `_local`, `_local/logs/server.log` |
-| `e2eDir`, `runsDir`, `worldsDir` | the tool's state, runs and saved worlds | `_local/e2e/...` |
-| `scenariosDir` | the tree's own scenarios, committed with it | `tools/e2e-scenarios` |
+| `e2eDir`, `runsDir`, `worldsDir` | the tool's state, runs and saved worlds | `_local/gridcheck/...` |
+| `scenariosDir` | the tree's own scenarios, committed with it | `tools/gridcheck-scenarios` |
 | `handshake` | where the bridge writes its port and token | `_local/agentBridge/bridge.json` |
-| `listeners` | which ports `e2e up` can move, and how | probed |
+| `listeners` | which ports `gridcheck up` can move, and how | probed |
 | `daemons.market` | the market daemon and its database | on if the tree has its source and a database |
 
 The environment wins over the file, as it does for the server: `EVEJS_GAMESTORE_DATA_DIR` moves the
@@ -36,15 +67,31 @@ data dir and the world beside it, `EVEJS_DATA_ROOT` moves the log, and
 file with a mistake stops every command except `init`, `doctor`, `help`, `vendor`, `gui` and
 `agents`, and says what is wrong. `init --dry-run` prints the file it would write without writing it.
 
+## Running from a checkout
+
+A tree always runs its own copy, so the CLI and the bridge inside its server are one version. A
+checkout's CLI hands each command to that copy:
+
+```
+node bin/gridcheck.js --tree F:/EveJS-0.12.9 run smoke-undock   # from anywhere
+cd F:/EveJS-0.12.9/server && node <checkout>/bin/gridcheck.js status   # inside a tree, --tree isn't needed
+```
+
+`npm link` in the checkout puts `gridcheck` on `PATH`, so `gridcheck --tree <tree> <command>`, or `gridcheck <command>`
+inside a tree, works from any shell. `vendor`, `gui` and `setup` read `--tree` themselves and run
+from the checkout. A tree with no copy yet gets the `setup` command to run. `status` and `doctor`
+add a note when the tree's copy isn't the checkout's `HEAD`. Developing the tool itself,
+`GRIDCHECK_TREE=<tree>` runs the checkout's own code against the tree instead.
+
 ## Auto, attach and managed
 
 In **auto** mode, the default, the tool uses the tree's server when it's up and starts its own when
-it isn't. If a server is up, whether you started it with `EVEJS_AGENT_BRIDGE=1` set or `e2e up`
+it isn't. If a server is up, whether you started it with `EVEJS_AGENT_BRIDGE=1` set or `gridcheck up`
 did, a run uses it as attach mode does: the scenario's world isn't restored, and the server stays
 up afterwards. If none is up, a run boots the scenario's world and stops the server at the end, as
 managed mode does. `up` starts a server, and says so when one is already up. `down` stops only a
-server `e2e up` started; it refuses one you started. `world copy`, `world save`, `world build`,
-`up` and `run --world` need the server down. `e2e status` says which case applies now.
+server `gridcheck up` started; it refuses one you started. `world copy`, `world save`, `world build`,
+`up` and `run --world` need the server down. `gridcheck status` says which case applies now.
 
 In **attach** mode you start the server and the tool talks to it. Set `EVEJS_AGENT_BRIDGE=1` in
 the shell that starts it, for example `npm start` in the server folder, or `StartServer.bat`
@@ -54,19 +101,19 @@ and its data dir, so the CLI finds the server wherever its ports are. `login`, `
 refuse. A scenario run uses the live server as it is: the scenario's world isn't restored and the
 server stays up afterwards.
 
-In **managed** mode the CLI runs the server. `e2e up` restores or seeds a world, moves every
+In **managed** mode the CLI runs the server. `gridcheck up` restores or seeds a world, moves every
 listener it can onto the tree's own port block, starts the server in the background and waits
-until a character can log in. `e2e down` stops it cleanly. A run boots its scenario's world and
+until a character can log in. `gridcheck down` stops it cleanly. A run boots its scenario's world and
 stops the server at the end.
 
 A scenario names a saved world, `"world": "fresh"` for a new game store seeded from the
 reference data, or `"recipe": "<name>"` for a world the tool builds ([WORLDS.md](WORLDS.md)).
-`e2e run <scenario> --world <name>` boots another world than the one the scenario names. Every
+`gridcheck run <scenario> --world <name>` boots another world than the one the scenario names. Every
 core scenario uses `fresh` or the `starter` recipe, so they all run in any tree.
 
-## What `e2e doctor` checks
+## What `gridcheck doctor` checks
 
-`e2e doctor` asks the running server (`GET /capabilities` on the bridge) and reads the tree's files
+`gridcheck doctor` asks the running server (`GET /capabilities` on the bridge) and reads the tree's files
 when no server is up. `--offline` always reads the files; `--json` prints the whole report.
 
 - **gateway**: whether the tree's web gateway allows each call the CLI makes, and which command
@@ -76,7 +123,7 @@ when no server is up. `--offline` always reads the files; `--json` prints the wh
   log, on `/tee` and in every watch's `START` line, rather than reporting DIVERGEs that aren't there.
 - **patches**: each optional stock edit in `patches/` as `applied` (its marker comments are in the
   file), `partial` (some are), `detected` (equivalent code without the marker, as in the LU fork),
-  `absent`, or `no-target` (a file it changes isn't in the tree). `e2e patch` applies and reverts
+  `absent`, or `no-target` (a file it changes isn't in the tree). `gridcheck patch` applies and reverts
   them ([PATCHES.md](PATCHES.md)).
 - **plugins**: which are active, and why the rest were skipped.
 - **listeners**: which ports can move. A listener moves when the tree's source reads its
@@ -84,14 +131,16 @@ when no server is up. `--offline` always reads the files; `--json` prints the wh
   port until the `xmpp-port` patch is applied.
 - **session**: with a character logged in, whether its session is one the client view can attach
   to.
-- **loadout**: whether the tree has the stock ship helpers `e2e loadout` builds a ship from.
+- **loadout**: whether the tree has the stock ship helpers `gridcheck loadout` builds a ship from.
   Without a running server it reads each module's exports from its file, without loading it.
 
 ## Stock EveJS's differences
 
-- Stock's logger writes no `[pid N]` tag, so `e2e log` and a watch's log lines can't tell this
-  server's lines from another process's.
-- Stock's slash commands don't say whether they refused. `e2e slash` prints `done (this tree
+- Stock's logger writes no `[pid N]` tag, so `gridcheck log` keeps an untagged line by its timestamp:
+  only lines written since this server's process started (the bridge's handshake records it), or
+  since the last `gridcheck up` with no server up. `--any-pid` shows every line. A watch reads only what
+  the log gains while it runs, so it needs neither.
+- Stock's slash commands don't say whether they refused. `gridcheck slash` prints `done (this tree
   doesn't say whether it refused)` until the `slash-success` patch is applied.
 - Stock's NPCs record no decision, so grid rows have no `decision` and a watch reports no
   `DECISION` events until the `last-decision` patch is applied.
@@ -122,13 +171,13 @@ the tree, by logging the test character in and undocking it.
 
 `compat` unpacks the zip outside the repo (`F:/LU/_compat` by default, `--scratch` to change it) and
 reuses the unpacked tree while the zip is unchanged. It builds the zip's reference data from an
-extracted SDE (`--sde`, `EVEJS_E2E_SDE_DIR`, or the one the LU tree's data comes from) and vendors
+extracted SDE (`--sde`, `GRIDCHECK_SDE_DIR`, or the one the LU tree's data comes from) and vendors
 this checkout's HEAD into each tree. Then it runs `init`, `doctor`, `login`, `undock`, `grid`,
 `watch` and `smoke-undock`: on stock in managed and in attach mode, on LU in managed mode on its
 saved world `lowsec-docked`. On stock in auto mode it runs `smoke-undock` with no server up, then
 with a server started by hand, which `down` must refuse to stop and the run must leave up. On stock with the three patches applied it also checks that a
 fresh character's loadout is refused with its missing skills, builds `starter`, and runs the five
-core scenarios on it, the last one with `--reuse` and then again on the server it left up. It drives `e2e gui` through its API against the stock tree: the tree's
+core scenarios on it, the last one with `--reuse` and then again on the server it left up. It drives `gridcheck gui` through its API against the stock tree: the tree's
 summary, its patches, a run's report and frame, and one patch applied and reverted by preview. It
 records the fixtures again and fails if they no longer match the
 committed ones: the encodings exactly, the session and grid by shape. It runs the tests that need a

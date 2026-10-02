@@ -11,18 +11,18 @@
 // tests that need a real tree. On stock with the three patches applied it
 // also refuses a loadout the character hasn't the skills for, builds the
 // starter world and runs the five core scenarios on it (one twice, the
-// second time with --reuse on the server the first left up), and drives e2e gui
+// second time with --reuse on the server the first left up), and drives gridcheck gui
 // through its API against the tree. Writes
 // compat-report.md and exits 1 on any failure.
 //
 // stock  the zip is unpacked once into --scratch (F:/LU/_compat by default,
 //        outside every repo) and reused while the zip is unchanged. Its
 //        reference data is built by the zip's own database creator from an
-//        extracted SDE: --sde, EVEJS_E2E_SDE_DIR, or the one the LU tree's
+//        extracted SDE: --sde, GRIDCHECK_SDE_DIR, or the one the LU tree's
 //        data comes from. Managed mode boots a fresh world; attach mode
 //        starts the server by hand, as a user would, on the tree's port block.
 // lu     managed mode on the saved world lowsec-docked. The tree's vendored
-//        copy (and an e2e.config.json this script wrote) is put back
+//        copy (and a gridcheck.config.json this script wrote) is put back
 //        afterwards unless --keep-lu.
 //
 // Lanes run one after the other: two big servers at once can lose a
@@ -39,10 +39,14 @@ const { runTests } = require("./run");
 const { captureDestiny, captureLive, committedFixtures, compareCaptures } = require("./fixtures/capture");
 
 const REPO_ROOT = path.join(__dirname, "..");
-const REPO_CLI = path.join(REPO_ROOT, "bin", "e2e.js");
+const REPO_CLI = path.join(REPO_ROOT, "bin", "gridcheck.js");
 const DEFAULT_SCRATCH = process.platform === "win32" ? "F:/LU/_compat" : path.join(os.homedir(), "evejs-compat");
 const LU_WORLD = "lowsec-docked";
-const VENDORED_PATHS = ["tools/evejs-e2e", "server/src/_secondary/agentBridge/server.js"];
+// The LU tree's copy and config, with their names from before the rename: a
+// vendor update into a tree that still has those moves them, so the restore
+// puts back whichever the tree has committed.
+const VENDORED_PATHS = ["tools/gridcheck", "tools/evejs-e2e", "server/src/_secondary/agentBridge/server.js"];
+const CONFIG_FILES = ["gridcheck.config.json", "e2e.config.json"];
 
 class CompatError extends Error {}
 
@@ -81,7 +85,7 @@ function cell(text) {
 function writeReport(file, context) {
   const failed = rows.filter((row) => row.result === "FAIL");
   const lines = [
-    "# evejs-e2e compatibility report",
+    "# Gridcheck compatibility report",
     "",
     `${failed.length ? `**red**: ${failed.length} of ${rows.length} checks failed` : `**green**: ${rows.filter((row) => row.result === "pass").length} checks passed`}` +
       `${rows.some((row) => row.result === "skip") ? `, ${rows.filter((row) => row.result === "skip").length} skipped` : ""}.`,
@@ -123,12 +127,12 @@ function git(cwd, args) {
 // The tree's own copy of the CLI, as a person runs it. -> output; throws
 // unless the exit code is `expect` (null: any).
 function cliIn(tree, args, { expect = 0, timeoutMs = 900_000 } = {}) {
-  const env = { ...process.env, EVEJS_E2E_TREE: tree };
-  for (const name of ["EVEJS_AGENT_BRIDGE", "EVEJS_AGENT_BRIDGE_HANDSHAKE", "EVEJS_E2E_PORT_SLOT", "EVEJS_GAMESTORE_DATA_DIR",
+  const env = { ...process.env, GRIDCHECK_TREE: tree };
+  for (const name of ["EVEJS_AGENT_BRIDGE", "EVEJS_AGENT_BRIDGE_HANDSHAKE", "GRIDCHECK_PORT_SLOT", "EVEJS_GAMESTORE_DATA_DIR",
     "EVEJS_DATA_ROOT"]) delete env[name];
-  const result = run(process.execPath, [path.join(tree, "tools", "evejs-e2e", "bin", "e2e.js"), ...args], { cwd: tree, env, timeoutMs });
+  const result = run(process.execPath, [path.join(tree, "tools", "gridcheck", "bin", "gridcheck.js"), ...args], { cwd: tree, env, timeoutMs });
   if (result.code === null || (expect !== null && result.code !== expect)) {
-    throw new CompatError(`e2e ${args.join(" ")} exited ${result.code}${result.error ? ` (${result.error.message})` : ""}:\n` +
+    throw new CompatError(`gridcheck ${args.join(" ")} exited ${result.code}${result.error ? ` (${result.error.message})` : ""}:\n` +
       result.out.split(/\r?\n/).slice(-15).join("\n"));
   }
   return result.out;
@@ -235,7 +239,7 @@ function sdeBuild(tree) {
 function findSde(name, { sde, lu }) {
   const candidates = [];
   if (sde) candidates.push(path.resolve(sde));
-  if (process.env.EVEJS_E2E_SDE_DIR) candidates.push(path.resolve(process.env.EVEJS_E2E_SDE_DIR));
+  if (process.env.GRIDCHECK_SDE_DIR) candidates.push(path.resolve(process.env.GRIDCHECK_SDE_DIR));
   if (lu) {
     candidates.push(path.join(lu, "_local", "sde", name));
     try {
@@ -256,7 +260,7 @@ function buildReferenceData(tree, { sde, lu }) {
   if (!fs.existsSync(target)) {
     const source = findSde(name, { sde, lu });
     if (!source) {
-      throw new CompatError(`no extracted SDE ${name}: pass --sde <dir> or set EVEJS_E2E_SDE_DIR, or run the tree's ` +
+      throw new CompatError(`no extracted SDE ${name}: pass --sde <dir> or set GRIDCHECK_SDE_DIR, or run the tree's ` +
         "tools/DatabaseCreator/CreateDatabase.bat, which downloads it");
     }
     fs.mkdirSync(path.dirname(target), { recursive: true });
@@ -335,7 +339,7 @@ function liveRoundTrips(lane, tree) {
 }
 
 async function compareFixtures(lane, tree, sections) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "evejs-e2e-fixtures-"));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "gridcheck-fixtures-"));
   try {
     const fresh = { destiny: captureDestiny({ tree, out: path.join(dir, "destiny.json") }), live: await captureLive({ tree }) };
     const differences = compareCaptures(committedFixtures(), fresh, { sections });
@@ -518,7 +522,7 @@ async function stockPatchRoundTrip(lane, tree) {
   }
 }
 
-// e2e gui from this checkout, driven through the API its page uses: the tree's
+// gridcheck gui from this checkout, driven through the API its page uses: the tree's
 // summary and patches, a run's report and frame, and one patch applied and
 // reverted by preview, byte for byte.
 async function guiRoundTrip(tree) {
@@ -527,7 +531,7 @@ async function guiRoundTrip(tree) {
   let printed = "";
   try {
     const { base, token } = await new Promise((resolve, reject) => {
-      const timer = setTimeout(() => reject(new CompatError(`e2e gui printed no URL in 30 s:\n${printed}`)), 30_000);
+      const timer = setTimeout(() => reject(new CompatError(`gridcheck gui printed no URL in 30 s:\n${printed}`)), 30_000);
       const take = (chunk) => {
         printed += chunk;
         const match = /(http:\/\/127\.0\.0\.1:\d+)\/gui#token=([0-9a-f]{64})/.exec(printed);
@@ -538,7 +542,7 @@ async function guiRoundTrip(tree) {
       };
       gui.stdout.on("data", take);
       gui.stderr.on("data", take);
-      gui.once("exit", (code) => reject(new CompatError(`e2e gui exited ${code}:\n${printed}`)));
+      gui.once("exit", (code) => reject(new CompatError(`gridcheck gui exited ${code}:\n${printed}`)));
     });
     const call = async (route, body) => {
       const response = await fetch(`${base}${route}`, { method: body ? "POST" : "GET",
@@ -677,7 +681,7 @@ async function stockLane(flags, context) {
 }
 
 function luVendoredClean(tree) {
-  const status = git(tree, ["status", "--porcelain", "--", ...VENDORED_PATHS, "e2e.config.json"]);
+  const status = git(tree, ["status", "--porcelain", "--", ...VENDORED_PATHS, ...CONFIG_FILES]);
   if (status.code !== 0) throw new CompatError(`git status failed in ${tree}: ${status.out}`);
   return status.out.trim();
 }
@@ -693,8 +697,8 @@ async function luLane(flags, context) {
     skip(lane, "all", `the tree has changes to its vendored copy or config; commit or discard them first:\n${dirty}`);
     return;
   }
-  const configFile = path.join(tree, "e2e.config.json");
-  const hadConfig = fs.existsSync(configFile);
+  const configFile = path.join(tree, "gridcheck.config.json");
+  const hadConfig = CONFIG_FILES.some((name) => fs.existsSync(path.join(tree, name)));
   try {
     if (!await check(lane, "vendor this checkout", () => vendorInto(tree))) return;
     if (!hadConfig) await check(lane, "init (managed)", () => lastLine(cliIn(tree, ["init", "--mode", "managed"])));
@@ -703,7 +707,7 @@ async function luLane(flags, context) {
       plugin: "lu", patches: { "xmpp-port": "detected", "last-decision": "detected", "slash-success": "detected" } }));
     await check(lane, "tests against the tree", () => treeTests(tree));
     if (mode !== "managed") {
-      skip(lane, "live checks", `the tree's e2e.config.json is in ${mode} mode`);
+      skip(lane, "live checks", `the tree's gridcheck.config.json is in ${mode} mode`);
       return;
     }
     const worlds = require("../core/worlds").listWorlds(tree).map((row) => row.name);
@@ -724,11 +728,12 @@ async function luLane(flags, context) {
     await check(lane, `run smoke-undock --world ${LU_WORLD} (managed)`, () => runScenario(tree, ["--world", LU_WORLD]));
   } finally {
     if (flags.keepLu) {
-      notes.push(`--keep-lu: ${tree} keeps this checkout's vendored copy${hadConfig ? "" : " and the e2e.config.json compat wrote"}`);
+      notes.push(`--keep-lu: ${tree} keeps this checkout's vendored copy${hadConfig ? "" : " and the gridcheck.config.json compat wrote"}`);
     } else {
-      git(tree, ["checkout", "--", ...VENDORED_PATHS]);
-      git(tree, ["clean", "-fdq", "--", "tools/evejs-e2e"]);
-      if (!hadConfig) fs.rmSync(configFile, { force: true });
+      // Put back what the tree has committed, and remove what the run added.
+      const tracked = git(tree, ["ls-files", "--", ...VENDORED_PATHS, ...CONFIG_FILES]).out.split("\n").filter(Boolean);
+      if (tracked.length) git(tree, ["checkout", "HEAD", "--", ...tracked]);
+      git(tree, ["clean", "-fdq", "--", ...VENDORED_PATHS, ...CONFIG_FILES]);
       const left = luVendoredClean(tree);
       if (left) notes.push(`restoring ${tree} left changes: ${left}`);
       else notes.push(`${tree}'s vendored copy is back as committed`);
@@ -772,7 +777,7 @@ async function main(argv = process.argv.slice(2)) {
   const dirty = git(REPO_ROOT, ["status", "--porcelain"]).out.trim();
   const context = { startedAtMs: Date.now(), commit: `${head}${dirty ? " plus uncommitted changes (trees get HEAD; the tests ran on the working files)" : ""}`, trees: [] };
   if (dirty) notes.push("the checkout has uncommitted changes: the trees ran HEAD, the tests the working files");
-  process.stdout.write(`compat: evejs-e2e ${context.commit}\n`);
+  process.stdout.write(`compat: Gridcheck ${context.commit}\n`);
   await check("repo", "npm test (no tree)", () => treeTests(null));
   if (!flags.only || flags.only === "stock") await stockLane(flags, context);
   if (!flags.only || flags.only === "lu") await luLane(flags, context);

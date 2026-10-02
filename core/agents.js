@@ -3,23 +3,37 @@
 // The coding agents on this machine that can run the tool's MCP server, and
 // their config for it. Claude Code reads the tree's .mcp.json, so its entry
 // names the copy relative to the tree. Codex reads one config.toml for every
-// folder, so its entry names this tree's copy by absolute path. `e2e agents`
-// reports, `e2e agents setup` writes, and the GUI's Install tab runs that
+// folder, so its entry names this tree's copy by absolute path. `gridcheck agents`
+// reports, `gridcheck agents setup` writes, and the GUI's Install tab runs that
 // command (core/gui.js).
 //
 // A setup only adds. It never edits another server's entry or reformats the
-// Codex file. The one entry it replaces is a Codex `e2e` whose mcp.js no
+// Codex file. The one entry it replaces is a Codex `gridcheck` whose mcp.js no
 // longer exists. Guide: docs/GUIDE.md "Setting up agents".
 
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 
-const AGENT_IDS = Object.freeze(["claude", "codex"]);
-const AGENT_NAMES = Object.freeze({ claude: "Claude Code", codex: "Codex" });
-const MCP_IN_TREE = Object.freeze(["tools", "evejs-e2e", "bin", "mcp.js"]);
-const SERVER_NAME = "e2e";
-const CLAUDE_FALLBACK_NAME = "evejs-e2e";
+// cli is any other agent: it gets a pointer to docs/CLI.md in the tree's
+// AGENTS.md (or CLAUDE.md), not an MCP server, and is never set up unasked.
+const AGENT_IDS = Object.freeze(["claude", "codex", "cli"]);
+const AGENT_NAMES = Object.freeze({ claude: "Claude Code", codex: "Codex", cli: "Other agents (CLI)" });
+const CLI_GUIDE = "tools/gridcheck/docs/CLI.md";
+const CLI_MARKER = "gridcheck:cli";
+const CLI_POINTER = Object.freeze([
+  `<!-- ${CLI_MARKER} -->`,
+  "**In-game checks:** to verify or debug anything a player would see on grid (ships, NPCs, combat, slash",
+  `commands) without the EVE client, follow \`${CLI_GUIDE}\`.`,
+  `<!-- /${CLI_MARKER} -->`,
+]);
+const agentList = () => `${AGENT_IDS.slice(0, -1).join(", ")} and ${AGENT_IDS.at(-1)}`;
+const MCP_IN_TREE = Object.freeze(["tools", "gridcheck", "bin", "mcp.js"]);
+const SERVER_NAME = "gridcheck";
+const CLAUDE_FALLBACK_NAME = "gridcheck-tool";
+// Before the rename the copy was tools/evejs-e2e. An entry that runs the old
+// copy's mcp.js is this tree's, and setup replaces it.
+const LEGACY_MCP_IN_TREE = "tools/evejs-e2e/bin/mcp.js";
 // A scenario run blocks its tool call for minutes; Codex's default cuts it off.
 const CODEX_TOOL_TIMEOUT_SEC = 600;
 
@@ -89,7 +103,8 @@ function detectAgents(given) {
     codexBin && `codex on PATH (${slashed(codexBin)})`,
     io.exists(home) && (String(io.env.CODEX_HOME || "").trim() ? `CODEX_HOME (${slashed(home)})` : "~/.codex"),
   ].filter(Boolean);
-  return { claude: { installed: claude.length > 0, evidence: claude }, codex: { installed: codex.length > 0, evidence: codex } };
+  return { claude: { installed: claude.length > 0, evidence: claude }, codex: { installed: codex.length > 0, evidence: codex },
+    cli: { installed: false, evidence: [] } };
 }
 
 // ---------- Claude Code: the tree's .mcp.json ----------
@@ -115,16 +130,28 @@ function planClaude(treeRoot, given) {
     /mcp\.js$/i.test(arg) && samePath(path.resolve(treeRoot, arg), mcpPath(treeRoot), io.platform));
   const found = Object.entries(servers).find(([, entry]) => ours(entry));
   if (found) return { agent: "claude", file, change: "none", serverName: found[0] };
-  const serverName = !servers[SERVER_NAME] ? SERVER_NAME : !servers[CLAUDE_FALLBACK_NAME] ? CLAUDE_FALLBACK_NAME : null;
+  const legacyPath = path.join(treeRoot, ...LEGACY_MCP_IN_TREE.split("/"));
+  const legacy = Object.keys(servers).filter((key) => {
+    const entry = servers[key];
+    return entry && Array.isArray(entry.args) && entry.args.some((arg) => typeof arg === "string" &&
+      samePath(path.resolve(treeRoot, arg), legacyPath, io.platform));
+  });
+  const kept = Object.fromEntries(Object.entries(servers).filter(([key]) => !legacy.includes(key)));
+  const serverName = !kept[SERVER_NAME] ? SERVER_NAME : !kept[CLAUDE_FALLBACK_NAME] ? CLAUDE_FALLBACK_NAME : null;
   if (!serverName) {
     throw new AgentsError(`${slashed(file)} already has servers named ${SERVER_NAME} and ${CLAUDE_FALLBACK_NAME} that aren't ` +
       "this tree's; rename one first");
   }
   const entry = { type: "stdio", command: "node", args: [MCP_IN_TREE.join("/")] };
   const eol = text && text.includes("\r\n") ? "\r\n" : "\n";
-  const after = `${JSON.stringify({ ...(json || {}), mcpServers: { ...servers, [serverName]: entry } }, null, 2)}\n`.replace(/\n/g, eol);
-  return { agent: "claude", file, change: "add", serverName, before: text, after,
-    added: JSON.stringify({ [serverName]: entry }, null, 2).split("\n").slice(1, -1) };
+  const after = `${JSON.stringify({ ...(json || {}), mcpServers: { ...kept, [serverName]: entry } }, null, 2)}\n`.replace(/\n/g, eol);
+  const added = JSON.stringify({ [serverName]: entry }, null, 2).split("\n").slice(1, -1);
+  if (legacy.length) {
+    const replaced = JSON.stringify(Object.fromEntries(legacy.map((key) => [key, servers[key]])), null, 2).split("\n").slice(1, -1);
+    return { agent: "claude", file, change: "replace", serverName, before: text, after, added, replaced,
+      gone: LEGACY_MCP_IN_TREE };
+  }
+  return { agent: "claude", file, change: "add", serverName, before: text, after, added };
 }
 
 // ---------- Codex: config.toml ----------
@@ -217,36 +244,69 @@ function planCodex(treeRoot, given) {
   if (mine) return { agent: "codex", file, change: "none", serverName: mine.name };
 
   const eol = text && text.includes("\r\n") ? "\r\n" : "\n";
-  const current = servers.find((server) => server.name === SERVER_NAME);
-  const gone = current && current.scripts.length && current.scripts.every((script) => path.isAbsolute(script) && !io.exists(script))
-    ? current.scripts[0] : null;
-  if (gone) {
+  const freeName = (others) => {
+    if (!others.has(SERVER_NAME)) return SERVER_NAME;
+    const base = `${SERVER_NAME}-${slug(path.basename(treeRoot))}`;
+    let name = base;
+    for (let n = 2; others.has(name); n += 1) name = `${base}-${n}`;
+    return name;
+  };
+  // Replaced in place: a gridcheck entry whose script is gone, or this tree's entry from before the rename.
+  const legacyPath = path.join(treeRoot, ...LEGACY_MCP_IN_TREE.split("/"));
+  const named = servers.find((server) => server.name === SERVER_NAME && server.scripts.length &&
+    server.scripts.every((script) => path.isAbsolute(script) && !io.exists(script)));
+  const legacy = servers.find((server) => server.scripts.some((script) => path.isAbsolute(script) &&
+    samePath(script, legacyPath, io.platform)));
+  const current = named || legacy;
+  if (current) {
+    const gone = current.scripts[0];
+    const name = current === named ? SERVER_NAME : freeName(new Set([...taken].filter((one) => one !== current.name)));
     // Keep the blank lines that separate it from the next table.
     let end = current.end;
     while (end > current.start + 1 && !lines[end - 1].trim()) end -= 1;
-    const block = codexBlock(SERVER_NAME, treeRoot);
+    const block = codexBlock(name, treeRoot);
     const replaced = lines.slice(current.start, end).map((line) => line.replace(/\r?\n$/, ""));
     const lastHadEnding = /\n$/.test(lines[end - 1]);
     const inserted = block.map((line, index) => (index < block.length - 1 || lastHadEnding ? `${line}${eol}` : line));
     const after = [...lines.slice(0, current.start), ...inserted, ...lines.slice(end)].join("");
-    return { agent: "codex", file, change: "replace", serverName: SERVER_NAME, before: text, after, added: block, replaced, gone };
+    return { agent: "codex", file, change: "replace", serverName: name, before: text, after, added: block, replaced, gone };
   }
-  let serverName = SERVER_NAME;
-  if (taken.has(serverName)) {
-    const base = `${SERVER_NAME}-${slug(path.basename(treeRoot))}`;
-    serverName = base;
-    for (let n = 2; taken.has(serverName); n += 1) serverName = `${base}-${n}`;
-  }
+  const serverName = freeName(taken);
   const block = codexBlock(serverName, treeRoot);
   const before = text || "";
   const after = `${before}${before && !before.endsWith("\n") ? eol : ""}${before.trim() ? eol : ""}${block.join(eol)}${eol}`;
   return { agent: "codex", file, change: "add", serverName, before: text, after, added: block };
 }
 
+// ---------- other agents: a pointer in AGENTS.md or CLAUDE.md ----------
+
+// AGENTS.md when the tree has one, else an existing CLAUDE.md, else a new AGENTS.md.
+function planCli(treeRoot, given) {
+  const io = ioFrom(given);
+  const agentsFile = path.join(treeRoot, "AGENTS.md");
+  const claudeFile = path.join(treeRoot, "CLAUDE.md");
+  const file = !io.exists(agentsFile) && io.exists(claudeFile) ? claudeFile : agentsFile;
+  const text = io.exists(file) ? io.readFile(file) : null;
+  const serverName = `a pointer to ${CLI_GUIDE}`;
+  const eol = (text || "").includes("\r\n") ? "\r\n" : "\n";
+  // A pointer from before the rename names the old copy's path: it is replaced in place.
+  const legacy = text === null ? null : /<!-- evejs-e2e:cli -->[\s\S]*?<!-- \/evejs-e2e:cli -->/.exec(text);
+  if (legacy && !text.includes(CLI_MARKER)) {
+    const after = text.slice(0, legacy.index) + CLI_POINTER.join(eol) + text.slice(legacy.index + legacy[0].length);
+    return { agent: "cli", file, change: "replace", serverName, before: text, after, added: [...CLI_POINTER],
+      replaced: legacy[0].split(/\r?\n/) };
+  }
+  if (text !== null && text.includes(CLI_MARKER)) return { agent: "cli", file, change: "none", serverName };
+  const before = text || "";
+  const after = `${before}${before && !before.endsWith("\n") ? eol : ""}${before.trim() ? eol : ""}${CLI_POINTER.join(eol)}${eol}`;
+  return { agent: "cli", file, change: "add", serverName, before: text, after, added: [...CLI_POINTER] };
+}
+
 function planFor(id, treeRoot, io) {
   if (id === "claude") return planClaude(treeRoot, io);
   if (id === "codex") return planCodex(treeRoot, io);
-  throw new AgentsError(`no agent ${id}; the agents are ${AGENT_IDS.join(" and ")}`);
+  if (id === "cli") return planCli(treeRoot, io);
+  throw new AgentsError(`no agent ${id}; the agents are ${agentList()}`);
 }
 
 // One row per agent: is it installed, and does it already run this tree's server?
@@ -268,7 +328,7 @@ function agentStatus(treeRoot, given) {
 
 function writeAtomic(file, text) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
-  const temporary = `${file}.e2e-${process.pid}.tmp`;
+  const temporary = `${file}.gridcheck-${process.pid}.tmp`;
   fs.writeFileSync(temporary, text);
   try {
     fs.renameSync(temporary, file);
@@ -283,7 +343,7 @@ function writeAtomic(file, text) {
 function setupAgents(treeRoot, ids = null, { dryRun = false, io: given } = {}) {
   const io = ioFrom(given);
   const found = detectAgents(io);
-  for (const id of ids || []) if (!AGENT_IDS.includes(id)) throw new AgentsError(`no agent ${id}; the agents are ${AGENT_IDS.join(" and ")}`);
+  for (const id of ids || []) if (!AGENT_IDS.includes(id)) throw new AgentsError(`no agent ${id}; the agents are ${agentList()}`);
   const chosen = ids && ids.length ? [...new Set(ids)] : AGENT_IDS.filter((id) => found[id].installed);
   // Plan everything before writing anything, so one agent's problem changes nothing.
   const plans = chosen.map((id) => ({ id, name: AGENT_NAMES[id], installed: found[id].installed, plan: planFor(id, treeRoot, io) }));
@@ -298,12 +358,15 @@ module.exports = {
   AGENT_IDS,
   AGENT_NAMES,
   AgentsError,
+  CLI_GUIDE,
+  CLI_POINTER,
   CODEX_TOOL_TIMEOUT_SEC,
   SERVER_NAME,
   agentStatus,
   detectAgents,
   headerKeys,
   planClaude,
+  planCli,
   planCodex,
   setupAgents,
 };

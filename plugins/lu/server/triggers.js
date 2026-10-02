@@ -1,6 +1,6 @@
 "use strict";
 
-// On-demand triggers for `e2e trigger`: put a feature in motion in one call
+// On-demand triggers for `gridcheck trigger`: put a feature in motion in one call
 // instead of teleporting around and hoping. Each trigger calls the entry point
 // the feature itself uses, so every gate still applies, and answers with the
 // flight or hunt ID it touched, which the watch prints beside every line.
@@ -77,7 +77,7 @@ function createAgentBridgeTriggers({
     const id = toPositiveInt(characterID);
     if (!id) throw new TriggerRefused("A positive characterID is required.", 400);
     const session = findSession(id);
-    if (!session) throw new TriggerRefused("That character has no live session. Log it in first (e2e login).");
+    if (!session) throw new TriggerRefused("That character has no live session. Log it in first (gridcheck login).");
     return session;
   }
 
@@ -89,7 +89,7 @@ function createAgentBridgeTriggers({
   function shipOf(session) {
     const scene = session._space ? space.getSceneForSession(session) : null;
     const ship = scene && typeof scene.getShipEntityForSession === "function" ? scene.getShipEntityForSession(session) : null;
-    if (!ship) throw new TriggerRefused("The character is docked or has no ship in space. Undock first (e2e undock).");
+    if (!ship) throw new TriggerRefused("The character is docked or has no ship in space. Undock first (gridcheck undock).");
     return { scene, ship, systemID: systemOf(session) };
   }
 
@@ -186,13 +186,13 @@ function createAgentBridgeTriggers({
       }
       if (!leader) {
         throw new TriggerRefused(`No materialized pirate flight in system ${systemID}. ` +
-          "Send one (e2e trigger scout), then stand it up (e2e trigger materialize <flightID>).");
+          "Send one (gridcheck trigger scout), then stand it up (gridcheck trigger materialize <flightID>).");
       }
       if (Number(leader.currentSystemID) !== systemID) {
         throw new TriggerRefused(`${leader.flightID} is in system ${leader.currentSystemID}, not yours (${systemID}).`);
       }
       const observer = t.entities(leader).sort((a, b) => distance(a.position, ship.position) - distance(b.position, ship.position))[0];
-      if (!observer) throw new TriggerRefused(`${leader.flightID} has no hulls on this system yet (e2e trigger materialize ${leader.flightID}).`);
+      if (!observer) throw new TriggerRefused(`${leader.flightID} has no hulls on this system yet (gridcheck trigger materialize ${leader.flightID}).`);
       const controller = t.registry.getControllerByEntityID(observer.itemID);
       if (!controller) throw new TriggerRefused(`${leader.flightID}'s ship has no NPC controller.`);
       let unseen = null;

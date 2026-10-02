@@ -3,19 +3,40 @@
 
 // Headless observer for end-to-end grid checks: log a character in through
 // the web gateway, undock it, run slash commands on its session and read its
-// grid, with no EVE client. `e2e help` lists the commands, the plugins'
+// grid, with no EVE client. `gridcheck help` lists the commands, the plugins'
 // included (core/plugins.js). Guide: docs/GUIDE.md.
 
-// `e2e vendor` loads core/vendor.js and nothing else: a copy edited by hand
+// `gridcheck vendor` loads core/vendor.js and nothing else: a copy edited by hand
 // may not load, and the check is what has to say which files changed.
 if (require.main === module && process.argv[2] === "vendor") {
   process.exitCode = require("../core/vendor").main(process.argv.slice(3));
   return;
 }
-// `e2e gui` manages trees other than this copy's, so it reads no tree config here.
+// From a checkout, --tree (or a working directory inside a tree) runs the
+// tree's own copy, so the CLI and the bridge in its server are one version.
+if (require.main === module) {
+  const launcher = require("../core/launcher");
+  const ownRoot = require("node:path").resolve(__dirname, "..");
+  const plan = launcher.planLaunch({ argv: process.argv.slice(2), ownRoot });
+  const code = launcher.launch(plan, { ownRoot });
+  if (code !== null) {
+    process.exitCode = code;
+    return;
+  }
+  process.argv = [...process.argv.slice(0, 2), ...plan.argv];
+}
+// `gridcheck setup` installs into a tree that may have no copy or config yet.
+if (require.main === module && process.argv[2] === "setup") {
+  require("../core/setup").main(process.argv.slice(3)).then((code) => { process.exitCode = code; }, (error) => {
+    console.error(`gridcheck: ${error.stack || error.message}`);
+    process.exitCode = 1;
+  });
+  return;
+}
+// `gridcheck gui` manages trees other than this copy's, so it reads no tree config here.
 if (require.main === module && process.argv[2] === "gui") {
   require("../core/gui").main(process.argv.slice(3)).then((code) => { process.exitCode = code; }, (error) => {
-    console.error(`e2e: ${error.stack || error.message}`);
+    console.error(`gridcheck: ${error.stack || error.message}`);
     process.exitCode = 1;
   });
   return;
@@ -45,7 +66,7 @@ const agentTools = require("../core/agents");
 
 const REPO_ROOT = DEFAULT_TREE_ROOT;
 const REGISTRY = defaultRegistry();
-// Every path below is the tree's e2e.config.json (core/treeConfig.js).
+// Every path below is the tree's gridcheck.config.json (core/treeConfig.js).
 const CONFIG = treeConfig.defaultTreeConfig();
 const E2E_DIR = CONFIG.e2eDir;
 const RUNS_DIR = CONFIG.runsDir;
@@ -70,10 +91,36 @@ const MANAGED = MODE === "managed";
 const AUTO = MODE === "auto";
 
 const BOOLEAN_FLAGS = new Set(["all", "json", "any-pid", "force", "fresh", "no-market", "no-log", "help",
-  "check", "keep-up", "reuse", "positions", "once", "serve", "offline", "dry-run", "profile", "perf", "now",
+  "check", "keep-up", "reuse", "positions", "once", "serve", "offline", "dry-run", "profile", "perf", "now", "detach", "mcp", "save",
   ...REGISTRY.booleanFlags]);
 
 class CliError extends Error {}
+
+// Up to `limit` candidates closest to word: those it starts or contains
+// first, then those a few edits away.
+function closest(word, candidates, limit = 3) {
+  const wanted = String(word || "").toLowerCase();
+  if (!wanted) return [];
+  const distance = (a, b) => {
+    let row = Array.from({ length: b.length + 1 }, (_value, index) => index);
+    for (let i = 1; i <= a.length; i += 1) {
+      const next = [i];
+      for (let j = 1; j <= b.length; j += 1) next.push(Math.min(row[j] + 1, next[j - 1] + 1, row[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1)));
+      row = next;
+    }
+    return row[b.length];
+  };
+  const scored = [];
+  for (const candidate of new Set(candidates)) {
+    const text = String(candidate).toLowerCase();
+    const score = text.startsWith(wanted) ? 0 : text.includes(wanted) ? 1 : distance(wanted, text) + 1;
+    if (score <= Math.max(2, Math.floor(wanted.length / 3) + 1)) scored.push({ candidate, score });
+  }
+  return scored.sort((a, b) => a.score - b.score || String(a.candidate).localeCompare(String(b.candidate))).slice(0, limit)
+    .map((row) => row.candidate);
+}
+
+const didYouMean = (names) => (names.length ? ` Did you mean ${names.map((name) => `\`${name}\``).join(", ")}?` : "");
 
 function parseArgs(argv) {
   const positionals = [];
@@ -147,29 +194,29 @@ function serverLogPath(handshake = readHandshake()) {
   return (handshake && handshake.logFile) || CONFIG.logFile;
 }
 
-// The lifecycle commands belong to managed and auto mode (e2e.config.json mode).
+// The lifecycle commands belong to managed and auto mode (gridcheck.config.json mode).
 function requireManaged(command) {
   if (MODE !== "attach") return;
   throw new CliError(
-    `\`e2e ${command}\` needs auto or managed mode; this tree is in attach mode (${relativePath(CONFIG.file)}). ` +
+    `\`gridcheck ${command}\` needs auto or managed mode; this tree is in attach mode (${relativePath(CONFIG.file)}). ` +
     "Start the server yourself with EVEJS_AGENT_BRIDGE=1 set, or let the CLI start one when none is up: " +
-    "`e2e init --mode auto --force`.",
+    "`gridcheck init --mode auto --force`.",
   );
 }
 
-// What `e2e up` started: server and market pids, the port block, boot time.
+// What `gridcheck up` started: server and market pids, the port block, boot time.
 function readRun() {
   return readJSON(RUN_PATH);
 }
 
 
-// A run `e2e down` stopped is over, even when Windows has since handed its
+// A run `gridcheck down` stopped is over, even when Windows has since handed its
 // pid to another process.
 function runLive(run) {
   return Boolean(run && !run.stoppedAtMs && pidAlive(run.pid));
 }
 
-// A live server that `e2e up` didn't start: one you started with
+// A live server that `gridcheck up` didn't start: one you started with
 // EVEJS_AGENT_BRIDGE=1 set. Auto mode attaches to it and never stops it.
 function startedElsewhere(handshake = readHandshake()) {
   if (!handshake) return null;
@@ -214,7 +261,14 @@ async function requestJSON(url, { method = "GET", headers = {}, body, timeoutMs 
     });
   } catch (error) {
     const cause = error && error.cause && error.cause.code ? error.cause.code : error.message;
-    throw new CliError(`${method} ${url} failed: ${cause}`);
+    const next = cause === "ECONNREFUSED" || cause === "ECONNRESET"
+      ? "Nothing answered there, so the server may have stopped or still be booting. `gridcheck status` says whether it's up."
+      : error && error.name === "TimeoutError"
+        ? `It didn't answer within ${Math.round(timeoutMs / 1000)} s. \`gridcheck log\` shows what the server is doing.`
+        : "`gridcheck status` says whether the server is up.";
+    const failure = new CliError(`${method} ${url} failed: ${cause}. ${next}`);
+    failure.transport = true;
+    throw failure;
   }
   const text = await response.text();
   let json;
@@ -237,7 +291,9 @@ async function gateway(method, route, body) {
     // Gateway errors are { ok: false, error: "<CODE>", message }.
     const code = typeof json.error === "string" ? json.error : `HTTP ${status}`;
     const message = json.message || json.raw || "";
-    throw new CliError(`gateway ${route}: ${code} ${message}`.trim());
+    const next = status === 401 || status === 403
+      ? " The gateway refused this session; if the server restarted since you logged in, `gridcheck login` again." : "";
+    throw new CliError(`gateway ${route}: ${code} ${message}`.trim() + next);
   }
   return json;
 }
@@ -247,8 +303,8 @@ function requireHandshake() {
   if (!handshake) {
     throw new CliError(
       `no live agent bridge (${relativePath(BRIDGE_HANDSHAKE_PATH)}). ` +
-      (MANAGED ? "Start the server with `e2e up`."
-        : AUTO ? "Start one with `e2e up`, or start the tree's server yourself with EVEJS_AGENT_BRIDGE=1 set (auto mode attaches to either)."
+      (MANAGED ? "Start the server with `gridcheck up`."
+        : AUTO ? "Start one with `gridcheck up`, or start the tree's server yourself with EVEJS_AGENT_BRIDGE=1 set (auto mode attaches to either)."
           : "Start the tree's server with EVEJS_AGENT_BRIDGE=1 set (attach mode)."),
     );
   }
@@ -266,14 +322,24 @@ async function callBridge(handshake, method, route, body) {
     headers: { authorization: `Bearer ${handshake.token}` },
   });
   if (status >= 400 || json.ok === false) {
-    throw new CliError(`bridge ${route}: ${json.error || json.message || `HTTP ${status}`}`);
+    throw new CliError(`bridge ${route}: ${json.error || json.message || `HTTP ${status}`}${bridgeNext(status, route)}`);
   }
   return json;
 }
 
+// The next step for a bridge refusal the bridge doesn't explain itself.
+function bridgeNext(status, route) {
+  if (status === 404) {
+    return `. This server's bridge has no ${route}: it loaded an older copy of the tool. Restart the server (\`gridcheck down\`, ` +
+      "then `gridcheck up`, or restart the one you started) so it loads this copy.";
+  }
+  if (status === 401) return ". The bridge refused the token: the handshake is from another server. `gridcheck status` says which is up.";
+  return "";
+}
+
 function requireLogin(state) {
   if (!state.characterID || !state.bridgeSessionID) {
-    throw new CliError("no logged-in character. Run `e2e login` first.");
+    throw new CliError("no logged-in character. Run `gridcheck login` first.");
   }
   return state;
 }
@@ -435,7 +501,7 @@ async function runSlash(command) {
   const before = await currentSystemID(state);
   const reply = await bridge("POST", "/slash", { characterID: state.characterID, command });
   // success null: the tree's command doesn't say whether it refused (stock
-  // EveJS; e2e patch apply slash-success makes the commands this tool drives say).
+  // EveJS; gridcheck patch apply slash-success makes the commands this tool drives say).
   const verdict = !reply.handled ? "not a command" : reply.success === null || reply.success === undefined
     ? "done (this tree doesn't say whether it refused)" : reply.success ? "ok" : "refused";
   const text = `${command} -> ${verdict}${reply.message ? `\n${reply.message}` : ""}`;
@@ -644,7 +710,7 @@ async function cmdWatch(flags) {
 
   const watch = await openWatch(state, handshake, {
     forSeconds, everySeconds, offGridEverySeconds, client, divergeMeters, perfEverySeconds,
-    // Positions feed the viewer (e2e view); a run always records them.
+    // Positions feed the viewer (gridcheck view); a run always records them.
     positions: Boolean(flags.positions),
     log: !flags["no-log"],
     grep: flags.grep,
@@ -669,7 +735,8 @@ function solarSystemTable() {
   if (!solarSystems) {
     const table = readJSON(SOLAR_SYSTEMS_PATH);
     if (!table || !Array.isArray(table.solarSystems)) {
-      throw new CliError(`no static solar system table at ${relativePath(SOLAR_SYSTEMS_PATH)}`);
+      throw new CliError(`no static solar system table at ${relativePath(SOLAR_SYSTEMS_PATH)}: the tree's reference data ` +
+        "is missing or elsewhere. `gridcheck doctor` checks the data dir, and the README's Quick start builds it.");
     }
     solarSystems = new Map(table.solarSystems.map((row) => [row.solarSystemID, row]));
   }
@@ -683,7 +750,8 @@ function resolveSystemID(text) {
   for (const row of solarSystemTable().values()) {
     if (String(row.solarSystemName).toLowerCase() === wanted) return row.solarSystemID;
   }
-  throw new CliError(`no solar system named ${text}`);
+  const names = [...solarSystemTable().values()].map((row) => String(row.solarSystemName));
+  throw new CliError(`no solar system named ${text}.${didYouMean(closest(text, names))} A system ID works too.`);
 }
 
 // The first plugin handler of a core command whose flags this call passes, if any.
@@ -694,7 +762,7 @@ function pluginHandler(command, flags) {
 // Stock /tr takes a system ID and lands on the system's first stargate.
 // A plugin may take the command over for its own flags (registry.handlers).
 async function cmdTeleport(positionals, flags) {
-  if (!positionals[0]) throw new CliError("usage: e2e teleport <system name|ID>");
+  if (!positionals[0]) throw new CliError("usage: gridcheck teleport <system name|ID>");
   const handler = pluginHandler("teleport", flags);
   if (handler) return handler.run(positionals, flags, pluginIO());
   const systemID = resolveSystemID(positionals.join(" "));
@@ -703,7 +771,7 @@ async function cmdTeleport(positionals, flags) {
 
 // ---------- loadout ----------
 
-// e2e loadout Tristan --modules "Light Neutron Blaster II x2, 1MN Afterburner II" --drones "Hobgoblin II x5"
+// gridcheck loadout Tristan --modules "Light Neutron Blaster II x2, 1MN Afterburner II" --drones "Hobgoblin II x5"
 // or --file <loadout.json>, or --spec '<json>' (what the MCP tool passes).
 function loadoutFromArgs(positionals, flags) {
   let raw;
@@ -743,7 +811,7 @@ async function runLoadout(loadout, { json = false } = {}) {
     headers: { authorization: `Bearer ${handshake.token}` },
     body: { characterID: state.characterID, ...loadoutTools.loadoutBody(loadout) },
   });
-  if (status === 404) throw new CliError("this tree's agent bridge has no /loadout; its server runs an older evejs-e2e copy");
+  if (status === 404) throw new CliError(`bridge /loadout: HTTP 404${bridgeNext(404, "/loadout")}`);
   const text = json ? JSON.stringify(reply, null, 2) : loadoutTools.formatLoadoutReply(reply);
   console.log(text);
   if (!reply.ok) process.exitCode = 2;
@@ -830,7 +898,7 @@ function viewerURL(port, token, runID) {
 async function cmdView(positionals, flags) {
   const runID = positionals[0] ? String(positionals[0]).replace(/[^A-Za-z0-9._-]/g, "_") : null;
   if (runID && !fs.existsSync(path.join(RUNS_DIR, runID, "timeline.jsonl"))) {
-    throw new CliError(`no timeline for run ${runID} in ${relativePath(RUNS_DIR)}`);
+    throw new CliError(`no timeline for run ${runID} in ${relativePath(RUNS_DIR)}. \`gridcheck report\` lists the runs.`);
   }
   const handshake = flags.serve ? null : readHandshake();
   if (handshake && await httpOK(`http://${handshake.host}:${handshake.port}/viewer`)) {
@@ -847,11 +915,11 @@ async function cmdView(positionals, flags) {
     routes: {
       handlePublic: viewer.handlePublic,
       handle: (method, route, query) => (route.startsWith("/viewer/") ? viewer.handle(method, route, query)
-        : { statusCode: 404, body: { ok: false, error: "this viewer serves runs only; `e2e up` for live calls" } }),
+        : { statusCode: 404, body: { ok: false, error: "this viewer serves runs only; `gridcheck up` for live calls" } }),
     },
     port,
     handshakePath: path.join(E2E_DIR, "viewer.json"),
-    serviceName: "e2e-viewer",
+    serviceName: "gridcheck-viewer",
   });
   const boundPort = await server.start();
   console.log(`viewer (served by this CLI${flags.serve ? "" : "; no server of this tree serves one"}). Ctrl-C stops it:\n` +
@@ -910,7 +978,10 @@ function loadScenarioOrFail(name, { anyWorld = false } = {}) {
     return scenarioTools.loadScenario(name, { worldExists: anyWorld ? () => true : savedWorldExists, resolveSystemID,
       recipeExists: (recipe) => recipeTools.recipeExists(recipe), registry: REGISTRY });
   } catch (error) {
-    throw new CliError(error.message);
+    if (!/no such scenario file/.test(error.message)) throw new CliError(error.message);
+    const names = scenarioTools.listScenarios({ registry: REGISTRY }).map((row) => row.name);
+    throw new CliError(`${error.message}.${didYouMean(closest(path.basename(String(name), ".json"), names))} ` +
+      "`gridcheck run` lists the scenarios, and `gridcheck scenario new <name>` writes one.");
   }
 }
 
@@ -933,7 +1004,7 @@ async function runScenarioStep(step, bindings = {}) {
   throw new CliError(`no such step: ${step.type}`);
 }
 
-// A scenario's `up` as the flags `e2e up` takes.
+// A scenario's `up` as the flags `gridcheck up` takes.
 function upFlagsFor(up) {
   const flags = {
     "no-market": up.market ? undefined : true,
@@ -984,7 +1055,7 @@ function gitCommit() {
 // result.json beside the watch's timeline.jsonl. Exit 1 when an expectation
 // is missing, 2 when the run could not finish.
 // --reuse keeps the server a run booted, so the next run skips the boot (16 s
-// on stock, about 50 s on LU). Only a server `e2e up` started on the
+// on stock, about 50 s on LU). Only a server `gridcheck up` started on the
 // scenario's recipe world, built from the current recipe, is reused; anything
 // else is stopped and booted again. Returns why it can't be reused, or null.
 function reuseBlocker(run, recipe, upKey) {
@@ -1075,6 +1146,66 @@ function describeScenarioRow(row) {
     timeout: raw.until && typeof raw.until.timeout === "number" ? raw.until.timeout : null, expect, problem };
 }
 
+// The tree's runs as the agents read them (core/runs.js), naming CLI commands.
+// scenario new: a draft (or with --save, a tree scenario) to edit, checked as written.
+function cmdScenario(positionals, flags) {
+  const [sub, name] = positionals;
+  if (sub !== "new") throw new CliError("usage: gridcheck scenario new <name> [--from <scenario>] [--save] [--force]");
+  let written;
+  try {
+    written = scenarioTools.newScenario(name, { from: flags.from ? String(flags.from) : null, save: Boolean(flags.save),
+      force: Boolean(flags.force), registry: REGISTRY });
+  } catch (error) {
+    throw new CliError(error.message);
+  }
+  console.log(`wrote ${relativePath(written.file)}${written.from ? ` from ${relativePath(written.from)}` : " from the template"}`);
+  try {
+    loadScenarioOrFail(written.file, { anyWorld: true });
+    console.log("it checks out as written.");
+  } catch (error) {
+    console.log(`it doesn't check out yet:\n${error.message}`);
+  }
+  console.log(`Edit it, then \`gridcheck run ${name} --check\` to check it and \`gridcheck run ${name}\` to run it.` +
+    (flags.save ? "" : ` It's a draft; \`gridcheck scenario new ${name} --from ${relativePath(written.file)} --save\` copies it to ` +
+      `${relativePath(scenarioTools.TREE_SCENARIO_DIR)}/ to commit with the feature.`));
+}
+
+function cliRuns() {
+  return require("../core/runs").createRuns({ treeRoot: REPO_ROOT, runsDir: RUNS_DIR, e2eDir: E2E_DIR, surface: "cli" });
+}
+
+// run --detach: the same run in a background process, its console in a file.
+function detachRun(file, scenario, flags) {
+  const runID = flags.run ? String(flags.run).replace(/[^A-Za-z0-9._-]/g, "_") : `${runStamp(Date.now())}-${scenario.name}`;
+  if (fs.existsSync(path.join(RUNS_DIR, runID))) throw new CliError(`run ${runID} already exists; pass another --run`);
+  const args = ["run", `--run=${runID}`, ...(flags["keep-up"] ? ["--keep-up"] : []), ...(flags.reuse ? ["--reuse"] : []),
+    ...(flags.world === undefined ? [] : [`--world=${flags.world}`]), "--", file];
+  const runs = cliRuns();
+  const started = runs.startBackground({ cliPath: __filename, args, runID, scenarioFile: relativePath(file) });
+  console.log(`started run ${runID} in the background (pid ${started.pid}); console in ${started.log}`);
+  console.log(runs.detachedText(runID));
+}
+
+// Exit 0 passed, 1 failed, 2 did not complete or no such run, 3 still running.
+async function cmdReport(positionals, flags) {
+  const wait = flags.wait === undefined ? 0 : Number(flags.wait);
+  if (!Number.isFinite(wait) || wait < 0) throw new CliError("--wait takes seconds, e.g. --wait 600");
+  const reply = await cliRuns().readReport({ run: positionals[0] || null, section: flags.section ? String(flags.section) : "summary",
+    waitSeconds: wait, onLine: (line) => process.stderr.write(`  ${line}\n`) });
+  console.log(reply.text);
+  process.exitCode = reply.running ? 3 : reply.isError ? 2 : (reply.exitCode || 0);
+}
+
+function cmdPrimer(flags) {
+  const dir = (file, fallback) => {
+    const relative = relativePath(file);
+    return relative.startsWith("..") ? fallback : relative;
+  };
+  console.log(require("../core/primer").primer({ registry: REGISTRY, mode: MODE, surface: flags.mcp ? "mcp" : "cli",
+    scenarioDirs: { tree: dir(scenarioTools.TREE_SCENARIO_DIR, "tools/gridcheck-scenarios"),
+      drafts: dir(scenarioTools.DRAFT_SCENARIO_DIR, "_local/gridcheck/scenarios") } }));
+}
+
 async function cmdRun(positionals, flags) {
   if (!positionals[0]) {
     const rows = scenarioTools.listScenarios({ registry: REGISTRY });
@@ -1083,10 +1214,10 @@ async function cmdRun(positionals, flags) {
       return;
     }
     for (const row of rows) {
-      console.log(`${row.name.padEnd(28)} ${String(row.world || "?").padEnd(16)} ${row.plugin ? `[${row.plugin}] ` : ""}${row.description}`);
+      console.log(`${row.name.padEnd(28)} ${String(row.world || "?").padEnd(16)} ${row.plugin ? `[${row.plugin}] ` : ""}${row.draft ? "[draft] " : ""}${row.description}`);
     }
     if (!rows.length) console.log(`no scenarios in ${relativePath(scenarioTools.SCENARIO_DIR)}`);
-    console.log("usage: e2e run <scenario> [--check] [--run <id>] [--world <name>|fresh] [--keep-up | --reuse]");
+    console.log("usage: gridcheck run <scenario> [--check] [--run <id>] [--world <name>|fresh] [--keep-up | --reuse]");
     return;
   }
   const override = flags.world === undefined ? null : String(flags.world);
@@ -1103,6 +1234,10 @@ async function cmdRun(positionals, flags) {
     printScenario(file, loaded);
     return;
   }
+  if (flags.detach) {
+    detachRun(file, loaded, flags);
+    return;
+  }
   let reusing = null;
   if (reuse) {
     if (MODE === "attach") throw new CliError("--reuse needs auto or managed mode: attach mode always runs on the live server as it is");
@@ -1112,7 +1247,7 @@ async function cmdRun(positionals, flags) {
         `world ${loaded.world}, not a recipe. Use --keep-up to leave the server up without a reset.`);
     }
     if (running && startedElsewhere(running)) {
-      throw new CliError(`the server up (pid ${running.pid}) wasn't started by \`e2e up\`, so --reuse won't reset it; ` +
+      throw new CliError(`the server up (pid ${running.pid}) wasn't started by \`gridcheck up\`, so --reuse won't reset it; ` +
         "stop it where you started it, or run without --reuse to attach to it");
     }
     if (running) {
@@ -1130,18 +1265,18 @@ async function cmdRun(positionals, flags) {
   }
   const boots = !reusing && (MANAGED || (AUTO && !running));
   if (MANAGED && running && !reusing) {
-    throw new CliError(`this tree's server is running (pid ${running.pid}); a run boots its own world. \`e2e down\` first.`);
+    throw new CliError(`this tree's server is running (pid ${running.pid}); a run boots its own world. \`gridcheck down\` first.`);
   }
   if (!boots && !running) {
     throw new CliError("attach mode runs on a live server, and this tree has none. Start it with EVEJS_AGENT_BRIDGE=1 " +
-      "set, or `e2e init --mode auto --force` to let runs boot their own world when none is up.");
+      "set, or `gridcheck init --mode auto --force` to let runs boot their own world when none is up.");
   }
   if (!boots && override !== null && AUTO) {
     throw new CliError(`--world needs the server down: it's up (pid ${running.pid}), so auto mode would run on it as it is. ` +
-      `${startedElsewhere(running) ? "Stop it where you started it" : "`e2e down` it"}, or drop --world.`);
+      `${startedElsewhere(running) ? "Stop it where you started it" : "`gridcheck down` it"}, or drop --world.`);
   }
   if (boots && override !== null && override !== scenarioTools.FRESH_WORLD && !savedWorldExists(override)) {
-    throw new CliError(`no saved world ${override} (e2e world list)`);
+    throw new CliError(`no saved world ${override} (gridcheck world list)`);
   }
   if (boots && override === null && loaded.recipe) await ensureRecipeWorld(loaded.recipe);
   const world = boots ? override || loaded.world : null;
@@ -1170,7 +1305,7 @@ async function cmdRun(positionals, flags) {
           `running on the live server, pid ${running.pid}, and leaving it up`);
         if (loaded.up.profile && !(running.profiler && running.profiler.enabled)) {
           console.log("run: the scenario asks for the tick profiler, and the live server runs without it, so no PROFILE " +
-            "lines will come. Start the server with EVEJS_TICK_PROFILE=1, or `e2e down` and let the run boot its own.");
+            "lines will come. Start the server with EVEJS_TICK_PROFILE=1, or `gridcheck down` and let the run boot its own.");
         }
       },
     step: runScenarioStep,
@@ -1191,8 +1326,8 @@ async function cmdRun(positionals, flags) {
     }),
     down: async () => {
       if (!boots && !reusing) return;
-      if (reuse) console.log("--reuse: the server stays up for the next --reuse run; `e2e down` stops it");
-      else if (flags["keep-up"]) console.log("--keep-up: the server stays up; `e2e down` stops it");
+      if (reuse) console.log("--reuse: the server stays up for the next --reuse run; `gridcheck down` stops it");
+      else if (flags["keep-up"]) console.log("--keep-up: the server stays up; `gridcheck down` stops it");
       else await cmdDown({});
     },
   };
@@ -1265,20 +1400,47 @@ async function cmdLogout() {
 // Reads the tail of the shared server log. Every process that boots this tree
 // writes to it, tests included, so lines are kept to the running server's pid
 // unless --any-pid. Stock's logger tags no pid, so its lines all stay.
-function selectLogLines(text, { grep, pid, lines }) {
+// pid: keep lines tagged [pid N] for it. sinceMs: keep an untagged line (stock
+// EveJS tags none) only when its timestamp is at or after it; a line with no
+// timestamp, such as a stack trace's, goes with the line before it.
+function selectLogLines(text, { grep, pid, lines, sinceMs = null }) {
   const pattern = grep ? new RegExp(grep, "i") : null;
   const pidTag = pid ? `[pid ${pid}]` : null;
-  const kept = text.split(/\r?\n/).filter((line) =>
-    line && (!pidTag || line.includes(pidTag) || !/^\[[^\]]+\] \[pid \d+\]/.test(line)) && (!pattern || pattern.test(line)));
+  const kept = [];
+  let previous = true;
+  for (const line of text.split(/\r?\n/)) {
+    if (!line) continue;
+    let keep;
+    if (/^\[[^\]]+\] \[pid \d+\]/.test(line)) {
+      keep = !pidTag || line.includes(pidTag);
+    } else if (sinceMs !== null) {
+      const stamp = /^\[([^\]]+)\]/.exec(line);
+      const atMs = stamp ? Date.parse(stamp[1]) : NaN;
+      keep = Number.isFinite(atMs) ? atMs >= sinceMs : previous;
+    } else {
+      keep = true;
+    }
+    previous = keep;
+    if (keep && (!pattern || pattern.test(line))) kept.push(line);
+  }
   return kept.slice(-lines);
 }
 
 function cmdLog(flags) {
   const handshake = readHandshake();
   const logPath = serverLogPath(handshake);
-  if (!fs.existsSync(logPath)) throw new CliError(`no server log at ${logPath}`);
+  if (!fs.existsSync(logPath)) {
+    throw new CliError(`no server log at ${logPath}: the server hasn't run in this tree yet, or logs elsewhere ` +
+      `(EVEJS_DATA_ROOT). ${MODE === "attach" ? "Start it with EVEJS_AGENT_BRIDGE=1 set" : "`gridcheck up` starts it"}; ` +
+      "`gridcheck status` shows the log path it uses.");
+  }
   const lines = Math.max(1, Math.trunc(Number(flags.lines) || 40));
   const pid = flags["any-pid"] ? null : handshake && handshake.pid;
+  // This server's start (or the last gridcheck up's, with none up): older untagged lines are another run's.
+  const run = readRun();
+  const since = flags["any-pid"] ? null
+    : handshake ? (handshake.processStartedAtMs || (run && run.pid === handshake.pid ? run.startedAtMs : null))
+      : run && run.startedAtMs ? run.startedAtMs : null;
   const size = fs.statSync(logPath).size;
   const readBytes = Math.min(size, 16 * 1024 * 1024);
   const buffer = Buffer.alloc(readBytes);
@@ -1288,7 +1450,7 @@ function cmdLog(flags) {
   } finally {
     fs.closeSync(fd);
   }
-  for (const line of selectLogLines(buffer.toString("utf8"), { grep: flags.grep, pid, lines })) {
+  for (const line of selectLogLines(buffer.toString("utf8"), { grep: flags.grep, pid, lines, sinceMs: since || null })) {
     console.log(line);
   }
 }
@@ -1352,7 +1514,7 @@ async function waitForExit(pid, timeoutMs) {
   return !pidAlive(pid);
 }
 
-// e2e.config.json start, run with this CLI's node.
+// gridcheck.config.json start, run with this CLI's node.
 function serverStartArgs() {
   if (CONFIG.start[0] !== "node") throw new CliError(`the server start command is not a node command: ${CONFIG.start.join(" ")}`);
   return CONFIG.start.slice(1);
@@ -1374,7 +1536,7 @@ function requireWorldIdle() {
   const handshake = readHandshake();
   if (handshake) {
     throw new CliError(`this tree's server is running (pid ${handshake.pid}); ` +
-      `${AUTO && startedElsewhere(handshake) ? "you started it, so stop it where you started it" : "`e2e down` first"}`);
+      `${AUTO && startedElsewhere(handshake) ? "you started it, so stop it where you started it" : "`gridcheck down` first"}`);
   }
   const leases = worlds.liveLeases(WORLD_PATH);
   const held = leases.filter((lease) => !lease.pid || pidAlive(lease.pid));
@@ -1419,7 +1581,7 @@ async function startMarket(ports, timeoutMs) {
   if (!fs.existsSync(WORLD.market)) {
     throw new CliError(
       `this tree has no market database (${relativePath(WORLD.market)}). ` +
-      "`e2e world copy --from ../dev --force` copies one with the world, or pass --no-market.",
+      "`gridcheck world copy --from ../dev --force` copies one with the world, or pass --no-market.",
     );
   }
   buildMarket();
@@ -1455,7 +1617,7 @@ function describePorts(ports) {
     `redshift :${ports.redshift}, xmpp :${ports.xmpp}`;
 }
 
-// The plugins' `e2e up` options (registry.upFlags) read from the flags:
+// The plugins' `gridcheck up` options (registry.upFlags) read from the flags:
 // { values: { key: value }, env, restore: { key: value } }. A number flag sets
 // its environment variable for the server; a bool flag goes to the plugins'
 // world restore.
@@ -1506,8 +1668,8 @@ async function cmdUp(flags) {
     console.log(`already up: pid ${running.pid}, ${describePorts(activePorts())}` +
       `${AUTO && startedElsewhere(running) ? "; you started it, and auto mode attaches to it" : ""}`);
     if (profile && !(running.profiler && running.profiler.enabled)) {
-      console.log("note: it runs without the tick profiler, so e2e perf and PERF lines have tick figures but no " +
-        "per-subsystem breakdown. `e2e down`, then `e2e up --profile`.");
+      console.log("note: it runs without the tick profiler, so gridcheck perf and PERF lines have tick figures but no " +
+        "per-subsystem breakdown. `gridcheck down`, then `gridcheck up --profile`.");
     }
     return;
   }
@@ -1529,7 +1691,7 @@ async function cmdUp(flags) {
     throw new CliError(
       `port(s) in use: ${busy.map((row) => `${row.name} :${row.port}`).join(", ")}. ` +
       `Another process holds this tree's block (slot ${ports.slot}); stop it, or run up with ` +
-      "EVEJS_E2E_PORT_SLOT=<0-799> to choose another block.",
+      "GRIDCHECK_PORT_SLOT=<0-799> to choose another block.",
     );
   }
 
@@ -1548,13 +1710,13 @@ async function cmdUp(flags) {
   if (!fs.existsSync(MANIFEST_PATH)) {
     throw new CliError(
       `this tree has no generated reference data (${relativePath(MANIFEST_PATH)}). Run the tree's database ` +
-      "setup first; e2e up will not, because it rewrites the data dir, which may be a link into another tree.",
+      "setup first; gridcheck up will not, because it rewrites the data dir, which may be a link into another tree.",
     );
   }
   if (!flags.fresh && !fs.existsSync(WORLD_PATH)) {
     throw new CliError(
-      `this tree has no world (${relativePath(WORLD_PATH)}). Boot a new one with \`e2e up --fresh\`, ` +
-      "restore a saved one with --world <name>, or copy one with `e2e world copy --from <tree>`.",
+      `this tree has no world (${relativePath(WORLD_PATH)}). Boot a new one with \`gridcheck up --fresh\`, ` +
+      "restore a saved one with --world <name>, or copy one with `gridcheck world copy --from <tree>`.",
     );
   }
 
@@ -1567,7 +1729,7 @@ async function cmdUp(flags) {
     .map(([name]) => name);
   if (fixed.length) {
     console.log(`note: ${fixed.join(", ")} can't move in this tree and stay on stock ports; ` +
-      "another server using them will clash (e2e doctor)");
+      "another server using them will clash (gridcheck doctor)");
   }
 
   const market = flags["no-market"] || !CONFIG.market.enabled ? null : await startMarket(ports, 120_000);
@@ -1607,7 +1769,8 @@ async function cmdUp(flags) {
       const leases = worlds.liveLeases(WORLD_PATH)
         .filter((lease) => lease.pid !== child.pid && (!lease.pid || pidAlive(lease.pid)));
       throw new CliError(
-        `server exited during boot${leases.length ? `; ${describeLeases(leases)}` : ""}.\n` +
+        `server exited during boot${leases.length ? `; ${describeLeases(leases)}` : ""}. The end of its console ` +
+        `(${relativePath(SERVER_OUT_PATH)}) says why; \`gridcheck doctor\` checks the tree:\n` +
         tailFile(SERVER_OUT_PATH, 40),
       );
     }
@@ -1620,7 +1783,7 @@ async function cmdUp(flags) {
       console.log(`up in ${run.bootSeconds}s: pid ${child.pid}, world ${run.world}, ${describePorts(ports)}`);
       if (profile) {
         console.log(`tick profiler on: a window every ${profile.everyTicks} ticks (${profile.everyTicks / 10} s at 10 Hz); ` +
-          "`e2e perf` reads it, and a watch with --perf streams it");
+          "`gridcheck perf` reads it, and a watch with --perf streams it");
       }
       for (const upNote of REGISTRY.upNotes) {
         try {
@@ -1635,7 +1798,7 @@ async function cmdUp(flags) {
     await sleep(2000);
   }
   throw new CliError(
-    `server not ready after ${timeoutMs / 1000}s; pid ${child.pid} is still running (\`e2e down\` stops it).\n` +
+    `server not ready after ${timeoutMs / 1000}s; pid ${child.pid} is still running (\`gridcheck down\` stops it).\n` +
     tailFile(SERVER_OUT_PATH, 40),
   );
 }
@@ -1653,7 +1816,7 @@ async function cmdDown(flags) {
   const run = readRun() || {};
   const handshake = readHandshake();
   if (AUTO && startedElsewhere(handshake)) {
-    throw new CliError(`the server up (pid ${handshake.pid}) wasn't started by \`e2e up\`, so auto mode leaves it running; ` +
+    throw new CliError(`the server up (pid ${handshake.pid}) wasn't started by \`gridcheck up\`, so auto mode leaves it running; ` +
       "stop it where you started it");
   }
   const serverPid = handshake ? handshake.pid : runLive(run) ? run.pid : null;
@@ -1661,15 +1824,25 @@ async function cmdDown(flags) {
     const timeoutMs = Math.max(5, Number(flags.timeout) || 120) * 1000;
     const startedAt = Date.now();
     if (handshake) {
-      await bridge("POST", "/shutdown", {});
+      try {
+        await bridge("POST", "/shutdown", {});
+      } catch (error) {
+        // The bridge stops the server 100 ms after it accepts; on a busy machine
+        // the reply can lose that race. Whether the server exits is what counts.
+        if (!error.transport) throw error;
+        console.log(`the shutdown request got no reply (${error.message.split(". ")[0].replace(/^POST \S+ failed: /, "")}); ` +
+          "waiting for the server to exit");
+      }
       console.log(`stopping pid ${serverPid}`);
     } else if (flags.force) {
       stopPid(serverPid);
       console.log(`killed pid ${serverPid}; its world lease stays live for up to 30s`);
     } else {
-      throw new CliError(`server pid ${serverPid} has no agent bridge yet (still booting?). Wait, or \`e2e down --force\` to kill it.`);
+      throw new CliError(`server pid ${serverPid} has no agent bridge yet (still booting?). Wait, or \`gridcheck down --force\` to kill it.`);
     }
-    if (!await waitForExit(serverPid, timeoutMs)) throw new CliError(`pid ${serverPid} still running after ${timeoutMs / 1000}s`);
+    if (!await waitForExit(serverPid, timeoutMs)) {
+      throw new CliError(`pid ${serverPid} still running after ${timeoutMs / 1000}s. \`gridcheck down --force\` kills it.`);
+    }
     const state = readState();
     if (state.bridgeSessionID) writeState({ ...state, bridgeSessionID: null });
     console.log(`stopped in ${((Date.now() - startedAt) / 1000).toFixed(1)}s`);
@@ -1686,7 +1859,7 @@ async function cmdDown(flags) {
   if (run.pid && !run.stoppedAtMs) writeRun({ ...run, stoppedAtMs: Date.now() });
 }
 
-const WORLD_USAGE = "usage: e2e world copy --from <tree> [--force] | world save <name> [--note text] [--force] | world list | " +
+const WORLD_USAGE = "usage: gridcheck world copy --from <tree> [--force] | world save <name> [--note text] [--force] | world list | " +
   "world build <recipe> [--force] | world recipes";
 
 // ---------- world recipes ----------
@@ -1737,7 +1910,10 @@ async function buildRecipeWorld(recipe, { force = false, why = null } = {}) {
   } finally {
     await cmdDown({});
   }
-  if (failed) throw new CliError(`recipe ${recipe.name} failed at ${failed}; the world was not saved`);
+  if (failed) {
+    throw new CliError(`recipe ${recipe.name} failed at ${failed}; the world was not saved. \`gridcheck log --lines 80\` shows what the ` +
+      `server did, and \`gridcheck world build ${recipe.name}\` tries again.`);
+  }
   const result = worlds.saveWorld(REPO_ROOT, recipe.name, { force: true, note: `built from recipe ${recipe.name}`,
     hooks: REGISTRY.worldHooks, recipe: fingerprint });
   console.log(`built ${result.name} in ${Math.round((Date.now() - startedAtMs) / 1000)} s ` +
@@ -1822,7 +1998,7 @@ async function cmdWorld(positionals, flags) {
           `${row.market ? "  +market" : ""}${row.recipe ? "  (recipe)" : ""}${row.note ? `  ${row.note}` : ""}`,
         );
       }
-      if (!rows.length) console.log("no saved worlds (e2e world save <name>)");
+      if (!rows.length) console.log("no saved worlds (gridcheck world save <name>)");
     } else {
       throw new CliError(WORLD_USAGE);
     }
@@ -1851,7 +2027,7 @@ function serverUpReason() {
   const handshake = readHandshake();
   if (handshake) return `this tree's server is up (pid ${handshake.pid})`;
   const run = readRun();
-  if (runLive(run)) return `this tree's server is up (pid ${run.pid}, started by e2e up)`;
+  if (runLive(run)) return `this tree's server is up (pid ${run.pid}, started by gridcheck up)`;
   return null;
 }
 
@@ -1898,7 +2074,7 @@ function cmdPatch(positionals, flags) {
   if (action !== "apply" && action !== "revert") {
     throw new CliError("patch takes list, status [<id>], apply <id>... or revert <id>...");
   }
-  if (!ids.length) throw new CliError(`patch ${action} needs a patch id (e2e patch list)`);
+  if (!ids.length) throw new CliError(`patch ${action} needs a patch id (gridcheck patch list)`);
   const results = [];
   for (const id of ids) {
     let result;
@@ -1923,7 +2099,7 @@ function cmdPatch(positionals, flags) {
   return results;
 }
 
-// Probes the tree and writes its e2e.config.json.
+// Probes the tree and writes its gridcheck.config.json.
 function cmdInit(flags) {
   const mode = flags.mode === undefined ? treeConfig.DEFAULT_MODE : String(flags.mode);
   if (!treeConfig.MODES.includes(mode)) throw new CliError(`--mode takes ${treeConfig.MODES.join(", ")}`);
@@ -1941,19 +2117,19 @@ function cmdInit(flags) {
     `  server     ${config.serverDir}: ${config.start.join(" ")}`,
     `  data       ${config.dataDir}; game store ${config.gameStore}`,
     `  log        ${config.logFile}`,
-    `  e2e        ${config.e2eDir}; runs ${config.runsDir}; worlds ${config.worldsDir}`,
+    `  gridcheck        ${config.e2eDir}; runs ${config.runsDir}; worlds ${config.worldsDir}`,
     `  market     ${config.daemons.market.enabled ? `on (${config.daemons.market.database})` : "off (no market source and database)"}`,
     `  listeners  move: ${listeners.filter(([, row]) => row.movable).map(([name]) => name).join(", ") || "none"}` +
       `${listeners.some(([, row]) => !row.movable) ? `; stay on stock ports: ${listeners.filter(([, row]) => !row.movable).map(([name]) => name).join(", ")}` : ""}`,
     ...notes.map((note) => `note: ${note}`),
     ...(dryRun ? ["nothing was written (--dry-run). The file would be:", JSON.stringify(config, null, 2)] : []),
     dryRun ? null : config.mode === "managed"
-      ? "next: e2e up --fresh (a new world) or e2e up --world <name>, then e2e login"
+      ? "next: gridcheck up --fresh (a new world) or gridcheck up --world <name>, then gridcheck login"
       : config.mode === "auto"
-        ? "next: e2e world build starter, then e2e run <scenario>. A run boots its own world when no server is up, and " +
+        ? "next: gridcheck world build starter, then gridcheck run <scenario>. A run boots its own world when no server is up, and " +
           "attaches to one you started with EVEJS_AGENT_BRIDGE=1 set"
         : "next: start the server with EVEJS_AGENT_BRIDGE=1 set (`npm start` in the server folder, or StartServer.bat " +
-          "from a shell that has it), then e2e login",
+          "from a shell that has it), then gridcheck login",
   ].filter((line) => line !== null);
   for (const line of lines) console.log(line);
   return lines.join("\n");
@@ -1985,15 +2161,20 @@ function cmdAgents(positionals, flags) {
     }
     return rows;
   }
-  if (action !== "setup") throw new CliError("agents takes status [--json] or setup [claude] [codex] [--dry-run]");
+  if (action !== "setup") throw new CliError("agents takes status [--json] or setup [claude] [codex] [cli] [--dry-run]");
   const dryRun = Boolean(flags["dry-run"]);
   const results = call(() => agentTools.setupAgents(REPO_ROOT, ids.length ? ids : null, { dryRun }));
   if (!results.length) {
-    throw new CliError("found neither Claude Code nor Codex on this machine; name one to set it up anyway, e.g. " +
-      "`e2e agents setup claude`");
+    throw new CliError("found neither Claude Code nor Codex on this machine. Name one to set it up anyway " +
+      "(`gridcheck agents setup claude`), or `gridcheck agents setup cli` to point any other agent at the CLI guide.");
   }
   for (const { name, installed, plan } of results) {
     const file = relativePath(plan.file).startsWith("..") ? plan.file.split(path.sep).join("/") : relativePath(plan.file);
+    if (plan.agent === "cli") {
+      console.log(`${name}: ${plan.change === "none" ? "already has" : dryRun ? "would add" : "added"} ${plan.serverName} in ${file}`);
+      for (const line of plan.change === "none" ? [] : plan.added) console.log(`  + ${line}`);
+      continue;
+    }
     if (plan.change === "none") {
       console.log(`${name}: already runs this tree's server as ${plan.serverName} (${file})`);
       continue;
@@ -2009,6 +2190,9 @@ function cmdAgents(positionals, flags) {
   if (changed.some((row) => row.id === "claude")) {
     console.log("next, Claude Code: start it in this tree's folder; it asks once to approve the project's MCP server");
   }
+  if (changed.some((row) => row.id === "cli")) {
+    console.log("next, any other agent: start it in this tree; it reads the pointer and follows the CLI guide");
+  }
   if (changed.some((row) => row.id === "codex")) {
     console.log("next, Codex: start a new session; the server is in every Codex session, and names this tree by path");
   }
@@ -2018,11 +2202,11 @@ function cmdAgents(positionals, flags) {
 function formatDoctor(report) {
   const lines = [];
   const tool = report.tool || {};
-  lines.push(`evejs-e2e  ${tool.version || "?"}${tool.commit ? ` at ${String(tool.commit).slice(0, 8)}` : ""}` +
+  lines.push(`Gridcheck  ${tool.version || "?"}${tool.commit ? ` at ${String(tool.commit).slice(0, 8)}` : ""}` +
     `${tool.vendored ? " (vendored)" : " (checkout)"}`);
   const config = report.tree && report.tree.config;
   lines.push(`tree       ${report.tree ? report.tree.root : "?"}; ` +
-    (config && config.exists ? `${treeConfig.CONFIG_NAME}, mode ${config.mode}` : `no ${treeConfig.CONFIG_NAME} (defaults, mode ${treeConfig.DEFAULT_MODE}; e2e init writes one)`));
+    (config && config.exists ? `${treeConfig.CONFIG_NAME}, mode ${config.mode}` : `no ${treeConfig.CONFIG_NAME} (defaults, mode ${treeConfig.DEFAULT_MODE}; gridcheck init writes one)`));
   for (const problem of (config && config.problems) || []) lines.push(`           config problem: ${problem}`);
   lines.push(`checked    ${report.source || "?"}`);
   const gateway = report.gateway || {};
@@ -2044,9 +2228,9 @@ function formatDoctor(report) {
   lines.push(listeners.length
     ? `listeners  move: ${listeners.filter(([, row]) => row.movable).map(([name]) => name).join(", ") || "none"}` +
       `${listeners.some(([, row]) => !row.movable) ? `; stay on stock ports: ${listeners.filter(([, row]) => !row.movable).map(([name, row]) => `${name} (${row.via})`).join(", ")}` : ""}`
-    : "listeners  not probed yet (e2e init)");
+    : "listeners  not probed yet (gridcheck init)");
   if (report.loadout) {
-    lines.push(report.loadout.ok ? "loadout    the stock ship helpers are there; e2e loadout can build a ship"
+    lines.push(report.loadout.ok ? "loadout    the stock ship helpers are there; gridcheck loadout can build a ship"
       : `loadout    OFF: ${report.loadout.missing.join("; ")}`);
   }
   const live = report.live;
@@ -2099,7 +2283,7 @@ function describePlugins() {
     `${REGISTRY.warnings.length ? `\nplugin warnings: ${REGISTRY.warnings.join("; ")}` : ""}`;
 }
 
-// e2e perf: how the server's ticks are doing. Samples --for seconds (default
+// gridcheck perf: how the server's ticks are doing. Samples --for seconds (default
 // 10) through POST /perf; --now reads the ticks the runtime holds (about 12 s)
 // at once, without CPU or loop delay. Needs a server, not a character.
 async function cmdPerf(flags) {
@@ -2137,15 +2321,15 @@ async function cmdStatus() {
   const [gatewayUp, marketUp] = await Promise.all([gatewayReady(ports), ports.marketHttp ? httpOK(marketHealthURL(ports)) : false]);
   const elsewhere = startedElsewhere(handshake);
   const now = !AUTO ? "" : elsewhere ? `: attached to pid ${elsewhere.pid}, a server you started; runs use it and leave it up`
-    : handshake ? `: e2e up's server is up, pid ${handshake.pid}; runs use it` : ": no server up; a run boots its own world";
-  console.log(`mode   ${CONFIG.mode}${CONFIG.exists ? "" : ` (no ${treeConfig.CONFIG_NAME}; e2e init writes one)`}${now}`);
+    : handshake ? `: gridcheck up's server is up, pid ${handshake.pid}; runs use it` : ": no server up; a run boots its own world";
+  console.log(`mode   ${CONFIG.mode}${CONFIG.exists ? "" : ` (no ${treeConfig.CONFIG_NAME}; gridcheck init writes one)`}${now}`);
   console.log(`ports  ${describePorts(ports)}`);
   if (runLive(run)) {
     console.log(run.readyAtMs
       ? `server pid ${run.pid}  booted in ${run.bootSeconds}s, up ${formatClock(Date.now() - run.readyAtMs)}  world ${run.world}`
       : `server pid ${run.pid}  booting for ${formatClock(Date.now() - run.startedAtMs)}  world ${run.world}`);
   } else {
-    console.log("server  none from e2e up");
+    console.log("server  none from gridcheck up");
   }
   console.log(`gateway  ${gatewayUp ? "ready" : "down"}`);
   console.log(handshake
@@ -2153,17 +2337,72 @@ async function cmdStatus() {
     : "agent bridge  none from this tree");
   if (handshake && handshake.profiler) {
     console.log(handshake.profiler.enabled
-      ? `tick profiler on: a window every ${handshake.profiler.everyTicks} ticks (e2e perf)`
-      : "tick profiler off (e2e perf has tick figures only; e2e up --profile for the breakdown)");
+      ? `tick profiler on: a window every ${handshake.profiler.everyTicks} ticks (gridcheck perf)`
+      : "tick profiler off (gridcheck perf has tick figures only; gridcheck up --profile for the breakdown)");
   }
   console.log(run && run.marketPid && pidAlive(run.marketPid)
     ? `market pid ${run.marketPid}  ${marketUp ? "ready" : "not answering"}`
-    : `market  ${marketUp ? "answering, not started by e2e up" : "down"}`);
+    : `market  ${marketUp ? "answering, not started by gridcheck up" : "down"}`);
   console.log(state.characterID
     ? `character ${state.characterName || "?"} (${state.characterID})  account ${state.username}/${state.accountID}` +
       `  session ${state.bridgeSessionID ? "held" : "released"}`
-    : "character  none (e2e login)");
+    : "character  none (gridcheck login)");
   console.log(describePlugins());
+  const hooks = slowestHook();
+  if (hooks) {
+    console.log(`plugin hooks  slowest in the last watch that ran one (${hooks.runID}): ${hooks.name} ${hooks.msAvg} ms avg, ` +
+      `${hooks.msMax} ms max over ${hooks.runs} call(s)${hooks.others ? `; ${hooks.others} other hook(s) faster` : ""}`);
+  }
+}
+
+// The plugin hook with the highest average cost in the newest watch whose END
+// timed any (bridge/watch.js costs.hooks). A watch's hooks run every scan, so
+// this is the plugins' share of whole-world cost.
+function slowestHook(limit = 10) {
+  let names = [];
+  try {
+    names = fs.readdirSync(RUNS_DIR, { withFileTypes: true }).filter((entry) => entry.isDirectory()).map((entry) => entry.name);
+  } catch (_error) {
+    return null;
+  }
+  const dirs = names.map((name) => {
+    const file = path.join(RUNS_DIR, name, "timeline.jsonl");
+    try {
+      return { name, file, mtimeMs: fs.statSync(file).mtimeMs };
+    } catch (_error) {
+      return null;
+    }
+  }).filter(Boolean).sort((a, b) => b.mtimeMs - a.mtimeMs).slice(0, limit);
+  for (const { name, file } of dirs) {
+    // END is the last line a watch writes; reading the tail is enough.
+    let tail = "";
+    try {
+      const size = fs.statSync(file).size;
+      const fd = fs.openSync(file, "r");
+      const length = Math.min(size, 64 * 1024);
+      const buffer = Buffer.alloc(length);
+      fs.readSync(fd, buffer, 0, length, size - length);
+      fs.closeSync(fd);
+      tail = buffer.toString("utf8");
+    } catch (_error) {
+      continue;
+    }
+    for (const line of tail.split("\n").reverse()) {
+      if (!line.includes("\"END\"")) continue;
+      let event;
+      try {
+        event = JSON.parse(line);
+      } catch (_error) {
+        continue;
+      }
+      const entries = Object.entries((event.costs && event.costs.hooks) || {});
+      if (!entries.length) break;
+      entries.sort((a, b) => b[1].msAvg - a[1].msAvg);
+      const [hookName, cost] = entries[0];
+      return { runID: name, name: hookName, ...cost, others: entries.length - 1 };
+    }
+  }
+  return null;
 }
 
 // ---------- the command table ----------
@@ -2176,12 +2415,17 @@ function upUsage() {
 // name -> { usage: [lines], run(positionals, flags) }. Plugin commands
 // (registry.commands) run with pluginIO() and can't take a core name.
 const CORE_COMMANDS = {
+  setup: {
+    usage: ["setup --tree <path> [--mode auto|attach|managed] [--agents claude,codex,cli|none] [--skip agents,patches,world,smoke] [--force] [--dry-run]"],
+    run: (positionals, flags) => require("../core/setup").main([...positionals,
+      ...Object.entries(flags).flatMap(([key, value]) => (value === true ? [`--${key}`] : [`--${key}`, String(value)]))]),
+  },
   init: {
     usage: ["init [--mode auto|attach|managed] [--force] [--dry-run]"],
     run: (_positionals, flags) => cmdInit(flags),
   },
   agents: {
-    usage: ["agents [status] [--json] | agents setup [claude] [codex] [--dry-run]"],
+    usage: ["agents [status] [--json] | agents setup [claude] [codex] [cli] [--dry-run]"],
     run: cmdAgents,
   },
   doctor: {
@@ -2216,7 +2460,7 @@ const CORE_COMMANDS = {
     usage: ["slash \"/tr me 30002537\""],
     run: (positionals) => {
       const line = positionals.join(" ").trim();
-      if (!line) throw new CliError('slash needs a command, e.g. e2e slash "/where"');
+      if (!line) throw new CliError('slash needs a command, e.g. gridcheck slash "/where"');
       return runSlash(line);
     },
   },
@@ -2243,9 +2487,12 @@ const CORE_COMMANDS = {
     run: (positionals, flags) => require("../core/gui").main([...positionals,
       ...Object.entries(flags).flatMap(([key, value]) => (value === true ? [`--${key}`] : [`--${key}`, String(value)]))]),
   },
-  run: { usage: ["run [<scenario>] [--check] [--run <id>] [--world <name>|fresh] [--keep-up | --reuse] | run --json"], run: cmdRun },
+  run: { usage: ["run [<scenario>] [--check] [--detach] [--run <id>] [--world <name>|fresh] [--keep-up | --reuse] | run --json"], run: cmdRun },
+  report: { usage: ["report [<run>|latest] [--section summary|full|result|pr] [--wait <s>]"], run: cmdReport },
+  scenario: { usage: ["scenario new <name> [--from <scenario>] [--save] [--force]"], run: cmdScenario },
   log: { usage: ["log [--grep NpcController] [--lines 40] [--any-pid]"], run: (_positionals, flags) => cmdLog(flags) },
   perf: { usage: ["perf [--for 10] [--now] [--json]"], run: (_positionals, flags) => cmdPerf(flags) },
+  primer: { usage: ["primer [--mcp]"], run: (_positionals, flags) => cmdPrimer(flags) },
   help: { usage: ["help [--json]"], run: (_positionals, flags) => { console.log(flags.json ? JSON.stringify(commandCatalog(), null, 2) : helpText()); } },
 };
 
@@ -2256,14 +2503,14 @@ function pluginCommands() {
 function helpText() {
   const lines = [];
   const push = (name, entry) => {
-    for (const usage of entry.usage || [name]) lines.push(`  ${usage.startsWith(" ") ? "  " : "e2e "}${usage}`);
+    for (const usage of entry.usage || [name]) lines.push(`  ${usage.startsWith(" ") ? "  " : "gridcheck "}${usage}`);
   };
   for (const [name, command] of Object.entries(CORE_COMMANDS)) push(name, command);
   for (const [command, handlers] of Object.entries(REGISTRY.handlers)) {
     for (const handler of handlers) push(command, { usage: handler.usage || [`${command} --${handler.flags.join(" --")}`] });
   }
   for (const [name, command] of Object.entries(pluginCommands())) push(name, command);
-  return `node tools/evejs-e2e/bin/e2e.js <command>\n${lines.join("\n")}\n${describePlugins()}`;
+  return `node tools/gridcheck/bin/gridcheck.js <command>\n${lines.join("\n")}\n${describePlugins()}`;
 }
 
 // help --json: every command with its usage, summary and tags (core/commandDocs.js),
@@ -2274,25 +2521,27 @@ function commandCatalog() {
     mcpTools: TOOLS });
 }
 
-// Commands that run even when e2e.config.json is broken: they fix or report it.
-const CONFIG_EXEMPT = new Set(["init", "doctor", "help", "vendor", "gui", "agents"]);
+// Commands that run even when gridcheck.config.json is broken: they fix or report it.
+const CONFIG_EXEMPT = new Set(["init", "doctor", "help", "vendor", "gui", "agents", "primer"]);
 
 async function main(argv) {
   const { command, positionals, flags } = parseArgs(argv);
   if (CONFIG.problems.length && !CONFIG_EXEMPT.has(command)) {
     throw new CliError(`${relativePath(CONFIG.file)}: ${CONFIG.problems.join("; ")}. ` +
-      "Fix it, or write a new one with `e2e init --force`.");
+      "Fix it, or write a new one with `gridcheck init --force`.");
   }
   const core = CORE_COMMANDS[command];
   if (core) return core.run(positionals, flags);
   const plugin = pluginCommands()[command];
   if (plugin) return plugin.run(positionals, flags, pluginIO());
-  throw new CliError(`unknown command: ${command}\n${helpText()}`);
+  const names = [...Object.keys(CORE_COMMANDS), ...Object.keys(pluginCommands())];
+  throw new CliError(`unknown command: ${command}.${didYouMean(closest(command, names).map((name) => `gridcheck ${name}`))} ` +
+    "`gridcheck help` lists them all.");
 }
 
 if (require.main === module) {
   main(process.argv.slice(2)).catch((error) => {
-    console.error(`e2e: ${error instanceof CliError ? error.message : error.stack || error}`);
+    console.error(`gridcheck: ${error instanceof CliError ? error.message : error.stack || error}`);
     process.exitCode = 1;
   });
 }

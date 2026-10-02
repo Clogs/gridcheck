@@ -1,6 +1,6 @@
 "use strict";
 
-// `e2e run <scenario>` (core/scenario.js, core/conditions.js): the
+// `gridcheck run <scenario>` (core/scenario.js, core/conditions.js): the
 // condition language, scenario checks at load, the run with its server calls
 // faked, and the report. The live path is in docs/GUIDE.md
 // "Scenarios".
@@ -424,7 +424,7 @@ test("a run stops at its stop condition, flags the unmet expectation and keeps t
     "the grace period's ARRIVE and the runner's own lines are kept");
   assert.deepStrictEqual(result.events, ops.timeline, "the report reads the same events the timeline holds");
 
-  const report = renderReport(result, { runID: "r1", scenario, scenarioFile: "tools/evejs-e2e/scenarios/t.json" });
+  const report = renderReport(result, { runID: "r1", scenario, scenarioFile: "tools/gridcheck/scenarios/t.json" });
   assert.match(report, /^# Scenario t: FAILED/);
   assert.match(report, /1 of 2 expectations met\. stop condition `HERE` met at t\+00:00:00, then watched 0\.\d s of 0\.2 s grace \(grace ran out\)\./,
     "an unmet expectation keeps grace running to its end");
@@ -705,4 +705,24 @@ test("a bare name is the tree's scenario first, then the core's, then a plugin's
     "a new name is the tree's");
   assert.deepStrictEqual(listScenarios({ treeDir, registry }).find((row) => row.name === "smoke-undock").file,
     path.join(treeDir, "smoke-undock.json"));
+});
+
+test("scenario new writes a template that checks out, or a copy, and won't replace one", (t) => {
+  const os = require("os");
+  const { newScenario, loadScenario } = require("../core/scenario");
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "e2e-scenario-new-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const dirs = { treeDir: path.join(root, "tree"), draftDir: path.join(root, "drafts"), registry: emptyRegistry() };
+  const draft = newScenario("my-check", dirs);
+  assert.strictEqual(draft.file, path.join(dirs.draftDir, "my-check.json"));
+  assert.strictEqual(draft.from, null);
+  const loaded = loadScenario(draft.file, { ...dirs, worldExists: () => true });
+  assert.strictEqual(loaded.scenario.name, "my-check");
+  assert.throws(() => newScenario("my-check", dirs), /already exists; pick another name, or pass --force/);
+  assert.doesNotThrow(() => newScenario("my-check", { ...dirs, force: true }));
+  const copy = newScenario("fight", { ...dirs, from: "smoke-undock", save: true });
+  assert.strictEqual(copy.file, path.join(dirs.treeDir, "fight.json"));
+  assert.match(JSON.parse(fs.readFileSync(copy.file, "utf8")).description, /^Undock and read the grid/);
+  assert.throws(() => newScenario("x", { ...dirs, from: "nope" }), /no scenario nope to copy/);
+  assert.throws(() => newScenario("bad name", dirs), /needs a name/);
 });

@@ -74,7 +74,7 @@ function createGridReader({ space, projectEntity, describeType, describeSystem, 
   };
 
   // options.annotate(row, entity) lets a caller add fields from the live
-  // entity, which the gateway projection leaves out. `e2e watch` uses it.
+  // entity, which the gateway projection leaves out. `gridcheck watch` uses it.
   function readGrid(session, options = {}) {
     const annotate = typeof options.annotate === "function" ? options.annotate : null;
     const spaceState = session && session._space && typeof session._space === "object"

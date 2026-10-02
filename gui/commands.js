@@ -1,8 +1,8 @@
 "use strict";
 
-// The Commands tab: every command the tree's copy of e2e has, grouped, with its
+// The Commands tab: every command the tree's copy of gridcheck has, grouped, with its
 // usage, what it does and its tags; open one for its flags and examples. The
-// list is the copy's own `e2e help --json` (core/commandDocs.js), read through
+// list is the copy's own `gridcheck help --json` (core/commandDocs.js), read through
 // GET /gui/api/commands. Built with textContent, like the rest of the page.
 
 (() => {
@@ -137,10 +137,10 @@
       const data = state.data;
       if (!data) return;
       const summary = shell.summary();
-      $("cm-source").textContent = data.source === "tree" ? `${data.command}` : "this page's own e2e";
+      $("cm-source").textContent = data.source === "tree" ? `${data.command}` : "this page's own gridcheck";
       const lede = $("cm-lede");
       lede.textContent = "";
-      lede.append("Everything e2e can do in this tree. Run each from ", summary ? shell.ref("path", summary.root, { dir: true }) : "the tree's folder",
+      lede.append("Everything gridcheck can do in this tree. Run each from ", summary ? shell.ref("path", summary.root, { dir: true }) : "the tree's folder",
         " as ", shell.ref("cmd", `${data.prefix} <command>`, { copy: false }), ". Open a row for its flags and examples.");
       $("cm-note").hidden = !data.note;
       $("cm-note").textContent = data.note || "";

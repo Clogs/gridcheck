@@ -95,7 +95,7 @@ function removeHandshake(handshakePath, options = {}) {
 }
 
 // handshakeExtra(): more fields for the handshake, read once at listen.
-// handshakePath null: no handshake file (`e2e gui` prints its URL instead).
+// handshakePath null: no handshake file (`gridcheck gui` prints its URL instead).
 function createAgentBridgeHttp({ routes, port, handshakePath, log, serviceName = "agentBridge", handshakeExtra = null }) {
   const logger = log || { debug() {}, err() {} };
   const token = crypto.randomBytes(32).toString("hex");
@@ -175,7 +175,9 @@ function createAgentBridgeHttp({ routes, port, handshakePath, log, serviceName =
         logger.err(`[AgentBridge] handshake details failed: ${error.message}`);
       }
     }
-    const payload = { ...extra, host: LOOPBACK_HOST, port: boundPort, token, pid: process.pid, startedAtMs: Date.now() };
+    // processStartedAtMs: gridcheck log keeps a stock log line, which has no pid tag, by its time.
+    const payload = { ...extra, host: LOOPBACK_HOST, port: boundPort, token, pid: process.pid, startedAtMs: Date.now(),
+      processStartedAtMs: Math.round(Date.now() - process.uptime() * 1000) };
     fs.writeFileSync(handshakePath, `${JSON.stringify(payload, null, 2)}\n`, { mode: 0o600 });
   }
 

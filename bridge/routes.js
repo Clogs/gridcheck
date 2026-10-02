@@ -40,7 +40,7 @@ function secondsIn(value, fallback, min, max) {
 // fx: DIVERGE plus the client's special effects (weapons firing), no CLIENT lines.
 const CLIENT_MODES = new Set(["all", "fx", "diverge", "off"]);
 
-const NOT_ONLINE = "That character has no live session. Log it in first (e2e login).";
+const NOT_ONLINE = "That character has no live session. Log it in first (gridcheck login).";
 
 // "METHOD /path" -> handler, where a path ending in /* matches everything
 // under it and passes the remainder as `rest`. Core routes are added first and

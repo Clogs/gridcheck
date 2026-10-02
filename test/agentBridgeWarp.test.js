@@ -1,6 +1,6 @@
 "use strict";
 
-// The agent bridge's warp routes and the projections `e2e warp` reads.
+// The agent bridge's warp routes and the projections `gridcheck warp` reads.
 
 const test = require("node:test");
 const assert = require("node:assert/strict");
@@ -63,10 +63,10 @@ test("/warp streams START, PROGRESS and END, and a hung-up caller stops the warp
 });
 
 test("/warp answers 409 with the driver's reason when it refuses", () => {
-  const routes = luRoutes({ warp: fakeWarp({ refuse: "no e2e marker" }), warpBridge: {} });
+  const routes = luRoutes({ warp: fakeWarp({ refuse: "no gridcheck marker" }), warpBridge: {} });
   const reply = routes.handle("POST", "/warp", {}, { forSeconds: 60 });
   assert.equal(reply.statusCode, 409);
-  assert.equal(reply.body.error, "no e2e marker");
+  assert.equal(reply.body.error, "no gridcheck marker");
 });
 
 test("/clock and /economy answer from the warp bridge, and 503 without one", () => {

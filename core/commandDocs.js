@@ -1,7 +1,7 @@
 "use strict";
 
-// What each CLI command does, for `e2e help --json` and the GUI's Commands tab.
-// The usage lines stay in bin/e2e.js's command table; this file adds a group,
+// What each CLI command does, for `gridcheck help --json` and the GUI's Commands tab.
+// The usage lines stay in bin/gridcheck.js's command table; this file adds a group,
 // a one-line summary, tags and notes on the flags. A key is a command name, or
 // "<command> <sub>" for one part of a usage line split at " | ". A plugin
 // command carries its own summary (and needs, writes) beside its usage.
@@ -24,27 +24,37 @@ const GROUPS = [
 ];
 
 const DOCS = {
+  setup: {
+    group: "setup", writes: true, needs: "down",
+    summary: "Everything a tree needs before its first run, one command at a time: install the tool, write the config, connect agents, apply the patches, build starter and run smoke-undock. Skips what is done, so it can run again after a fix.",
+    flags: [["--tree <path>", "the tree you're in", "The tree to set up."], ["--mode auto|attach|managed", "auto, or the config's", "The server mode to write."],
+      ["--agents claude,codex,cli|none", "the agents found", "Which agents to connect."],
+      ["--skip agents,patches,world,smoke", null, "Leave those steps out."], ["--force", null, "Replace a copy whose files were edited."],
+      ["--dry-run", null, "Show each command and what it would change; write nothing."]],
+    examples: [["gridcheck setup --tree F:/EveJS-0.12.9", null], ["gridcheck setup --tree F:/EveJS-0.12.9 --dry-run", "see the plan first"]],
+  },
   init: {
     group: "setup", writes: true,
-    summary: "Writes the tree's e2e.config.json with its server mode, and probes which listeners the tree's source can move.",
+    summary: "Writes the tree's gridcheck.config.json with its server mode, and probes which listeners the tree's source can move.",
     flags: [["--mode auto|attach|managed", "auto", "How runs get a server: use a running one, start their own, or both."],
-      ["--force", null, "Replace an existing e2e.config.json."], ["--dry-run", null, "Print the config without writing it."]],
+      ["--force", null, "Replace an existing gridcheck.config.json."], ["--dry-run", null, "Print the config without writing it."]],
   },
   agents: {
     group: "setup", writes: true,
-    summary: "Shows the Claude Code and Codex on this machine and whether each has this tree's e2e tools; setup adds them.",
+    summary: "Shows the Claude Code and Codex on this machine and whether each has this tree's gridcheck tools; setup adds them.",
     flags: [["status", null, "The default: what was found and what each agent already has."],
-      ["setup [claude] [codex]", "both found", "Add the e2e MCP server to those agents. Only adds entries."],
+      ["setup [claude] [codex]", "both found", "Add the gridcheck MCP server to those agents. Only adds entries."],
+      ["setup cli", null, "For any other agent: add a pointer to docs/CLI.md to the tree's AGENTS.md (or CLAUDE.md)."],
       ["--dry-run", null, "Show the lines setup would add."], ["--json", null, "Print the status as JSON."]],
   },
   doctor: {
-    group: "setup", mcp: "e2e_doctor",
+    group: "setup", mcp: "doctor",
     summary: "Health check: asks the tree's copy which gateway calls, patches, listeners and client-view decoding work.",
     flags: [["--offline", null, "Read the tree's files even when a server is up."], ["--json", null, "Print the whole report."]],
   },
   "vendor update": {
     group: "setup", writes: true, needs: "down",
-    summary: "Copies an evejs-e2e checkout or tag into a tree's tools/evejs-e2e/, with the bridge shim.",
+    summary: "Copies a Gridcheck checkout or tag into a tree's tools/gridcheck/, with the bridge shim.",
     flags: [["--from <checkout|tag>", "this checkout's HEAD", "What to copy."], ["--tree <path>", null, "The tree to update."],
       ["--force", null, "Replace files that were edited in the tree's copy."], ["--dry-run", null, "List what it would add, change and remove."]],
   },
@@ -65,7 +75,7 @@ const DOCS = {
     summary: "Builds a world from a recipe and saves it under the recipe's name. A run that names the recipe builds it when it's missing or stale.",
     flags: [["<recipe>", null, "A recipe from world recipes, e.g. starter."],
       ["--force", null, "Replace a saved world of that name that no recipe built."]],
-    examples: [["e2e world build starter", "every skill, a fitted Tristan docked in Amamake"]],
+    examples: [["gridcheck world build starter", "every skill, a fitted Tristan docked in Amamake"]],
   },
   "world recipes": {
     group: "worlds",
@@ -74,7 +84,7 @@ const DOCS = {
   },
   "world save": {
     group: "worlds", writes: true, needs: "down", managed: true,
-    summary: "Snapshots the stopped world into _local/e2e/worlds/<name>/, so every run from it starts in the same place.",
+    summary: "Snapshots the stopped world into _local/gridcheck/worlds/<name>/, so every run from it starts in the same place.",
     flags: [["<name>", null, "The saved world's name."], ["--note \"...\"", null, "What's in it."], ["--force", null, "Replace a saved world of that name."]],
   },
   "world list": {
@@ -87,7 +97,7 @@ const DOCS = {
     flags: [["--from <tree>", null, "The tree to copy from."], ["--force", null, "Replace this tree's world."]],
   },
   up: {
-    group: "server", managed: true, mcp: "e2e_up",
+    group: "server", managed: true, mcp: "up",
     summary: "Starts the server in the background with the agent bridge on, and waits until it's ready.",
     flags: [["--world <name>", null, "Replace the tree's world with a saved one before boot."],
       ["--fresh", null, "Delete the game store and boot a new one from the seed tables."],
@@ -96,15 +106,15 @@ const DOCS = {
       ["--profile", null, "Boot with the tick profiler."], ["--profile-every", "50 ticks", "The profiler's window."]],
     note: "Refuses before touching the world when another process holds the world lease, a port in the tree's block is taken, " +
       "or the world is missing. Sets EVEJS_AGENT_BRIDGE=1 for you.",
-    examples: [["e2e up --world starter", null]],
+    examples: [["gridcheck up --world starter", null]],
   },
   down: {
-    group: "server", managed: true, mcp: "e2e_down",
+    group: "server", managed: true, mcp: "down",
     summary: "Stops the server cleanly: it runs the shutdown hooks, flushes the store and releases the world lease.",
     flags: [["--force", null, "Kill a server that has no bridge yet. Its lease stays live for 30 s."]],
   },
   status: {
-    group: "server", mcp: "e2e_status",
+    group: "server", mcp: "status",
     summary: "The mode, ports, server pid and boot time, gateway, bridge, daemons and the character held.",
   },
   ports: {
@@ -112,13 +122,13 @@ const DOCS = {
     summary: "Prints this tree's block of 20 ports and what listens on each.",
   },
   log: {
-    group: "server", mcp: "e2e_log",
+    group: "server", mcp: "log",
     summary: "The tail of the server's log.",
     flags: [["--grep <regex>", null, "Keep matching lines, case-insensitively."], ["--lines", "40", "How many lines."],
       ["--any-pid", null, "Keep every process's lines, not only the running server's."]],
   },
   login: {
-    group: "ship", needs: "up", mcp: "e2e_login",
+    group: "ship", needs: "up", mcp: "login",
     summary: "Logs a character in over the web gateway and starts the client view.",
     flags: [["--user", "e2eagent", "The account."], ["--name", null, "The character's name, for a new character."]],
   },
@@ -127,7 +137,7 @@ const DOCS = {
     summary: "Releases the held character's session.",
   },
   undock: {
-    group: "ship", needs: "up", mcp: "e2e_undock",
+    group: "ship", needs: "up", mcp: "undock",
     summary: "Undocks the held character's ship.",
   },
   dock: {
@@ -135,40 +145,40 @@ const DOCS = {
     summary: "Docks with stock /dock, which goes back to the home station.",
   },
   slash: {
-    group: "ship", needs: "up", mcp: "e2e_slash",
+    group: "ship", needs: "up", mcp: "slash",
     summary: "Runs a slash command as the character.",
-    examples: [["e2e slash \"/npc 2\"", "two hostile NPCs"], ["e2e slash \"/tr me 30002537\"", "move to a system by ID"]],
+    examples: [["gridcheck slash \"/npc 2\"", "two hostile NPCs"], ["gridcheck slash \"/tr me 30002537\"", "move to a system by ID"]],
   },
   teleport: {
-    group: "ship", needs: "up", mcp: "e2e_teleport",
+    group: "ship", needs: "up", mcp: "teleport",
     summary: "Moves the ship to another system, by name or ID.",
-    examples: [["e2e teleport Rens", null]],
+    examples: [["gridcheck teleport Rens", null]],
   },
   loadout: {
-    group: "ship", needs: "up", mcp: "e2e_loadout",
+    group: "ship", needs: "up", mcp: "loadout",
     summary: "Gives the character a fitted ship, with modules, drones, cargo and charges named by item.",
     flags: [["--modules \"Name xN, ...\"", null, "Modules, fitted to the slots they need."], ["--drones", null, "Drones for the drone bay."],
       ["--cargo", null, "Items for the cargo hold."], ["--charges", null, "Charges to load into the modules."],
       ["--file <loadout.json> | --spec '<json>'", null, "The whole loadout as JSON instead."], ["--json", null, "Print the bridge's reply."]],
-    examples: [["e2e loadout Tristan --modules \"Light Neutron Blaster II x2\" --drones \"Hobgoblin II x5\"", null]],
+    examples: [["gridcheck loadout Tristan --modules \"Light Neutron Blaster II x2\" --drones \"Hobgoblin II x5\"", null]],
   },
   act: {
-    group: "ship", needs: "up", mcp: "e2e_act",
+    group: "ship", needs: "up", mcp: "act",
     summary: "Makes the character act. The server applies every rule, so a refusal comes back in its own words.",
     flags: [["--range", "per action", "Orbit 5,000 m, keep at range 10,000 m, warp 0."], ["--target", "first locked", "Who activate aims at."],
       ["--once", null, "Activate a module for one cycle."], ["--charge", null, "The cargo charge loadAmmo loads."],
       ["--count", null, "How many drones launchDrones launches."], ["--timeout", "30 s", "How long lock waits for the server to list it."]],
-    examples: [["e2e act lock nearest npc", "waits until the server lists the lock"], ["e2e act activate weapons", null],
-      ["e2e act orbit \"name~Blood\" --range 2km", null], ["e2e act launchDrones --count 5", null],
-      ["e2e act engageDrones nearest npc", null]],
+    examples: [["gridcheck act lock nearest npc", "waits until the server lists the lock"], ["gridcheck act activate weapons", null],
+      ["gridcheck act orbit \"name~Blood\" --range 2km", null], ["gridcheck act launchDrones --count 5", null],
+      ["gridcheck act engageDrones nearest npc", null]],
   },
   grid: {
-    group: "watch", needs: "up", mcp: "e2e_grid",
+    group: "watch", needs: "up", mcp: "grid",
     summary: "Lists what's on grid, nearest first, with mode, target and shield, armour and hull.",
     flags: [["--range", "10,000 km", "The cut-off."], ["--all", null, "Everything the session can see."], ["--json", null, "The bridge's full reply."]],
   },
   watch: {
-    group: "watch", needs: "up", mcp: "e2e_watch",
+    group: "watch", needs: "up", mcp: "watch",
     summary: "Prints what changed on grid and why, as one timeline, and saves it as a run.",
     flags: [["--for", "600 s", "How long to watch."], ["--every", "2 s", "How often the grid is sampled."],
       ["--offgrid-every", "5 s", "How often plugins scan the rest of the system."],
@@ -179,7 +189,7 @@ const DOCS = {
       ["--run <id>", null, "Name the run folder."], ["--json", null, "Print the timeline lines as JSON."]],
   },
   perf: {
-    group: "watch", needs: "up", mcp: "e2e_perf",
+    group: "watch", needs: "up", mcp: "perf",
     summary: "Samples the server's ticks over a window and prints them, with the busiest scenes and the profiler's sections.",
     flags: [["--for", "10 s", "How long to sample, 1 to 600 s."], ["--now", null, "The ticks the server holds now, at once."],
       ["--json", null, "Print the figures as JSON."]],
@@ -191,12 +201,36 @@ const DOCS = {
       ["--port N", "a free one", "The port --serve uses."]],
   },
   run: {
-    group: "scenarios", mcp: "e2e_run_scenario",
+    group: "scenarios", mcp: "run_scenario",
     summary: "Runs a scenario: boots its world, runs its steps, watches until it stops, and writes report.md. With no scenario, lists them.",
     flags: [["--check", null, "Only load and check the scenario. Boots nothing."], ["--run <id>", null, "Name the run folder."],
       ["--world <name>|fresh", "the scenario's", "Boot another world."], ["--keep-up", null, "Leave the server running afterwards."],
-      ["--reuse", null, "Reset the server a --reuse run left up, instead of booting."], ["--json", null, "With no scenario, list them as JSON."]],
-    examples: [["e2e run", "list the scenarios"], ["e2e run loadout-npc-fight", null], ["e2e run loadout-npc-fight --check", null]],
+      ["--reuse", null, "Reset the server a --reuse run left up, instead of booting."],
+      ["--detach", null, "Start the run in the background and print its ID; `gridcheck report <run> --wait 600` waits for it."],
+      ["--json", null, "With no scenario, list them as JSON."]],
+    examples: [["gridcheck run", "list the scenarios"], ["gridcheck run loadout-npc-fight", null], ["gridcheck run loadout-npc-fight --check", null],
+      ["gridcheck run loadout-npc-fight --detach", "then gridcheck report <run> --wait 600"]],
+  },
+  scenario: {
+    group: "scenarios", writes: true,
+    summary: "Writes a new scenario to edit: a copy of another, or a template that checks out as it stands. Drafts go in _local/gridcheck/scenarios.",
+    flags: [["--from <scenario>", "the template", "Copy this scenario (a name `gridcheck run` lists, or a path)."],
+      ["--save", null, "Write it to the tree's tools/gridcheck-scenarios/, to commit with the feature."],
+      ["--force", null, "Replace a scenario of that name."]],
+    examples: [["gridcheck scenario new fleet-arrives", null], ["gridcheck scenario new my-fight --from loadout-npc-fight", null]],
+  },
+  report: {
+    group: "scenarios", mcp: "report",
+    summary: "Prints a run's report: its verdict, expected against observed, and its files. With no run, lists the recent runs. Exits 0 passed, 1 failed, 2 did not complete or no such run, 3 still running.",
+    flags: [["<run>|latest", "the recent runs", "Which run."], ["--section summary|full|result|pr", "summary",
+      "full adds the timeline, result is result.json, pr is markdown to cite the run in a PR."],
+    ["--wait <s>", "0", "Wait up to this long for a run still going in the background."]],
+    examples: [["gridcheck report", "the recent runs"], ["gridcheck report latest --wait 600", null], ["gridcheck report latest --section pr", null]],
+  },
+  primer: {
+    group: "tool",
+    summary: "Prints what an agent needs to drive the CLI: the workflow, the scenario format and the condition syntax, with the active plugins' notes.",
+    flags: [["--mcp", null, "The MCP server's version, naming its tools instead of commands."]],
   },
   gui: {
     group: "tool",
@@ -279,7 +313,7 @@ function buildCatalog({ core = {}, plugins = {}, handlers = {}, mcpTools = [] } 
     }
   }
   return {
-    prefix: "node tools/evejs-e2e/bin/e2e.js",
+    prefix: "node tools/gridcheck/bin/gridcheck.js",
     groups: groups.filter((group) => commands.some((command) => command.group === group.id)),
     commands,
     mcpTools: mcpTools.map((tool) => ({ name: tool.name, description: String(tool.description || "").split(/(?<=\.)\s/)[0] })),

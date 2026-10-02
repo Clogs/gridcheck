@@ -1,8 +1,8 @@
 "use strict";
 
-// A tree's e2e.config.json: where its server, data, log and runs live, how
-// `e2e up` starts the server, which listeners can move and which daemons the
-// tree has. `e2e init` probes the tree and writes it; the CLI, the MCP server
+// A tree's gridcheck.config.json: where its server, data, log and runs live, how
+// `gridcheck up` starts the server, which listeners can move and which daemons the
+// tree has. `gridcheck init` probes the tree and writes it; the CLI, the MCP server
 // and the bridge take every path from here. Paths are relative to the tree
 // root with forward slashes, so the file can be committed with the tree.
 //
@@ -22,7 +22,10 @@ const path = require("node:path");
 
 const { LISTENER_ENV, OFFSETS } = require("./ports");
 
-const CONFIG_NAME = "e2e.config.json";
+const CONFIG_NAME = "gridcheck.config.json";
+// Its name before the rename to Gridcheck. A tree that still has only this one
+// is read from it; `gridcheck vendor update` renames it.
+const LEGACY_CONFIG_NAME = "e2e.config.json";
 const CONFIG_VERSION = 1;
 const MODES = Object.freeze(["auto", "attach", "managed"]);
 const DEFAULT_MODE = "auto";
@@ -93,7 +96,7 @@ function marketDefaults(treeRoot) {
   };
 }
 
-// What `e2e init` writes before the listener scan; also what a tree with no
+// What `gridcheck init` writes before the listener scan; also what a tree with no
 // file runs with.
 function defaultConfig(treeRoot, env = process.env) {
   const dataDir = defaultDataDir(treeRoot, env);
@@ -108,10 +111,10 @@ function defaultConfig(treeRoot, env = process.env) {
     gameStore: forFile(treeRoot, path.join(path.dirname(dataDir), "gamestore.sqlite")),
     manifest: forFile(treeRoot, path.join(path.dirname(dataDir), "manifest.json")),
     logFile: forFile(treeRoot, path.join(dataRoot, "logs", "server.log")),
-    e2eDir: "_local/e2e",
-    worldsDir: "_local/e2e/worlds",
-    runsDir: "_local/e2e/runs",
-    scenariosDir: "tools/e2e-scenarios",
+    e2eDir: "_local/gridcheck",
+    worldsDir: "_local/gridcheck/worlds",
+    runsDir: "_local/gridcheck/runs",
+    scenariosDir: "tools/gridcheck-scenarios",
     handshake: "_local/agentBridge/bridge.json",
     listeners: {},
     daemons: { market: marketDefaults(treeRoot) },
@@ -152,7 +155,7 @@ function scanSource(serverRoot, names) {
   return found;
 }
 
-// Which listeners `e2e up` can move onto the tree's port block. A listener
+// Which listeners `gridcheck up` can move onto the tree's port block. A listener
 // moves when the tree's source reads its variable; the rest stay on their
 // stock ports, so two such trees can't run at once.
 // pluginListeners: core/plugins.js registry.listeners.
@@ -170,7 +173,7 @@ function probeListeners(serverRoot, { pluginListeners = [] } = {}) {
     } else if (name === "agentBridge") {
       listeners[name] = { movable: true, via: "EVEJS_AGENT_BRIDGE_PORT" };
     } else if (name === "marketHttp") {
-      // `e2e up` writes the market's TOML itself, so this one always moves.
+      // `gridcheck up` writes the market's TOML itself, so this one always moves.
       listeners[name] = { movable: true, via: "the market's generated TOML" };
     } else {
       listeners[name] = { movable: false, via: "nothing this tool knows" };
@@ -179,7 +182,7 @@ function probeListeners(serverRoot, { pluginListeners = [] } = {}) {
   return listeners;
 }
 
-// -> { config, notes }: the file `e2e init` writes.
+// -> { config, notes }: the file `gridcheck init` writes.
 function probeTree(treeRoot, { env = process.env, pluginListeners = [], mode = DEFAULT_MODE } = {}) {
   const config = defaultConfig(treeRoot, env);
   config.mode = mode;
@@ -241,7 +244,9 @@ function absolute(treeRoot, value) {
 // is wrong with the file, and the defaults stand in for anything unusable.
 // The CLI refuses to run on problems; the bridge logs them.
 function loadTreeConfig(treeRoot, { env = process.env } = {}) {
-  const file = path.join(treeRoot, CONFIG_NAME);
+  const current = path.join(treeRoot, CONFIG_NAME);
+  const legacy = path.join(treeRoot, LEGACY_CONFIG_NAME);
+  const file = !fs.existsSync(current) && fs.existsSync(legacy) ? legacy : current;
   const defaults = defaultConfig(treeRoot, env);
   let raw = null;
   const problems = [];
@@ -313,15 +318,23 @@ function defaultTreeConfig() {
 
 function writeTreeConfig(treeRoot, config, { force = false, dryRun = false } = {}) {
   const file = path.join(treeRoot, CONFIG_NAME);
-  if (fs.existsSync(file) && !force) throw new TreeConfigError(`${CONFIG_NAME} exists; pass --force to replace it`);
+  const legacy = path.join(treeRoot, LEGACY_CONFIG_NAME);
+  if ((fs.existsSync(file) || fs.existsSync(legacy)) && !force) {
+    throw new TreeConfigError(`${fs.existsSync(file) ? CONFIG_NAME : LEGACY_CONFIG_NAME} exists; pass --force to replace it`);
+  }
   const problems = validateConfig(config);
   if (problems.length) throw new TreeConfigError(`refusing to write a bad ${CONFIG_NAME}: ${problems.join("; ")}`);
-  if (!dryRun) fs.writeFileSync(file, `${JSON.stringify(config, null, 2)}\n`);
+  if (!dryRun) {
+    fs.writeFileSync(file, `${JSON.stringify(config, null, 2)}\n`);
+    // One config per tree: the new file replaces the one from before the rename.
+    fs.rmSync(legacy, { force: true });
+  }
   return file;
 }
 
 module.exports = {
   CONFIG_NAME,
+  LEGACY_CONFIG_NAME,
   CONFIG_VERSION,
   DEFAULT_MODE,
   MODES,
