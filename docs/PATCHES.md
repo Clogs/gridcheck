@@ -66,6 +66,10 @@ file, once:
   applied. An edit elsewhere in the file survives a revert.
 - **`detect`.** A patch's `detect({ read })` recognises equivalent code that has no marker, as in
   the LU fork.
+- **What it's for.** `headline`, `gain` and `without` are for the GUI's Patches tab: what the
+  patch gets you in a few words, what you get with it, and what happens without it. Text in
+  backticks shows as code. `patch status --json` passes them on, with the patch's `files` and its
+  number of `hunks`.
 - **Encoding.** A file that isn't UTF-8 is refused, because it couldn't be written back exactly.
 
 ## The patches

@@ -12,6 +12,9 @@ module.exports = {
   id: "xmpp-port",
   version: 1,
   title: "EVEJS_XMPP_SERVER_PORT moves the XMPP chat listener",
+  headline: "Run two servers side by side",
+  gain: "Each tree's chat listener gets its own port. `gridcheck up` picks it for you, so two stock trees can run at the same time.",
+  without: "Every tree wants chat port `5222`, so only one server can be up at a time.",
   hunks: [{
     file: TARGET,
     anchor: ["const address = Object.freeze({"],

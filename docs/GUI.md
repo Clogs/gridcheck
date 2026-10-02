@@ -234,10 +234,18 @@ none.
 
 ## Patches
 
-Each optional patch in the tree's copy with its state, from `gridcheck patch status --json`: `absent`
-(with whether it applies cleanly), `applied`, `detected` (the tree already has equivalent code),
-`partial` or `no-target`. An absent patch offers "Preview apply" and an applied one "Preview
-revert". [PATCHES.md](PATCHES.md) describes the patches.
+One card per optional patch in the tree's copy, from `gridcheck patch status --json`. The card's title
+says what the patch gets you ("Run two servers side by side"), with the patch's id and its state
+beside it: `absent` (shown as "not applied"), `applied`, `detected` (shown as "built in": the tree
+already has equivalent code), `partial` or `no-target`. Two boxes say what you get with the patch
+and what happens without it. A line under them gives the files, the number of insertions, and
+whether it applies cleanly. These texts are the patch's `headline`, `gain` and `without`. A copy whose
+patches have none shows the patch's title.
+
+A patch that applies cleanly offers **Apply…**, and an applied one **Remove…**, which runs
+`patch revert`. Both open the preview, which for a patch is just the files it edits or restores and
+how many insertions each gets or loses. Removing also says what you go without. The dry run's
+output is folded under "Dry-run output". [PATCHES.md](PATCHES.md) describes the patches.
 
 ## Every change is previewed
 

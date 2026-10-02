@@ -910,6 +910,37 @@ dialog.browse { width: min(720px, 94vw); }
 .tbl .why { color: var(--muted); font-size: 12px; margin-top: 2px; }
 .tbl td.act { text-align: right; white-space: nowrap; }
 
+.btn.danger { background: transparent; color: #e88b7b; border-color: color-mix(in srgb, var(--bad) 60%, var(--btn-line)); }
+.btn.danger:hover:not(:disabled) { background: var(--bad); color: #fff; border-color: var(--bad); }
+
+/* Patches tab: one card per patch (gui.js patchCard) */
+.lede b { color: var(--text); font-weight: 600; }
+.pcards { display: grid; gap: 12px; }
+.pcard { display: grid; grid-template-columns: 1fr auto; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
+.pcard.s-applied { border-color: color-mix(in srgb, var(--ok) 35%, var(--line)); }
+.pc-main { padding: 14px 16px 12px; min-width: 0; }
+.pc-top { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
+.pc-top h3 { margin: 0; font-size: 15px; font-weight: 600; }
+.pc-id { font-family: var(--mono); font-size: 11.5px; color: var(--muted); background: var(--bg); border: 1px solid var(--line); border-radius: 4px; padding: 0 6px; }
+.pc-title { margin-top: 4px; color: var(--muted); }
+.pc-vs { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 11px; }
+.pc-vs > div { border-radius: 7px; padding: 9px 12px; font-size: 12.5px; line-height: 1.55; }
+.pc-with { background: color-mix(in srgb, var(--ok) 7%, var(--bg)); border: 1px solid color-mix(in srgb, var(--ok) 25%, var(--line)); }
+.pc-without { background: var(--bg); border: 1px solid var(--line); color: var(--muted); }
+.pc-vs h4 { margin: 0 0 3px; font-size: 10.5px; font-weight: 700; letter-spacing: 0.07em; text-transform: uppercase; }
+.pc-with h4 { color: var(--ok); }
+.pc-without h4 { color: var(--dim); }
+.pc-vs code, .pv-callout code { font-family: var(--mono); font-size: 11.5px; white-space: nowrap; padding: 0 4px; border-radius: 3px;
+  color: var(--text); background: color-mix(in srgb, var(--text) 7%, transparent); }
+.pc-without code { color: var(--muted); }
+.pc-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+.pc-foot { display: flex; flex-wrap: wrap; gap: 0 14px; margin-top: 9px; font-size: 12px; color: var(--dim); }
+.pc-foot span + span::before { content: "\2022"; margin-right: 14px; color: var(--line); }
+.pc-side { display: flex; flex-direction: column; align-items: flex-end; justify-content: center; gap: 6px; width: 170px; padding: 14px 16px;
+  border-left: 1px solid var(--line); }
+.pc-hint { font-size: 11.5px; color: var(--dim); text-align: right; }
+@media (max-width: 900px) { .pc-vs { grid-template-columns: 1fr; } }
+
 /* ---------- Commands ---------- */
 
 .cm-rail { padding: 14px 10px; gap: 4px; }
@@ -1138,6 +1169,18 @@ dialog.pv { width: min(700px, 94vw); }
 .pv-handoff .pv-sec-h { color: var(--accent); }
 .pv-try { margin: 10px 0 0; font-size: 12.5px; color: var(--muted); }
 .pv-try q { color: var(--text); }
+
+/* a patch's files (gui.js patchFiles) */
+.pv-plist { list-style: none; margin: 0; padding: 0; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); overflow: hidden; }
+.pv-plist li { display: flex; align-items: center; gap: 10px; padding: 7px 12px; }
+.pv-plist li + li { border-top: 1px solid var(--line); }
+.pv-plist .pv-ficon { width: 24px; height: 24px; }
+.pv-plist .pv-fdir { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pv-ins { flex: none; font-family: var(--mono); font-size: 11.5px; white-space: nowrap; }
+.pv-ins.add { color: var(--ok); }
+.pv-ins.rm { color: #e88b7b; }
+.pv-sec + .pv-callout { margin-top: -4px; margin-bottom: 14px; }
+.pv-lede.muted { color: var(--muted); margin-bottom: 12px; }
 
 .pv-tech { margin: 4px -18px 0; padding: 0 18px 4px; border-top: 1px dashed var(--line); }
 .pv-tech > summary { padding: 10px 0; font-size: 12px; color: var(--muted); }

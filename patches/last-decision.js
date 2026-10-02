@@ -20,6 +20,9 @@ module.exports = {
   id: "last-decision",
   version: 1,
   title: "NPC controllers record their last decision",
+  headline: "See why each NPC did what it did",
+  gain: "Every NPC records its last decision, such as `engage`, `leash-return` or `order-stop`. Grid rows get a `decision` column and `watch` reports `DECISION` events.",
+  without: "You can see where NPCs are and what they target, but not which branch of their AI they took.",
   hunks: [
     { file: TARGET, anchor: ["if (manualOrder && manualOrder.type === \"stop\") {", "clearNpcCombatState(scene, entity, controller, {"],
       insert: "after", at: 0, lines: set(4, "\"order-stop\"") },

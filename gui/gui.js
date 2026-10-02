@@ -35,6 +35,8 @@
     runData: new Map(),
     runPick: new Map(),
     runOpts: { check: false, keepUp: false, reuse: false },
+    // patch id -> its row from `patch status --json`, for the preview dialog's words.
+    patchRows: new Map(),
     blobs: [],
     frameSeek: null,
   };
@@ -1535,11 +1537,57 @@
     }
   }
 
+  // A patch's own text, with `backticked` parts as code. Built as text nodes, never HTML.
+  function codeText(text) {
+    return String(text || "").split("`").map((part, index) => (index % 2 ? h("code", { text: part }) : part));
+  }
+
+  const PATCH_STATES = {
+    applied: ["ok", "applied"], detected: ["ok", "built in"], absent: ["mute", "not applied"],
+    partial: ["bad", "partly applied"], "no-target": ["bad", "can't apply"], unknown: ["warn", "unknown"],
+  };
+
+  function patchCard(row) {
+    const [cls, label] = PATCH_STATES[row.state] || ["warn", row.state];
+    const why = row.state === "detected" ? "equivalent code is already there, so this Eve.js instance doesn't need it"
+      : row.state === "absent" && row.applies ? "applies cleanly"
+        : row.state === "applied" ? (row.version ? `applied v${row.version}` : "applied")
+          : row.problems ? row.problems.join("; ") : row.missing ? `${row.missing.join(", ")} not in this Eve.js instance` : row.error || "";
+    const foot = [];
+    if (Array.isArray(row.files) && row.files.length) foot.push(plural(row.files.length, "file"));
+    if (row.hunks) foot.push(plural(row.hunks, "insertion"));
+    if (why) foot.push(why);
+    const vs = row.gain || row.without ? h("div", { className: "pc-vs" },
+      row.gain ? h("div", { className: "pc-with" }, h("h4", { text: "With it" }), codeText(row.gain),
+        row.commands ? h("div", { className: "pc-chips" }, row.commands.map((name) => h("code", { text: `/${name}` }))) : null) : null,
+      row.without ? h("div", { className: "pc-without" }, h("h4", { text: "Without it" }), codeText(row.without)) : null) : null;
+    let action = null;
+    let hint = "previews first";
+    if (row.state === "absent" && row.applies !== false) {
+      action = h("button", { type: "button", className: "btn primary", text: "Apply…", onclick: () => preview({ action: "patch-apply", id: row.id }) });
+    } else if (row.state === "applied") {
+      action = h("button", { type: "button", className: "btn danger", text: "Remove…", onclick: () => preview({ action: "patch-revert", id: row.id }) });
+    } else {
+      hint = row.state === "detected" ? "built into this Eve.js instance" : "nothing to do from here";
+    }
+    return h("div", { className: `pcard s-${row.state}`, "data-patch": row.id },
+      h("div", { className: "pc-main" },
+        h("div", { className: "pc-top" },
+          h("h3", { text: row.headline || row.title || row.id }),
+          h("code", { className: "pc-id", text: row.id }),
+          badge(cls, label)),
+        // An older copy's patches have no headline; their title is the only description.
+        row.headline && !vs ? h("div", { className: "pc-title", text: row.title }) : null,
+        vs,
+        foot.length ? h("div", { className: "pc-foot" }, foot.map((text) => h("span", { text }))) : null),
+      h("div", { className: "pc-side" }, action, h("div", { className: "pc-hint", text: hint })));
+  }
+
   async function loadPatches() {
-    const tbody = $("patches").querySelector("tbody");
+    const list = $("patches");
     const tree = currentTree();
     if (!tree || !tree.copy) {
-      tbody.textContent = "";
+      list.textContent = "";
       $("patches-empty").hidden = false;
       $("patches-empty").textContent = "Install the copy into this Eve.js instance first (Install tab).";
       return;
@@ -1550,7 +1598,7 @@
     const patches = body.patches;
     $("patches-empty").hidden = true;
     $("patches-command").textContent = `${patches.command}  (in ${patches.cwd})`;
-    tbody.textContent = "";
+    list.textContent = "";
     if (!Array.isArray(patches.json)) {
       $("patches-empty").hidden = false;
       $("patches-empty").textContent = patches.output || "patch status printed nothing";
@@ -1558,20 +1606,8 @@
     }
     const open = patches.json.filter((row) => row.state === "absent" || row.state === "partial").length;
     setCount("patches", open || null, open > 0);
-    for (const row of patches.json) {
-      const cls = row.state === "applied" || row.state === "detected" ? "ok" : row.state === "absent" ? "mute" : "bad";
-      const why = row.state === "detected" ? "equivalent code is already there, so this Eve.js instance doesn't need it"
-        : row.state === "absent" && row.applies ? "applies cleanly"
-          : row.problems ? row.problems.join("; ") : row.missing ? `${row.missing.join(", ")} not in this Eve.js instance` : row.error || "";
-      const actions = h("td", { className: "act" });
-      if (row.state === "absent") actions.append(h("button", { type: "button", className: "btn sm primary", text: "Preview apply", onclick: () => preview({ action: "patch-apply", id: row.id }) }));
-      if (row.state === "applied") actions.append(h("button", { type: "button", className: "btn sm", text: "Preview revert", onclick: () => preview({ action: "patch-revert", id: row.id }) }));
-      tbody.append(h("tr", {},
-        h("td", {}, h("code", { text: row.id })),
-        h("td", {}, badge(cls, `${row.state}${row.version ? ` v${row.version}` : ""}`, cls === "ok")),
-        h("td", {}, row.title, why ? h("div", { className: "why", text: why }) : null),
-        actions));
-    }
+    state.patchRows = new Map(patches.json.map((row) => [row.id, row]));
+    list.append(...patches.json.map(patchCard));
   }
 
   // ---------- preview and run ----------
@@ -1646,11 +1682,12 @@
             lede: "Replaces this Eve.js instance's copy of Gridcheck in tools/gridcheck/ with the version below." };
       }
       case "patch-apply":
-        return { icon: "patch", title: `Apply the ${request.id} patch`, run: "Apply patch", done: `Applied the ${request.id} patch`,
-          lede: "Inserts the lines below into the server's code. Reverting the patch takes them out again." };
-      case "patch-revert":
-        return { icon: "patch", title: `Revert the ${request.id} patch`, run: "Revert patch", done: `Reverted the ${request.id} patch`,
-          lede: "Takes the patch's lines out of the server's code, so the files are back as they were." };
+      case "patch-revert": {
+        const row = state.patchRows.get(request.id) || {};
+        const apply = request.action === "patch-apply";
+        return { icon: "patch", title: `${apply ? "Apply" : "Remove"} ${request.id}`, run: apply ? "Apply patch" : "Remove patch",
+          done: `${apply ? "Applied" : "Removed"} ${request.id}`, lede: row.headline || row.title || "", danger: !apply };
+      }
       case "init": {
         const replacing = changes.length ? changes[0].exists : false;
         return { icon: "sliders", title: replacing ? "Replace the config" : "Write the config", run: replacing ? "Replace config" : "Write config",
@@ -1854,9 +1891,10 @@
     return h("ol", { className: "pv-next" }, items.map((item) => h("li", {}, h("div", {}, item))));
   }
 
-  function techDetails(steps, { open = false, ran = false } = {}) {
+  function techDetails(steps, { open = false, ran = false, label = null } = {}) {
     return h("details", { className: "pv-tech", open: open || null },
-      h("summary", {}, "Technical details", h("span", { className: "dim", text: ran ? ": the commands and their output" : ": the command, where it runs, and its dry run's output" })),
+      label ? h("summary", { text: label })
+        : h("summary", {}, "Technical details", h("span", { className: "dim", text: ran ? ": the commands and their output" : ": the command, where it runs, and its dry run's output" })),
       steps.map((step) => h("div", { className: "step-block" },
         h("div", { className: "command", text: step.command }),
         h("div", { className: `exit${step.exitCode === 0 ? "" : " bad"}`, text: ran
@@ -1876,13 +1914,59 @@
       source ? h("span", { className: "pv-source" }, `${source.name} ${source.version} ${source.at}`, h("span", { className: "dim", text: ` from ${source.from}` })) : "");
   }
 
-  function previewFooter({ run = null, enabled = false, again = false, close = "Cancel", done = false } = {}) {
+  function previewFooter({ run = null, enabled = false, again = false, close = "Cancel", done = false, danger = false } = {}) {
     $("preview-run").hidden = !run;
     $("preview-run").textContent = run || "Run";
+    $("preview-run").classList.toggle("danger", danger);
     $("preview-run").disabled = !enabled;
     $("preview-again").hidden = !again;
     $("preview-close").textContent = close;
     $("preview-close").className = `btn${done ? " primary" : " ghost"}`;
+  }
+
+  const isPatch = (request) => request.action === "patch-apply" || request.action === "patch-revert";
+
+  // A patch's files, one line each with how many insertions it adds or takes out.
+  function patchFiles(request, p) {
+    const removing = request.action === "patch-revert";
+    return h("ul", { className: "pv-plist" }, summaryOf(p).changes.map((row) => {
+      const cut = row.path.lastIndexOf("/");
+      const count = (row.hunks || []).length;
+      return h("li", { title: row.path },
+        h("span", { className: "pv-ficon" }, icon("file")),
+        h("div", { className: "pv-grow" },
+          h("div", { className: "pv-fname", text: baseName(row.path) }),
+          cut > 0 ? h("div", { className: "pv-fdir", text: row.path.slice(0, cut + 1) }) : null),
+        count ? h("span", { className: `pv-ins ${removing ? "rm" : "add"}`, text: `${removing ? "−" : "+"}${plural(count, "insertion")}` }) : null);
+    }));
+  }
+
+  // Applying or removing a patch: the files it edits, and what removing it gives up.
+  function patchBody(request, p, words, blockers) {
+    const summary = summaryOf(p);
+    const parts = [];
+    if (words.lede) parts.push(h("p", { className: "pv-lede muted", text: words.lede }));
+    if (blockers.length) {
+      parts.push(statusLine("bad", blockers.length, blockers.length === 1 ? "Can't run yet: one thing to fix first." : `Can't run yet: ${blockers.length} things to fix first.`,
+        "Nothing was changed."));
+      parts.push(h("div", { className: "pv-sec" }, blockers.map(blockerCard)));
+    } else if (!p.ok) {
+      parts.push(statusLine("bad", "x", "Can't run.", (p.refused || []).join("; ")));
+    }
+    if (summary.changes.length) {
+      const files = section(request.action === "patch-revert" ? "Files that will be restored" : "Files that will be edited",
+        String(summary.changes.length), patchFiles(request, p));
+      if (blockers.length) files.classList.add("pv-dim");
+      parts.push(files);
+    }
+    const row = state.patchRows.get(request.id);
+    if (request.action === "patch-revert" && row && row.without) {
+      parts.push(h("div", { className: "pv-callout k-change" }, icon("alert"), h("span", {}, h("b", { text: "Without it: " }), codeText(row.without))));
+    }
+    const notes = summary.notes.filter((text) => !/isn't a git checkout/.test(text));
+    if (notes.length) parts.push(h("ul", { className: "pv-notes" }, notes.map((text) => h("li", { text }))));
+    parts.push(techDetails(p.steps || [], { open: !summary.changes.length || blockers.some((blocker) => blocker.kind === "failed"), label: "Dry-run output" }));
+    return parts;
   }
 
   function previewBody(request, p, words) {
@@ -1890,6 +1974,7 @@
     const nothing = nothingToDo(p);
     // With nothing to write, what would block the write doesn't matter.
     const blockers = nothing ? [] : p.blockers || [];
+    if (isPatch(request)) return patchBody(request, p, words, blockers);
     const parts = [];
     if (words.lede) parts.push(h("p", { className: "pv-lede", text: words.lede }));
     if (nothing) {
@@ -1922,7 +2007,9 @@
   function footNote(request, p) {
     if (request.action === "setup") return "Stops at the first step that fails. The preview stays valid for 10 minutes.";
     const count = fileCount(p);
-    return `${count ? `Writes ${plural(count, "file")}. ` : ""}The preview stays valid for 10 minutes.`;
+    const unchecked = isPatch(request) && (p.checks || []).some((check) => check.kind === "not-git")
+      ? "Not a git checkout, so uncommitted edits weren't checked. " : "";
+    return `${unchecked}${count ? `Writes ${plural(count, "file")}. ` : ""}The preview stays valid for 10 minutes.`;
   }
 
   // The finished change in a sentence, from what the preview said it would do.
@@ -1957,7 +2044,7 @@
     if (request.action === "agents" && changed.length === 1 && changed[0].change === "add" && changed[0].agent !== "CLI only") {
       return `To undo, remove the ${changed[0].entry} entry from ${baseName(changed[0].path)}.`;
     }
-    if (request.action === "patch-apply") return "To undo, use Preview revert on the Patches tab.";
+    if (request.action === "patch-apply") return "To undo, use Remove… on the Patches tab.";
     return "";
   }
 
@@ -1989,7 +2076,7 @@
       case "init": return [`Wrote ${where}/gridcheck.config.json.`];
       case "agents": return ["Set up the agents you picked for this Eve.js instance."];
       case "patch-apply": return [`Applied the ${request.id} patch.`];
-      case "patch-revert": return [`Reverted the ${request.id} patch.`, "The files are back as they were."];
+      case "patch-revert": return [`Removed the ${request.id} patch.`, "The files are back as they were."];
       default: return ["Done."];
     }
   }
@@ -2003,7 +2090,7 @@
     previewHead(pending, null);
     $("preview-steps").replaceChildren(h("p", { className: "pv-lede muted", text: "Checking what this would do, without changing anything..." }));
     $("preview-note").textContent = "";
-    previewFooter({ run: pending.run });
+    previewFooter({ run: pending.run, danger: !!pending.danger });
     if (!dialog.open) dialog.showModal();
     try {
       const body = await api("/gui/api/preview", { method: "POST", body: { tree: state.treeID, ...request } });
@@ -2017,7 +2104,7 @@
       state.preview = p.ok && !nothing ? p.previewID : null;
       if (blocked) previewFooter({ again: true, close: "Close" });
       else if (nothing) previewFooter({ close: "Close", done: true });
-      else previewFooter({ run: words.run, enabled: true });
+      else previewFooter({ run: words.run, enabled: true, danger: !!words.danger });
       $("preview-note").textContent = blocked ? "Nothing was changed." : nothing ? "" : footNote(request, p);
     } catch (error) {
       $("preview-note").textContent = error.message;
@@ -2044,7 +2131,8 @@
         previewHead({ ...words, icon: "check", title: words.done }, p.root, { kind: "ok" });
         const next = doneNext(request, p, result);
         const tryIt = request.action === "agents" && (request.agents || []).some((agent) => agent !== "cli");
-        $("preview-steps").replaceChildren(
+        // replaceChildren would write a null out as the text "null".
+        $("preview-steps").replaceChildren(...[
           h("div", { className: "success" },
             h("span", { className: "success-mark" }, icon("check")),
             h("div", {}, h("h3", { text: doneHeadline(request, p) }), h("p", { text: `Took ${seconds} s.` }))),
@@ -2052,16 +2140,16 @@
             h("div", { className: "pv-sec-h", text: next.length === 1 ? "One more step" : "Next" }), nextList(next),
             tryIt ? h("p", { className: "pv-try" }, "Then ask it something like ",
               h("q", { text: "Run the loadout-npc-fight scenario and tell me what happened." })) : null) : null,
-          techDetails(result.steps, { ran: true }));
+          techDetails(result.steps, { ran: true })].filter(Boolean));
         previewFooter({ close: "Done", done: true });
         $("preview-note").textContent = undoHint(request, p);
       } else {
         previewHead({ ...words, icon: "bang" }, p.root, { kind: "bad" });
-        $("preview-steps").replaceChildren(
+        $("preview-steps").replaceChildren(...[
           statusLine("bad", "x", result.refused.length ? "It was refused when it came to run." : "It didn't finish.",
             result.refused.length ? "Nothing was changed." : "The output below says why."),
           result.refused.length ? h("div", { className: "pv-sec" }, result.refused.map((text, index) => blockerCard({ kind: "other", text }, index))) : null,
-          techDetails(result.steps, { open: true, ran: true }));
+          techDetails(result.steps, { open: true, ran: true })].filter(Boolean));
         previewFooter({ again: true, close: "Close" });
         $("preview-note").textContent = "";
       }

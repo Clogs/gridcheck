@@ -246,15 +246,10 @@
         <span class="spacer"></span>
         <button id="patches-refresh" type="button" class="btn sm">&#x21BB; Refresh</button>
       </div>
-      <p class="lede">Optional edits to stock EveJS, written as anchored insertions with a marker comment. Revert gives each file
-        back byte for byte. The Eve.js instance's server must be down.</p>
-      <div class="panel">
-        <table id="patches" class="tbl">
-          <thead><tr><th>Patch</th><th>State</th><th>What it does</th><th></th></tr></thead>
-          <tbody></tbody>
-        </table>
-        <p id="patches-empty" class="empty" hidden></p>
-      </div>
+      <p class="lede">Each patch adds a few lines to stock EveJS so Gridcheck can do more on this Eve.js instance. Gridcheck works
+        without them. <b>Removing a patch puts every file back exactly as it was.</b> The server has to be stopped to apply or remove one.</p>
+      <div id="patches" class="pcards"></div>
+      <p id="patches-empty" class="empty" hidden></p>
     </div>
   </section>
 

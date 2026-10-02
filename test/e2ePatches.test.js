@@ -52,6 +52,16 @@ const DEMO = normalizePatch({
   detect: ({ read }) => read("a.js").includes("options.port"),
 });
 
+test("a patch's state carries what it's for, its files and its insertion count", (t) => {
+  const root = tree(t, { "a.js": MIXED });
+  const patch = normalizePatch({ ...DEMO, headline: "Pick the port", gain: "`port` moves it", without: "fixed port" });
+  const row = patchState(patch, createReader(root.serverRoot));
+  assert.equal(row.state, "absent");
+  assert.deepEqual({ headline: row.headline, gain: row.gain, without: row.without, files: row.files, hunks: row.hunks },
+    { headline: "Pick the port", gain: "`port` moves it", without: "fixed port", files: ["a.js"], hunks: 2 });
+  assert.equal("headline" in patchState(DEMO, createReader(root.serverRoot)), false, "a patch without one has no headline");
+});
+
 test("lines split with their own endings and join back exactly", () => {
   const lines = splitLines(MIXED);
   assert.deepEqual(lines.map((line) => line.eol), ["\r\n", "\r\n", "\n", "\r\n", "\n", "\r\n", ""]);
@@ -168,6 +178,8 @@ test("the shipped patches load with hunks and a check for equivalent code", () =
   for (const patch of patches) {
     assert.ok(patch.hunks.length > 0, `${patch.id} has hunks`);
     assert.equal(typeof patch.detect, "function", `${patch.id} has detect`);
+    // The Patches tab leads with these.
+    for (const key of ["headline", "gain", "without"]) assert.ok(typeof patch[key] === "string" && patch[key].length, `${patch.id} has ${key}`);
     for (const hunk of patch.hunks) {
       assert.ok(["before", "after"].includes(hunk.insert), `${patch.id}: ${hunk.file} insert`);
       assert.ok(hunk.anchor.length && hunk.lines.length, `${patch.id}: ${hunk.file} anchor and lines`);

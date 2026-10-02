@@ -199,7 +199,9 @@ function countMarkers(patch, text) {
 }
 
 // One patch's state against a tree's files.
-// -> { id, title, state, version?, ... }
+// -> { id, title, headline?, gain?, without?, commands?, files, hunks, state, version?, ... }
+//   headline, gain and without are for people: what the patch gets you, and what
+//   you get without it. hunks is the number of insertions.
 //   applied    its markers are in place (version: the one applied)
 //   partial    some of its markers are, not all
 //   detected   equivalent code without the marker (as in the LU fork)
@@ -207,9 +209,12 @@ function countMarkers(patch, text) {
 //   no-target  a file it changes isn't in the tree
 //   unknown    no check for equivalent code, or the check failed
 function patchState(patch, read) {
-  const row = { id: patch.id, title: patch.title || "", state: "absent" };
-  if (patch.broken) return { ...row, state: "unknown" };
   const files = Array.isArray(patch.files) ? patch.files : [];
+  const row = { id: patch.id, title: patch.title || "" };
+  for (const key of ["headline", "gain", "without"]) if (typeof patch[key] === "string" && patch[key]) row[key] = patch[key];
+  if (Array.isArray(patch.commands) && patch.commands.length) row.commands = patch.commands;
+  Object.assign(row, { files, hunks: patch.hunks.length, state: "absent" });
+  if (patch.broken) return { ...row, state: "unknown" };
   const missing = files.filter((file) => read(file) === null && !(read.isBinary && read.isBinary(file)));
   if (missing.length) return { ...row, state: "no-target", missing };
   const markers = files.flatMap((file) => countMarkers(patch, read(file)));
