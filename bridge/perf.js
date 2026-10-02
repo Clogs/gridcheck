@@ -35,10 +35,16 @@ function profilerSettings(env = process.env) {
   return { enabled: String(env.EVEJS_TICK_PROFILE || "") === "1", everyTicks };
 }
 
+// The histogram records the whole interval between its timer's runs, so an
+// idle process reads as the resolution itself; the delay is what's past it.
+// Windows rounds timers up to its clock tick (15.6 ms by default), which
+// leaves an idle floor of about 11 ms here.
+const LOOP_RESOLUTION_MS = 20;
+
 function defaultLoopDelay() {
-  const histogram = monitorEventLoopDelay({ resolution: 20 });
+  const histogram = monitorEventLoopDelay({ resolution: LOOP_RESOLUTION_MS });
   histogram.enable();
-  const value = (ns) => (Number.isFinite(ns) && ns > 0 && ns < 9e18 ? round(ns / 1e6) : null);
+  const value = (ns) => (Number.isFinite(ns) && ns > 0 && ns < 9e18 ? round(Math.max(0, ns / 1e6 - LOOP_RESOLUTION_MS)) : null);
   return {
     read() {
       if (!histogram.count) return { p50: null, p99: null, max: null };

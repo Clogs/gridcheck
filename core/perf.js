@@ -307,7 +307,7 @@
   function sectionRows(profile, limit = 12) {
     return (profile && profile.sections ? profile.sections : []).slice(0, limit)
       .map((row) => [`${row.nested ? "  ↳ " : ""}${row.label}${row.afterTick ? " (after tick)" : ""}`, ms(row.msPerTick),
-        row.pct === null || row.pct === undefined ? "--" : `${row.pct}%`, row.calls ? String(row.calls) : "-"]);
+        row.pct === null || row.pct === undefined ? "--" : `${Number(row.pct).toFixed(1)}%`, row.calls ? String(row.calls) : "-"]);
   }
 
   // What `e2e perf` prints for a POST /perf or GET /perf reply.
