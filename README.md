@@ -68,9 +68,11 @@ Open the printed URL if no browser opens. Then, on the **Install** tab:
 
 1. "Preview install", read what it will copy, then **Run**. That vendors this checkout into
    `tools/evejs-e2e/` and adds a one-file shim the server's loader finds.
-2. Choose **managed** mode, "Preview config", then **Run**. That writes `e2e.config.json`; managed
-   mode lets the tool start and stop the server and build worlds.
-3. Check that "What the tree needs to run" is all ticked, and run **e2e doctor**.
+2. Keep **auto** mode, "Preview config", then **Run**. That writes `e2e.config.json`. In auto mode
+   the tool uses the tree's server when it's up and starts its own when it isn't.
+3. Under **Agents**, the agents found on this machine (Claude Code, Codex) are already ticked.
+   "Preview setup" shows the entry each gets, then **Run** writes it.
+4. Check that "What the tree needs to run" is all ticked, and run **e2e doctor**.
 
 An unpacked zip isn't a git checkout, so the GUI can't check its files for uncommitted changes,
 and each preview says so. In a tree that is a git checkout, a change to a file with uncommitted
@@ -81,12 +83,13 @@ and revert byte for byte. Without them stock reports no NPC decisions and no sla
 outcomes, and two stock trees can't run at once. Each change shows its preview first.
 [docs/GUI.md](docs/GUI.md) describes every tab.
 
-Without the GUI, the same three steps are:
+Without the GUI, the same steps are:
 
 ```bash
 node bin/e2e.js vendor update --tree F:/EveJS-0.12.9                     # in the evejs-e2e checkout
 cd F:/EveJS-0.12.9
-node tools/evejs-e2e/bin/e2e.js init --mode managed
+node tools/evejs-e2e/bin/e2e.js init                                     # auto mode
+node tools/evejs-e2e/bin/e2e.js agents setup                             # the agents it finds
 node tools/evejs-e2e/bin/e2e.js patch apply last-decision slash-success xmpp-port
 ```
 
@@ -97,8 +100,9 @@ node tools/evejs-e2e/bin/e2e.js world build starter        # every skill, a fitt
 node tools/evejs-e2e/bin/e2e.js run loadout-npc-fight      # two rats spawn; drones and guns kill one
 ```
 
-The run boots the server, plays the scenario, stops the server, and prints its verdict and the path
-of its `report.md`. In a new tree the first `starter` build took 80 s, most of it the first boot
+With no server up, the run boots one, plays the scenario, stops the server, and prints its verdict
+and the path of its `report.md`. If you started the tree's server yourself with
+`EVEJS_AGENT_BRIDGE=1` set, the run uses it instead and leaves it running. In a new tree the first `starter` build took 80 s, most of it the first boot
 seeding a game store; a rebuild takes about 20 s. The fight took about 50 s, boot and shutdown
 included.
 
@@ -113,6 +117,11 @@ standalone viewer's URL.
 
 `tools/evejs-e2e/bin/mcp.js` is an MCP server over stdio with the CLI's commands as tools. Its
 instructions teach an agent the workflow and the scenario format.
+
+The GUI's **Agents** step, or `node tools/evejs-e2e/bin/e2e.js agents setup` in the tree, registers
+it with the Claude Code and Codex it finds on this machine. `e2e agents` shows what it found and
+what each already has. [docs/GUIDE.md](docs/GUIDE.md#setting-up-agents) has the rules. By hand,
+it's these entries.
 
 Claude Code: add `.mcp.json` at the tree's root, and start the session in the tree.
 
@@ -144,7 +153,7 @@ run it with `e2e_run_scenario`. [docs/GUIDE.md](docs/GUIDE.md#agent-mcp-tools) l
 for `node tools/evejs-e2e/bin/e2e.js` in the tree:
 
 ```bash
-e2e up --world starter | down | status | doctor
+e2e up --world starter | down | status | doctor | agents
 e2e login | undock | grid | slash "/npc 2" | teleport Rens
 e2e loadout Tristan --modules "Light Neutron Blaster II x2" --drones "Hobgoblin II x5"
 e2e act lock nearest npc | act activate weapons | act launchDrones | act engageDrones nearest npc

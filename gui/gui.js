@@ -24,6 +24,9 @@
     tree: null,
     summaries: new Map(),
     preview: null,
+    // tree id -> { agent id: ticked }, for the boxes someone changed by hand.
+    agentPicks: new Map(),
+    agentChoice: () => [],
     blobs: [],
     frameSeek: null,
   };
@@ -444,19 +447,22 @@
     setBadge("config-badge", !copy.present ? null : config.exists ? badge(config.problems && config.problems.length ? "warn" : "ok", config.mode) : badge("warn", "missing"));
     $("config-status").textContent = !copy.present ? "Install the copy first."
       : config.exists ? `${config.file}, mode ${config.mode}. Runs go to ${config.runsDir}.`
-        : `No ${config.file || "e2e.config.json"} yet. Managed mode lets e2e start the server, restore worlds and build recipes; ` +
-          "attach mode uses a server you start.";
+        : `No ${config.file || "e2e.config.json"} yet. Auto mode uses the tree's server when it's up and starts its own when ` +
+          "it isn't; managed mode always starts its own; attach mode only uses a server you start.";
     const configProblems = $("config-problems");
     configProblems.textContent = "";
     for (const problem of config.problems || []) configProblems.append(h("li", { text: problem }));
-    $("config-mode").value = config.exists ? config.mode : "managed";
+    $("config-mode").value = config.exists ? config.mode : "auto";
     $("config-preview").disabled = !copy.present;
     $("config-preview").textContent = config.exists ? "Preview rewrite" : "Preview config";
+
+    renderAgents(tree, copy);
 
     const prereqs = $("prereqs");
     prereqs.textContent = "";
     for (const row of tree.prerequisites || []) prereqs.append(checkItem(row.ok, row.name, row.ok ? null : row.fix));
-    $("server-status").textContent = tree.serverUp ? `${tree.serverUp}. Changes wait until it stops.` : "The tree's server is down.";
+    $("server-status").textContent = tree.serverUp ? `${tree.serverUp}. Changes other than agent setup wait until it stops.`
+      : "The tree's server is down.";
 
     const plugins = $("plugins");
     plugins.textContent = "";
@@ -471,12 +477,60 @@
     else if (!config.exists) next.append(h("p", { text: "Write the config." }));
     else if ((tree.prerequisites || []).some((row) => !row.ok)) next.append(h("p", { text: "Finish what the tree needs (above), then run e2e doctor." }));
     else {
+      const agentReady = (tree.agents || []).some((row) => row.registered);
       next.append(h("p", { text: "Apply the patches you want on the Patches tab, then from the tree's folder:" }),
-        h("pre", { text: config.mode === "managed"
-          ? `${cli} world build starter\n${cli} run loadout-npc-fight\n${cli} help`
-          : `(start the server with EVEJS_AGENT_BRIDGE=1 set)\n${cli} login\n${cli} run smoke-undock\n${cli} help` }),
+        h("pre", { text: config.mode === "attach"
+          ? `(start the server with EVEJS_AGENT_BRIDGE=1 set)\n${cli} login\n${cli} run smoke-undock\n${cli} help`
+          : `${cli} world build starter\n${cli} run loadout-npc-fight\n${cli} help` }),
+        agentReady ? h("p", { text: "Or ask your agent to test a feature: it has the e2e tools, and starts with e2e_status." }) : null,
         h("p", { className: "muted", text: "Each run shows up on the Runs tab." }));
     }
+  }
+
+  // One row per agent: found or not, set up or not. The boxes start ticked for
+  // agents found here and not set up yet; a box changed by hand stays as set.
+  function renderAgents(tree, copy) {
+    const rows = tree.agents || [];
+    const picks = state.agentPicks.get(tree.id) || {};
+    state.agentPicks.set(tree.id, picks);
+    const usable = (row) => copy.present && !row.registered && !row.problem;
+    const ticked = (row) => usable(row) && (picks[row.id] ?? row.installed);
+    const list = $("agents");
+    list.textContent = "";
+    const update = () => {
+      const chosen = rows.filter(ticked).map((row) => row.id);
+      $("agents-preview").disabled = !chosen.length;
+      $("agents-preview").title = chosen.length ? "" : "Tick an agent that isn't set up yet";
+    };
+    for (const row of rows) {
+      const box = h("input", { type: "checkbox" });
+      box.checked = ticked(row);
+      box.disabled = !usable(row);
+      box.addEventListener("change", () => {
+        picks[row.id] = box.checked;
+        update();
+      });
+      const detail = row.problem ? h("span", { className: "bad", text: row.problem })
+        : row.registered ? h("span", { className: "muted mono", text: `runs this tree's server as ${row.serverName}, in ${row.file}` })
+          : h("span", { className: "muted mono", text: `setup adds ${row.serverName} to ${row.file}` });
+      list.append(h("li", {},
+        h("label", { className: "toggle", title: usable(row) ? `Set up ${row.name}` : "" }, box, h("span", { className: "sw-t" })),
+        h("div", { className: "what" },
+          h("b", { text: row.name }),
+          h("span", { className: "muted", text: row.installed ? `found: ${row.evidence.join(", ")}`
+            : "not found on this machine; tick it to set it up anyway" }),
+          detail),
+        row.problem ? badge("bad", "problem") : row.registered ? badge("ok", "set up", true)
+          : row.installed ? badge("info", "not set up") : badge("mute", "not found")));
+    }
+    const found = rows.filter((row) => row.installed);
+    setBadge("agents-badge", !copy.present ? null : !found.length ? badge("mute", "none found")
+      : found.every((row) => row.registered) ? badge("ok", "ready", true) : badge("warn", "to set up"));
+    $("agents-status").textContent = !copy.present ? "Install the copy first."
+      : "Claude Code reads this tree's .mcp.json. Codex reads one config.toml for every folder, so its entry names this " +
+        "tree's copy by path. Setup only adds entries; it leaves your other servers alone.";
+    state.agentChoice = () => rows.filter(ticked).map((row) => row.id);
+    update();
   }
 
   async function runDoctor() {
@@ -588,7 +642,8 @@
 
   // ---------- preview and run ----------
 
-  const ACTION_TITLES = { vendor: "Install or update the copy", init: "Write e2e.config.json", "patch-apply": "Apply a patch", "patch-revert": "Revert a patch" };
+  const ACTION_TITLES = { vendor: "Install or update the copy", init: "Write e2e.config.json", agents: "Set up agents",
+    "patch-apply": "Apply a patch", "patch-revert": "Revert a patch" };
 
   async function preview(request) {
     const dialog = $("preview");
@@ -660,6 +715,7 @@
     $("doctor-run").addEventListener("click", runDoctor);
     $("copy-preview").addEventListener("click", () => preview({ action: "vendor", force: $("copy-force").checked, from: $("copy-from").value }));
     $("config-preview").addEventListener("click", () => preview({ action: "init", mode: $("config-mode").value }));
+    $("agents-preview").addEventListener("click", () => preview({ action: "agents", agents: state.agentChoice() }));
     $("preview-run").addEventListener("click", runPreview);
     $("preview-close").addEventListener("click", () => $("preview").close());
     $("frame-close").addEventListener("click", () => $("frame-view").close());

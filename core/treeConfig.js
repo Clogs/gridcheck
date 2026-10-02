@@ -6,8 +6,11 @@
 // and the bridge take every path from here. Paths are relative to the tree
 // root with forward slashes, so the file can be committed with the tree.
 //
-//   mode "attach"   the default. You start the server with EVEJS_AGENT_BRIDGE=1
-//                   and the CLI talks to it; up, down and world refuse.
+//   mode "auto"     the default. When the tree's server is up, the CLI attaches
+//                   to it and leaves it running; when none is, a run boots its
+//                   own world and stops it after. down stops only what up started.
+//   mode "attach"   you start the server with EVEJS_AGENT_BRIDGE=1 and the CLI
+//                   talks to it; up, down and world refuse.
 //   mode "managed"  the CLI boots, restores and stops the tree's server itself.
 //
 // The environment wins over the file, as it does for the server:
@@ -21,7 +24,8 @@ const { LISTENER_ENV, OFFSETS } = require("./ports");
 
 const CONFIG_NAME = "e2e.config.json";
 const CONFIG_VERSION = 1;
-const MODES = Object.freeze(["attach", "managed"]);
+const MODES = Object.freeze(["auto", "attach", "managed"]);
+const DEFAULT_MODE = "auto";
 const PATH_KEYS = Object.freeze(["serverDir", "dataRoot", "dataDir", "gameStore", "manifest", "logFile", "e2eDir",
   "worldsDir", "runsDir", "scenariosDir", "handshake"]);
 const KEYS = new Set(["configVersion", "mode", "start", "listeners", "daemons", ...PATH_KEYS]);
@@ -96,7 +100,7 @@ function defaultConfig(treeRoot, env = process.env) {
   const dataRoot = defaultDataRoot(treeRoot, env);
   return {
     configVersion: CONFIG_VERSION,
-    mode: "attach",
+    mode: DEFAULT_MODE,
     serverDir: "server",
     start: startArgv(treeRoot),
     dataRoot: forFile(treeRoot, dataRoot),
@@ -176,7 +180,7 @@ function probeListeners(serverRoot, { pluginListeners = [] } = {}) {
 }
 
 // -> { config, notes }: the file `e2e init` writes.
-function probeTree(treeRoot, { env = process.env, pluginListeners = [], mode = "attach" } = {}) {
+function probeTree(treeRoot, { env = process.env, pluginListeners = [], mode = DEFAULT_MODE } = {}) {
   const config = defaultConfig(treeRoot, env);
   config.mode = mode;
   const serverRoot = path.join(treeRoot, config.serverDir);
@@ -200,7 +204,7 @@ function validateConfig(raw) {
   if (!isObject(raw)) return ["the file is not a JSON object"];
   for (const key of Object.keys(raw)) if (!KEYS.has(key)) problems.push(`unknown key ${key}`);
   if (raw.configVersion !== CONFIG_VERSION) problems.push(`configVersion is ${JSON.stringify(raw.configVersion)}; this tool reads ${CONFIG_VERSION}`);
-  if (raw.mode !== undefined && !MODES.includes(raw.mode)) problems.push(`mode is attach or managed, not ${JSON.stringify(raw.mode)}`);
+  if (raw.mode !== undefined && !MODES.includes(raw.mode)) problems.push(`mode is auto, attach or managed, not ${JSON.stringify(raw.mode)}`);
   for (const key of PATH_KEYS) if (raw[key] !== undefined && !validPath(raw[key])) problems.push(`${key} is a path`);
   if (raw.start !== undefined && !validStart(raw.start)) problems.push('start is an argv starting with "node", e.g. ["node", "."]');
   if (raw.listeners !== undefined) {
@@ -319,6 +323,7 @@ function writeTreeConfig(treeRoot, config, { force = false, dryRun = false } = {
 module.exports = {
   CONFIG_NAME,
   CONFIG_VERSION,
+  DEFAULT_MODE,
   MODES,
   TreeConfigError,
   defaultConfig,

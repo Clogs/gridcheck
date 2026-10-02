@@ -96,15 +96,21 @@ For the chosen tree:
    update" runs `vendor update`. A copy with edits, or a folder that was never vendored, needs "replace
    edited files" (`--force`). The shim's state is shown below it.
 2. **The tree's config.** Whether `e2e.config.json` exists, its mode and any problems in it.
-   "Preview config" runs `e2e init --mode <mode>`, with `--force` when the file exists. Managed
-   mode lets the tool start the server and build worlds; attach mode uses a server you start.
-3. **What the tree needs to run.** Its npm dependencies (`node_modules` at the root and in `server/`,
+   "Preview config" runs `e2e init --mode <mode>`, with `--force` when the file exists. Auto mode,
+   the default, uses the tree's server when it's up and starts its own when it isn't. Managed mode
+   always starts its own; attach mode only uses a server you start.
+3. **Agents.** Claude Code and Codex: whether each is on this machine (and what gave it away),
+   and whether it already runs this tree's MCP server. The agents found and not set up yet start
+   ticked. "Preview setup" runs `e2e agents setup <agents>`, and the preview shows the lines it adds
+   to the tree's `.mcp.json` and to Codex's `config.toml`. Setup only adds entries.
+   [GUIDE.md](GUIDE.md#setting-up-agents) has the rules.
+4. **What the tree needs to run.** Its npm dependencies (`node_modules` at the root and in `server/`,
    where their `package.json` lists any) and the reference data
    (the data dir's `solarSystems/data.json`), each with the command that fixes it. The GUI doesn't
    run these; they are the tree's own setup. Also whether the tree's server is up.
-4. **Plugins and doctor.** The plugins that apply to the tree and the ones skipped, with the
+5. **Plugins and doctor.** The plugins that apply to the tree and the ones skipped, with the
    reason. "Run e2e doctor" runs the tree's `e2e doctor --json` and shows its report.
-5. **Next.** The commands to run once the tree is ready.
+6. **Next.** The commands to run once the tree is ready.
 
 ## Patches
 
@@ -115,7 +121,7 @@ revert". [PATCHES.md](PATCHES.md) describes the patches.
 
 ## Every change is previewed
 
-Install, update, config, apply and revert all work the same way:
+Install, update, config, agent setup, apply and revert all work the same way:
 
 1. The page asks the server for a preview. The server runs the command with `--dry-run` and
    returns the command, the folder it runs in, and the dry run's output: the files a vendor update
@@ -127,9 +133,11 @@ Install, update, config, apply and revert all work the same way:
 
 A change is refused when:
 
-- the tree's server is up (a live bridge handshake, or a live `e2e up` run);
+- the tree's server is up (a live bridge handshake, or a live `e2e up` run). Agent setup is the
+  exception: it doesn't touch the server;
 - a file it would change has uncommitted changes: `tools/evejs-e2e/` and the shim for a vendor
-  update, `e2e.config.json` for config, a patch's targets for an apply. A tree that isn't a git
+  update, `e2e.config.json` for config, `.mcp.json` for Claude Code's setup, a patch's targets for
+  an apply. A tree that isn't a git
   checkout, such as an unpacked zip, can't be checked, and the preview says so;
 - the dry run fails, for example `vendor update` on a drifted copy without `--force`, or a patch
   whose anchor is missing;
@@ -159,10 +167,10 @@ The page uses a small JSON API, and a script or an agent can call it the same wa
 | `GET /gui/api/context` | Checkout or vendored copy, its version and commit. |
 | `GET /gui/api/trees` | The tree list: `id`, `root`, copy version, mode, server up. |
 | `POST /gui/api/trees` `{ "path": "F:/EveJS-0.12.9" }` | Add a tree. |
-| `GET /gui/api/tree?tree=<id>` | The Install tab's summary: `copy`, `shim`, `config`, `prerequisites` (each `{ name, ok, fix }`), `serverUp`, `plugins`. |
+| `GET /gui/api/tree?tree=<id>` | The Install tab's summary: `copy`, `shim`, `config`, `prerequisites` (each `{ name, ok, fix }`), `serverUp`, `plugins`, `agents` (each `{ id, name, installed, evidence, file, registered, serverName, problem }`). |
 | `GET /gui/api/doctor?tree=<id>` | `e2e doctor --json`, parsed. |
 | `GET /gui/api/patches?tree=<id>` | `e2e patch status --json`, parsed. |
-| `POST /gui/api/preview` `{ "tree": "<id>", "action": "vendor" \| "init" \| "patch-apply" \| "patch-revert", "mode": "managed", "id": "xmpp-port", "force": false }` | The preview: `ok`, `refused`, each step's command and dry-run output, and a `previewID` when `ok`. |
+| `POST /gui/api/preview` `{ "tree": "<id>", "action": "vendor" \| "init" \| "agents" \| "patch-apply" \| "patch-revert", "mode": "auto", "agents": ["claude", "codex"], "id": "xmpp-port", "force": false }` | The preview: `ok`, `refused`, each step's command and dry-run output, and a `previewID` when `ok`. |
 | `POST /gui/api/run` `{ "previewID": "..." }` | Runs the previewed commands; each step's output and exit code. |
 | `GET /gui/api/runs?tree=<id>` | The runs, newest first, each with `result`: `name`, `world`, `startedAtMs`, `stoppedAtMs`, `passed`, `exitCode`, `missing`, `expectations` (a count). |
 | `GET /viewer/timeline?tree=<id>&run=<run>&from=<byte>` | The next chunk of a run's `timeline.jsonl`, as the Runs tab reads it. |

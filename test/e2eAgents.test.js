@@ -1,0 +1,215 @@
+"use strict";
+
+// MCP setup for Claude Code and Codex (core/agents.js and `e2e agents`):
+// detection, the entry each agent reads, and that a setup only adds. Every
+// test runs against a scratch home and tree, never this machine's config.
+
+const test = require("node:test");
+const assert = require("node:assert");
+const fs = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
+const { spawnSync } = require("node:child_process");
+
+const agents = require("../core/agents");
+
+const CLI = path.join(__dirname, "..", "bin", "e2e.js");
+const WINDOWS = process.platform === "win32";
+
+function write(file, text) {
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, text);
+  return file;
+}
+
+// <dir>/home, <dir>/bin (on PATH), <dir>/tree with a vendored mcp.js.
+function setup(t) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "e2e-agents-"));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const home = path.join(dir, "home");
+  const bin = path.join(dir, "bin");
+  const tree = path.join(dir, "My Tree");
+  fs.mkdirSync(home, { recursive: true });
+  fs.mkdirSync(bin, { recursive: true });
+  write(path.join(tree, "server", "src", "server.js"), "// a tree\n");
+  write(path.join(tree, "tools", "evejs-e2e", "bin", "mcp.js"), "// the vendored MCP server\n");
+  const io = { env: { PATH: bin, PATHEXT: ".EXE;.CMD" }, platform: process.platform, home };
+  const tool = (name) => write(path.join(bin, WINDOWS ? `${name}.cmd` : name), "");
+  return { dir, home, bin, tree, io, tool, mcp: path.join(tree, "tools", "evejs-e2e", "bin", "mcp.js").split(path.sep).join("/") };
+}
+
+const SAMPLE_CODEX = [
+  "model = \"gpt-5\"",
+  "",
+  "[mcp_servers.node_repl]",
+  "args = []",
+  "command = 'C:\\Users\\me\\node_repl.exe'",
+  "",
+  "[mcp_servers.node_repl.env]",
+  "SOME_VAR = \"1\"",
+  "",
+  "[mcp_servers.serena]",
+  "command = 'C:\\Users\\me\\serena.exe'",
+  "args = [",
+  "    \"start-mcp-server\",",
+  "    \"--context=codex\",",
+  "]",
+  "",
+  "[projects.'f:\\lu\\dev']",
+  "trust_level = \"trusted\"",
+  "",
+].join("\n");
+
+test("an agent is found by its command on PATH or its config folder, and CODEX_HOME moves Codex's", (t) => {
+  const s = setup(t);
+  let found = agents.detectAgents(s.io);
+  assert.deepStrictEqual([found.claude.installed, found.codex.installed], [false, false]);
+  s.tool("claude");
+  fs.mkdirSync(path.join(s.home, ".codex"));
+  found = agents.detectAgents(s.io);
+  assert.strictEqual(found.claude.installed, true);
+  assert.match(found.claude.evidence[0], /^claude on PATH/);
+  assert.deepStrictEqual(found.codex.evidence, ["~/.codex"]);
+  const elsewhere = path.join(s.dir, "codex-home");
+  fs.mkdirSync(elsewhere);
+  found = agents.detectAgents({ ...s.io, env: { ...s.io.env, CODEX_HOME: elsewhere } });
+  assert.match(found.codex.evidence[0], /^CODEX_HOME/);
+  assert.strictEqual(agents.planCodex(s.tree, { ...s.io, env: { CODEX_HOME: elsewhere } }).file, path.join(elsewhere, "config.toml"));
+});
+
+test("Claude Code: the tree's .mcp.json gets an e2e server by relative path, beside the servers it has", (t) => {
+  const s = setup(t);
+  const fresh = agents.planClaude(s.tree, s.io);
+  assert.strictEqual(fresh.change, "add");
+  assert.strictEqual(fresh.serverName, "e2e");
+  assert.deepStrictEqual(JSON.parse(fresh.after), { mcpServers: { e2e: { type: "stdio", command: "node", args: ["tools/evejs-e2e/bin/mcp.js"] } } });
+
+  write(path.join(s.tree, ".mcp.json"), "{\r\n  \"mcpServers\": { \"other\": { \"command\": \"x\" } },\r\n  \"extra\": 1\r\n}\r\n");
+  const merged = agents.planClaude(s.tree, s.io);
+  assert.deepStrictEqual(Object.keys(JSON.parse(merged.after).mcpServers), ["other", "e2e"]);
+  assert.strictEqual(JSON.parse(merged.after).extra, 1);
+  assert.ok(!/[^\r]\n/.test(merged.after), "the file's CRLF endings are kept");
+
+  fs.writeFileSync(path.join(s.tree, ".mcp.json"), merged.after);
+  assert.strictEqual(agents.planClaude(s.tree, s.io).change, "none");
+
+  write(path.join(s.tree, ".mcp.json"), JSON.stringify({ mcpServers: { e2e: { command: "node", args: ["../elsewhere/tools/evejs-e2e/bin/mcp.js"] } } }));
+  const taken = agents.planClaude(s.tree, s.io);
+  assert.strictEqual(taken.serverName, "evejs-e2e", "another tree's e2e is left alone");
+  assert.ok(JSON.parse(taken.after).mcpServers.e2e.args[0].startsWith("../elsewhere"));
+
+  write(path.join(s.tree, ".mcp.json"), "{ nope");
+  assert.throws(() => agents.planClaude(s.tree, s.io), (error) => error instanceof agents.AgentsError && /is not JSON/.test(error.message));
+  write(path.join(s.tree, ".mcp.json"), "[]");
+  assert.throws(() => agents.planClaude(s.tree, s.io), /mcpServers object/);
+});
+
+test("Codex: config.toml gains a table at its end, and every byte before it is kept", (t) => {
+  const s = setup(t);
+  const file = write(path.join(s.home, ".codex", "config.toml"), SAMPLE_CODEX);
+  const plan = agents.planCodex(s.tree, s.io);
+  assert.strictEqual(plan.change, "add");
+  assert.strictEqual(plan.serverName, "e2e");
+  assert.ok(plan.after.startsWith(SAMPLE_CODEX), "the file is only appended to");
+  assert.strictEqual(plan.after.slice(SAMPLE_CODEX.length),
+    `\n[mcp_servers.e2e]\ncommand = "node"\nargs = [${JSON.stringify(s.mcp)}]\ntool_timeout_sec = 600\n`);
+  fs.writeFileSync(file, plan.after);
+  assert.strictEqual(agents.planCodex(s.tree, s.io).change, "none", "set up once");
+
+  // No file yet, and a file with no final newline.
+  fs.rmSync(file);
+  assert.strictEqual(agents.planCodex(s.tree, s.io).after, `[mcp_servers.e2e]\ncommand = "node"\nargs = [${JSON.stringify(s.mcp)}]\ntool_timeout_sec = 600\n`);
+  write(file, "model = \"x\"\r\n[a]\r\nb = 1");
+  assert.strictEqual(agents.planCodex(s.tree, s.io).after, `model = "x"\r\n[a]\r\nb = 1\r\n\r\n[mcp_servers.e2e]\r\ncommand = "node"\r\n` +
+    `args = [${JSON.stringify(s.mcp)}]\r\ntool_timeout_sec = 600\r\n`);
+});
+
+test("Codex: another live tree keeps e2e and this one gets its own name; an e2e whose script is gone is replaced in place", (t) => {
+  const s = setup(t);
+  const other = write(path.join(s.dir, "other", "tools", "evejs-e2e", "bin", "mcp.js"), "").split(path.sep).join("/");
+  const file = write(path.join(s.home, ".codex", "config.toml"),
+    `${SAMPLE_CODEX}[mcp_servers.e2e]\ncommand = "node"\nargs = ['${other}']\n\n[mcp_servers.e2e-my-tree]\ncommand = "x"\n`);
+  const named = agents.planCodex(s.tree, s.io);
+  assert.strictEqual(named.change, "add");
+  assert.strictEqual(named.serverName, "e2e-my-tree-2", "the tree's folder name, then a number past the ones taken");
+
+  const gone = path.join(s.dir, "deleted", "tools", "evejs-e2e", "bin", "mcp.js").split(path.sep).join("/");
+  const before = `${SAMPLE_CODEX}[mcp_servers.e2e]\ncommand = "node"\nargs = ["${gone}"]\nstartup_timeout_sec = 9\n\n` +
+    "[mcp_servers.e2e.env]\nKEEP = \"1\"\n\n[tail]\nx = 1\n";
+  fs.writeFileSync(file, before);
+  const replaced = agents.planCodex(s.tree, s.io);
+  assert.strictEqual(replaced.change, "replace");
+  assert.strictEqual(replaced.gone, gone);
+  assert.deepStrictEqual(replaced.replaced, ["[mcp_servers.e2e]", "command = \"node\"", `args = ["${gone}"]`, "startup_timeout_sec = 9"]);
+  assert.strictEqual(replaced.after, before.replace(`args = ["${gone}"]\nstartup_timeout_sec = 9\n`,
+    `args = [${JSON.stringify(s.mcp)}]\ntool_timeout_sec = 600\n`), "only the e2e table changes; its env table and the rest stay");
+});
+
+test("Codex: an inline mcp_servers isn't edited, and the reply carries the entry to add by hand", (t) => {
+  const s = setup(t);
+  write(path.join(s.home, ".codex", "config.toml"), "mcp_servers.x.command = \"y\"\n[a]\n");
+  assert.throws(() => agents.planCodex(s.tree, s.io), /defines mcp_servers inline.*\n\[mcp_servers\.e2e\]/s);
+  write(path.join(s.home, ".codex", "config.toml"), "[mcp_servers]\nx = { command = \"y\" }\n");
+  assert.throws(() => agents.planCodex(s.tree, s.io), /inline/);
+});
+
+test("table headers read as key paths, quoted keys included", () => {
+  assert.deepStrictEqual(agents.headerKeys("[mcp_servers.node_repl.env]"), ["mcp_servers", "node_repl", "env"]);
+  assert.deepStrictEqual(agents.headerKeys("[projects.'f:\\lu\\dev']  # trusted"), ["projects", "f:\\lu\\dev"]);
+  assert.deepStrictEqual(agents.headerKeys(" [ plugins . \"a@b\" ]"), ["plugins", "a@b"]);
+  for (const line of ["[[array]]", "key = [1]", "[a b]", "[]"]) assert.strictEqual(agents.headerKeys(line), null, line);
+});
+
+test("setup writes for the agents found, plans both before writing either, and a dry run writes nothing", (t) => {
+  const s = setup(t);
+  assert.deepStrictEqual(agents.setupAgents(s.tree, null, { io: s.io }), [], "none found, none chosen");
+  s.tool("claude");
+  s.tool("codex");
+  const dry = agents.setupAgents(s.tree, null, { dryRun: true, io: s.io });
+  assert.deepStrictEqual(dry.map((row) => [row.id, row.plan.change, row.wrote]), [["claude", "add", false], ["codex", "add", false]]);
+  assert.ok(!fs.existsSync(path.join(s.tree, ".mcp.json")));
+  assert.ok(!fs.existsSync(path.join(s.home, ".codex")));
+
+  write(path.join(s.tree, ".mcp.json"), "{ broken");
+  assert.throws(() => agents.setupAgents(s.tree, null, { io: s.io }), /is not JSON/);
+  assert.ok(!fs.existsSync(path.join(s.home, ".codex", "config.toml")), "Codex wasn't written either");
+  fs.rmSync(path.join(s.tree, ".mcp.json"));
+
+  const wrote = agents.setupAgents(s.tree, null, { io: s.io });
+  assert.deepStrictEqual(wrote.map((row) => row.wrote), [true, true]);
+  assert.match(fs.readFileSync(path.join(s.home, ".codex", "config.toml"), "utf8"), /^\[mcp_servers\.e2e\]/);
+  assert.deepStrictEqual(agents.setupAgents(s.tree, ["codex"], { io: s.io }).map((row) => row.plan.change), ["none"]);
+  assert.throws(() => agents.setupAgents(s.tree, ["cursor"], { io: s.io }), /no agent cursor/);
+  const rows = agents.agentStatus(s.tree, s.io);
+  assert.deepStrictEqual(rows.map((row) => [row.id, row.installed, row.registered, row.serverName]),
+    [["claude", true, true, "e2e"], ["codex", true, true, "e2e"]]);
+});
+
+test("e2e agents: status, a dry run that shows the lines, and setup", (t) => {
+  const s = setup(t);
+  s.tool("claude");
+  const env = { ...process.env, EVEJS_E2E_TREE: s.tree, HOME: s.home, USERPROFILE: s.home };
+  // A copied Windows environment spells it Path; a second PATH key would be ambiguous.
+  env[Object.keys(env).find((key) => key.toUpperCase() === "PATH") || "PATH"] = s.bin;
+  delete env.CODEX_HOME;
+  const cli = (...args) => {
+    const result = spawnSync(process.execPath, [CLI, ...args], { env, encoding: "utf8", timeout: 60_000, windowsHide: true });
+    return { code: result.status, out: `${result.stdout}${result.stderr}` };
+  };
+  const status = cli("agents");
+  assert.strictEqual(status.code, 0, status.out);
+  assert.match(status.out, /Claude Code +found \(claude on PATH/);
+  assert.match(status.out, /Codex +not found on this machine/);
+  const dry = cli("agents", "setup", "--dry-run");
+  assert.strictEqual(dry.code, 0, dry.out);
+  assert.match(dry.out, /Claude Code: would add server e2e to \.mcp\.json/);
+  assert.match(dry.out, /^ {2}\+ +"args": \[$/m);
+  assert.match(dry.out, /nothing was written \(--dry-run\)/);
+  assert.doesNotMatch(dry.out, /Codex/, "only the agents found");
+  assert.ok(!fs.existsSync(path.join(s.tree, ".mcp.json")));
+  const ran = cli("agents", "setup", "claude", "codex");
+  assert.strictEqual(ran.code, 0, ran.out);
+  assert.match(ran.out, /Codex: added server e2e to .*config\.toml \(not found on this machine\)/);
+  assert.match(cli("agents", "setup").out, /Claude Code: already runs this tree's server as e2e/);
+  assert.strictEqual(cli("agents", "setup", "cursor").code, 1);
+});

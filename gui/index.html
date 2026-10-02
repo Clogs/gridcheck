@@ -176,6 +176,7 @@
                 <ul id="config-problems" class="problems"></ul>
                 <div class="row">
                   <label class="tree"><span class="lbl">Mode</span><select id="config-mode">
+                    <option value="auto">auto: uses a server that's up, else starts its own</option>
                     <option value="managed">managed: e2e starts and stops the server</option>
                     <option value="attach">attach: you start the server</option>
                   </select></label>
@@ -184,11 +185,19 @@
               </div>
             </div>
             <div class="panel">
-              <div class="panel-head"><span class="stepn">3</span><h3>What the tree needs to run</h3></div>
+              <div class="panel-head"><span class="stepn">3</span><h3>Agents</h3><span id="agents-badge" class="right"></span></div>
+              <div class="pbody">
+                <p id="agents-status"></p>
+                <ul id="agents" class="agents"></ul>
+                <div class="row"><button id="agents-preview" type="button" class="btn primary">Preview setup</button></div>
+              </div>
+            </div>
+            <div class="panel">
+              <div class="panel-head"><span class="stepn">4</span><h3>What the tree needs to run</h3></div>
               <div class="pbody"><ul id="prereqs" class="checks"></ul><p id="server-status" class="muted"></p></div>
             </div>
             <div class="panel">
-              <div class="panel-head"><span class="stepn">4</span><h3>Plugins and doctor</h3></div>
+              <div class="panel-head"><span class="stepn">5</span><h3>Plugins and doctor</h3></div>
               <div class="pbody">
                 <ul id="plugins" class="checks"></ul>
                 <div class="row"><button id="doctor-run" type="button" class="btn">Run e2e doctor</button><span id="doctor-command" class="muted mono"></span></div>
@@ -196,7 +205,7 @@
               </div>
             </div>
             <div class="panel">
-              <div class="panel-head"><span class="stepn">5</span><h3>Next</h3></div>
+              <div class="panel-head"><span class="stepn">6</span><h3>Next</h3></div>
               <div class="pbody" id="next-steps"></div>
             </div>
           </div>

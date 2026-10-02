@@ -7,8 +7,10 @@
 //            expectations, frames and report.md of one; a workbench view or a
 //            trace view with a lane per ball (gui/runs.js, gui/replay.js)
 //   Install  known trees or a typed path; for each, the vendored copy and its
-//            drift check, the shim, e2e.config.json, what the tree still needs,
-//            the plugins and `e2e doctor`. Installs, updates and writes config.
+//            drift check, the shim, e2e.config.json, the agents on this machine
+//            (Claude Code, Codex) and whether each runs the tree's MCP server,
+//            what the tree still needs, the plugins and `e2e doctor`. Installs,
+//            updates, writes config and sets the agents up (core/agents.js).
 //   Patches  each optional stock edit's state, a preview, apply and revert
 //
 // Every write is a CLI command. The page asks for a preview, which runs that
@@ -32,6 +34,7 @@ const { spawn, spawnSync } = require("node:child_process");
 
 const vendor = require("./vendor");
 const treeConfig = require("./treeConfig");
+const agents = require("./agents");
 const { createToolRegistry, loadPlugins, treeAt } = require("./plugins");
 const { createAgentBridgeHttp } = require("../bridge/http");
 const { createAgentBridgeViewer, resolveRunDir } = require("../bridge/viewer");
@@ -314,7 +317,17 @@ function summarizeTree(root, { context, trees }) {
     serverUp: serverUpReason(root, config),
     // What this checkout's plugins make of the tree; doctor asks the tree's own copy.
     plugins: { active: loaded.active.map((row) => row.name), skipped: loaded.skipped },
+    // The agents on this machine, and whether each already runs this tree's MCP server.
+    agents: agentRows(root),
   };
+}
+
+function agentRows(root) {
+  try {
+    return agents.agentStatus(root);
+  } catch (error) {
+    return agents.AGENT_IDS.map((id) => ({ id, name: agents.AGENT_NAMES[id], installed: false, evidence: [], problem: error.message }));
+  }
 }
 
 // ---------- running the CLI ----------
@@ -402,8 +415,8 @@ function planAction(action, root, params, context) {
   }
   if (action === "init") {
     requireCopy(root);
-    const mode = String(params.mode || "attach");
-    if (!treeConfig.MODES.includes(mode)) throw new GuiError(`mode is ${treeConfig.MODES.join(" or ")}`);
+    const mode = String(params.mode || treeConfig.DEFAULT_MODE);
+    if (!treeConfig.MODES.includes(mode)) throw new GuiError(`mode is ${treeConfig.MODES.join(", ")}`);
     const force = exists(path.join(root, treeConfig.CONFIG_NAME));
     return { steps: [treeStep(root, ["init", "--mode", mode, ...(force ? ["--force"] : [])])], dirtyTargets: [treeConfig.CONFIG_NAME] };
   }
@@ -414,12 +427,22 @@ function planAction(action, root, params, context) {
     // The patch command checks its own targets for uncommitted changes and reports them in the dry run.
     return { steps: [treeStep(root, ["patch", action === "patch-apply" ? "apply" : "revert", id])], dirtyTargets: [] };
   }
+  if (action === "agents") {
+    requireCopy(root);
+    const chosen = Array.isArray(params.agents) ? [...new Set(params.agents.map(String))] : [];
+    if (!chosen.length) throw new GuiError("pick an agent to set up");
+    const unknown = chosen.filter((id) => !agents.AGENT_IDS.includes(id));
+    if (unknown.length) throw new GuiError(`no agent ${unknown.join(", ")}; the agents are ${agents.AGENT_IDS.join(" and ")}`);
+    // An agent's config doesn't touch the server, so this may run while it's up.
+    return { steps: [treeStep(root, ["agents", "setup", ...chosen])], dirtyTargets: chosen.includes("claude") ? [".mcp.json"] : [],
+      serverMayRun: true };
+  }
   throw new GuiError(`unknown action ${action}`);
 }
 
 function guards(root, plan) {
   const reasons = [];
-  const up = serverUpReason(root);
+  const up = plan.serverMayRun ? null : serverUpReason(root);
   if (up) reasons.push(`${up}; stop it first (e2e down, or stop the server you started)`);
   if (plan.dirtyTargets.length) {
     const status = gitDirty(root, plan.dirtyTargets);

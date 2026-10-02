@@ -30,7 +30,8 @@ function git(cwd, ...args) {
 
 const HELP = [
   "node tools/evejs-e2e/bin/e2e.js <command>",
-  "  e2e init [--mode attach|managed] [--force] [--dry-run]",
+  "  e2e init [--mode auto|attach|managed] [--force] [--dry-run]",
+  "  e2e agents [status] [--json] | agents setup [claude] [codex] [--dry-run]",
   "  e2e vendor update [--from <checkout|tag>] [--tree <path>] [--force] [--dry-run] | vendor check [--tree <path>]",
   "  e2e patch list | patch status [<id>] [--json] | patch apply|revert <id>... [--dry-run]",
 ].join("\n");
@@ -170,6 +171,44 @@ test("a write is previewed with --dry-run and then runs exactly that command onc
   }
   const noCopy = await app.handle("POST", "/gui/api/preview", {}, { tree: gui.treeID(s.other), action: "init", mode: "managed" });
   assert.match(noCopy.body.error, /no vendored copy yet/);
+});
+
+test("agent setup is previewed like any change, may run while the server is up, and names the agents ticked", async (t) => {
+  const s = setup(t);
+  const fake = fakeRun();
+  const app = gui.createGui({ context: s.context, stateFile: s.stateFile, run: fake.run });
+  const id = gui.treeID(s.tree);
+  const summary = body(await app.handle("GET", "/gui/api/tree", { tree: id })).tree;
+  assert.deepStrictEqual(summary.agents.map((row) => row.id), ["claude", "codex"]);
+  assert.ok(summary.agents.every((row) => typeof row.installed === "boolean" && Array.isArray(row.evidence)), JSON.stringify(summary.agents));
+
+  write(s.tree, "_local/agentBridge/bridge.json", JSON.stringify({ port: 1, token: "t", pid: process.pid }));
+  const previewed = body(await app.handle("POST", "/gui/api/preview", {}, { tree: id, action: "agents", agents: ["codex", "claude", "codex"] })).preview;
+  assert.strictEqual(previewed.ok, true, JSON.stringify(previewed));
+  assert.deepStrictEqual(previewed.refused, [], "a running server doesn't block it");
+  assert.deepStrictEqual(fake.calls.at(-1), ["agents", "setup", "codex", "claude", "--dry-run"]);
+  const ran = body(await app.handle("POST", "/gui/api/run", {}, { previewID: previewed.previewID })).result;
+  assert.strictEqual(ran.ok, true);
+  assert.deepStrictEqual(fake.calls.at(-1), ["agents", "setup", "codex", "claude"]);
+  const patch = body(await app.handle("POST", "/gui/api/preview", {}, { tree: id, action: "patch-apply", id: "xmpp-port" })).preview;
+  assert.match(patch.refused[0], /server is up/, "other changes still wait for it");
+
+  for (const [agents, error] of [[[], /pick an agent/], [["cursor"], /no agent cursor/], [undefined, /pick an agent/]]) {
+    const refused = await app.handle("POST", "/gui/api/preview", {}, { tree: id, action: "agents", agents });
+    assert.strictEqual(refused.statusCode, 400);
+    assert.match(refused.body.error, error);
+  }
+  assert.match((await app.handle("POST", "/gui/api/preview", {}, { tree: gui.treeID(s.other), action: "agents", agents: ["claude"] })).body.error,
+    /no vendored copy yet/);
+});
+
+test("the config is written in auto mode unless another is picked", async (t) => {
+  const s = setup(t);
+  const fake = fakeRun();
+  const app = gui.createGui({ context: s.context, stateFile: s.stateFile, run: fake.run });
+  const previewed = body(await app.handle("POST", "/gui/api/preview", {}, { tree: gui.treeID(s.tree), action: "init" })).preview;
+  assert.strictEqual(previewed.ok, true);
+  assert.deepStrictEqual(fake.calls.at(-1), ["init", "--mode", "auto", "--dry-run"]);
 });
 
 test("a copy whose command has no --dry-run isn't previewed at all, so an old copy can't make the change", async (t) => {

@@ -447,6 +447,12 @@ pre {
 .checks li.bad::before { content: "\2717"; color: var(--bad); }
 .checks li.info::before { content: "\2013"; color: var(--muted); }
 .checks .muted { margin-left: 6px; }
+.agents { list-style: none; padding: 0; margin: 0 0 8px; display: flex; flex-direction: column; gap: 8px; font-size: 12.5px; }
+.agents li { display: grid; grid-template-columns: auto 1fr auto; gap: 2px 10px; align-items: start; }
+.agents .what { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.agents .what b { color: var(--text, inherit); font-weight: 600; }
+.agents .what .muted { overflow-wrap: anywhere; }
+.agents .what .bad { color: var(--bad); }
 .tbl { width: 100%; border-collapse: collapse; font-size: 12.5px; }
 .tbl th { text-align: left; font-size: 10px; text-transform: uppercase; letter-spacing: 0.07em; color: var(--dim); font-weight: 600; padding: 8px 14px; border-bottom: 1px solid var(--line); background: var(--panel2); }
 .tbl td { padding: 9px 14px; border-bottom: 1px solid var(--line); vertical-align: top; }

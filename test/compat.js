@@ -625,6 +625,38 @@ async function stockLane(flags, context) {
       await check(lane, "server stopped (attach)", () => stopByHand(server));
     }
   }
+
+  // Auto, the default: with no server up a run boots its own and stops it;
+  // with one started by hand, it runs on that one and leaves it up.
+  await check(lane, "init (auto, the default)", () => {
+    const line = cliIn(tree, ["init", "--force"]).split(/\r?\n/).find((text) => /^wrote /.test(text)) || "";
+    if (!/mode auto$/.test(line)) throw new CompatError(`init wrote ${line || "nothing"}`);
+    return line;
+  });
+  await check(lane, "run smoke-undock boots its own server (auto)", async () => {
+    const verdict = await runScenario(tree, []);
+    const config = require("../core/treeConfig").loadTreeConfig(tree, { env: {} });
+    const handshake = readJSON(config.handshake);
+    if (handshake && pidAlive(handshake.pid)) throw new CompatError(`the run left pid ${handshake.pid} up`);
+    return verdict;
+  });
+  require("../core/worlds").freshWorld(tree);
+  let own = null;
+  if (await check(lane, "server started by hand (auto)", async () => {
+    own = await startByHand(tree);
+    return own.text;
+  })) {
+    try {
+      await check(lane, "down refuses a server started by hand (auto)", () => lastLine(cliIn(tree, ["down"], { expect: 1 })));
+      await check(lane, "run smoke-undock attaches to it (auto)", async () => {
+        const verdict = await runScenario(tree, []);
+        if (!pidAlive(own.pid)) throw new CompatError(`the run stopped pid ${own.pid}, which it should have left up`);
+        return `${verdict}; pid ${own.pid} still up`;
+      });
+    } finally {
+      await check(lane, "server stopped (auto)", () => stopByHand(own));
+    }
+  }
 }
 
 function luVendoredClean(tree) {

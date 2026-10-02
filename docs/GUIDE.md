@@ -11,7 +11,7 @@ ways to run its server, [WORLDS.md](WORLDS.md) loadouts and world recipes, [PATC
 the optional stock edits, and [GUI.md](GUI.md) the web page.
 
 ```bash
-node tools/evejs-e2e/bin/e2e.js world build starter        # managed mode: a fitted Tristan docked in Amamake
+node tools/evejs-e2e/bin/e2e.js world build starter        # a fitted Tristan docked in Amamake
 node tools/evejs-e2e/bin/e2e.js up --world starter         # boot it
 node tools/evejs-e2e/bin/e2e.js login                      # account e2eagent, character Agent Observer
 node tools/evejs-e2e/bin/e2e.js undock
@@ -34,14 +34,32 @@ agent can do all of this through the `e2e` MCP tools instead of a shell.
 `node tools/evejs-e2e/bin/e2e.js <command>` in the tree and returns what the CLI printed, so a
 session in a worktree drives that worktree's server. The CLI stays the source of truth: a tool adds
 no rule of its own, and anything a tool did can be repeated in a shell. The server speaks MCP over
-stdio, has no dependencies and opens no port. The README shows how to register it with Claude Code
-and Codex.
+stdio, has no dependencies and opens no port.
+
+### Setting up agents
+
+`e2e agents` says which agents this machine has and whether each already runs this tree's server.
+`e2e agents setup` registers it with every agent it finds; name `claude` or `codex` to choose, or
+to set one up that it didn't find. `--dry-run` prints the lines it would add and writes nothing. The
+GUI's Install tab runs the same command, with the agents it found ticked.
+
+| Agent | Found by | Writes |
+| --- | --- | --- |
+| Claude Code | `claude` on `PATH`, `~/.claude` or `~/.claude.json` | `.mcp.json` at the tree's root: server `e2e`, `node tools/evejs-e2e/bin/mcp.js`. Start Claude Code in the tree; it asks once to approve the project's server. |
+| Codex | `codex` on `PATH`, or `~/.codex` (`CODEX_HOME` moves it) | `[mcp_servers.e2e]` at the end of `config.toml`, with the copy's absolute path and `tool_timeout_sec = 600`. |
+
+A setup only adds. It merges into an existing `.mcp.json` and keeps its other servers, and it
+appends to `config.toml`, keeping every byte before its own table. Codex reads one file for every
+folder. When another tree already has `e2e` there, this tree's server is named
+`e2e-<folder>`. The one entry setup replaces is a Codex `e2e` whose `mcp.js` no longer exists. A
+`config.toml` that defines `mcp_servers` inline isn't edited, and the error shows the table to add
+by hand. When an entry already runs this tree's `mcp.js`, setup leaves it as it is.
 
 | Tool | CLI | Notes |
 | --- | --- | --- |
 | `e2e_status` | `status`, `world list`, `run` | Start here: server, character, saved worlds and recipes, scenarios, active plugins, recent runs and background runs. |
 | `e2e_doctor` | `doctor` | What the tree supports: gateway calls, the client view, patches, plugins, ports, loadouts. |
-| `e2e_up`, `e2e_down` | `up`, `down` | Managed mode only. |
+| `e2e_up`, `e2e_down` | `up`, `down` | Auto and managed mode. In auto mode `down` stops only a server `up` started. |
 | `e2e_login`, `e2e_undock`, `e2e_teleport` | `login`, `undock`, `teleport` | `e2e_teleport` is stock `/tr`. |
 | `e2e_loadout` | `loadout` | A ship and its fit by item name, skills checked first. |
 | `e2e_grid` | `grid` | `json: true` prints the field names conditions use. |
@@ -70,7 +88,8 @@ or with `save: true` to `tools/e2e-scenarios/` to commit with the feature. It al
 - `wait: false` starts the run detached and returns its run ID at once, with the console in
   `_local/e2e/mcp/<run>.log`. `e2e_report { run, waitSeconds: 600 }` waits for it, up to 600 s a
   call. Use this where the client limits a tool call's time (Codex: 60 s by default);
-- cancelling the call kills the CLI and runs `e2e down`, since a killed CLI can't. `e2e_down`
+- cancelling the call kills the CLI and runs `e2e down`, since a killed CLI can't, unless the run
+  was using a server that was already up (attach mode, or auto mode with a server up). `e2e_down`
   ends a background run early, and the run still writes its report.
 
 `e2e_report` with no `run` lists recent runs and their verdicts; `run: "latest"` is the newest.
@@ -181,13 +200,15 @@ node tools/evejs-e2e/bin/e2e.js world copy --from ../other-tree
 - Saved worlds belong to one tree. To use one elsewhere, `world copy --from` that tree after
   restoring it there.
 
-`up`, `down`, `world copy`, `world save` and `world build` need managed mode.
+`up`, `down`, `world copy`, `world save` and `world build` need auto or managed mode, and the
+world commands need the server down.
 
 ## Starting and stopping
 
-In attach mode you start the server with `EVEJS_AGENT_BRIDGE=1` set, and the tool works on it. In
-managed mode the CLI starts and stops it. [TREES.md](TREES.md) has both, and `e2e status` prints
-the mode.
+In auto mode, the default, the tool uses the tree's server when it's up and starts its own when it
+isn't. In attach mode you start the server with `EVEJS_AGENT_BRIDGE=1` set, and the tool works on
+it. In managed mode the CLI starts and stops it. [TREES.md](TREES.md) has all three, and
+`e2e status` prints the mode and, in auto mode, which case applies now.
 
 `e2e up` starts any daemons the config turns on, then the server's own start command, in the
 background, with `EVEJS_AGENT_BRIDGE=1` and every listener it can move on the tree's port block. It
@@ -426,7 +447,8 @@ node tools/evejs-e2e/bin/e2e.js act stop
 
 `e2e run <scenario>` runs a whole check in one command. In managed mode it boots the scenario's
 world, runs setup, watches until a stop condition, shuts the server down and writes a report of
-expected against observed. In attach mode it uses the live server as it is. Scenarios are JSON
+expected against observed. In attach mode it uses the live server as it is. In auto mode it does
+the first when no server is up and the second when one is. Scenarios are JSON
 files in the tree's `tools/e2e-scenarios/`, in `tools/evejs-e2e/scenarios/` and in each active
 plugin's `plugins/<name>/scenarios/`; `e2e run` lists them all. Pass a name or a path.
 
@@ -543,8 +565,9 @@ checked scenario.
 ### What a run does
 
 1. In managed mode, refuses if the tree's server is already running, so a run always starts from
-   its world. A recipe world is built first when it's missing or stale.
-2. Runs `up --world <world>` (managed mode), then the login.
+   its world. In auto mode, a server that's up means the run uses it and skips the boot. When the
+   run boots, a recipe world is built first when it's missing or stale.
+2. Runs `up --world <world>` when it boots, then the login.
 3. Starts one watch, so the timeline covers the whole of setup.
 4. Runs the other setup steps, and records each one as a `STEP` line in the timeline.
 5. Starts the `during` steps, if any, and waits for a stop condition. By default only events
@@ -552,7 +575,7 @@ checked scenario.
    still belongs to setup. With `"from": "start"`, setup's events count too, and a condition setup
    already met stops the run at once. The timeout counts from the end of setup. `expect` always
    matches the whole timeline.
-6. Writes a `STOP` line, stops the watch and runs `down` (managed mode). `down` runs whatever
+6. Writes a `STOP` line, stops the watch and runs `down` when it booted. `down` runs whatever
    happened before it: a failed boot, a refused step or Ctrl-C. `--keep-up` leaves the server
    running.
 

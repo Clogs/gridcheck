@@ -40,6 +40,7 @@ const loadoutTools = require("../core/loadout");
 const recipeTools = require("../core/recipes");
 const vendor = require("../core/vendor");
 const patchEngine = require("../core/patches");
+const agentTools = require("../core/agents");
 
 const REPO_ROOT = DEFAULT_TREE_ROOT;
 const REGISTRY = defaultRegistry();
@@ -63,7 +64,9 @@ const MARKET_OUT_PATH = path.join(E2E_DIR, "market.out.log");
 const MARKET_BUILD_PATH = path.join(E2E_DIR, "market.build.log");
 const LISTENERS = usableListeners(REGISTRY.listeners);
 const TREE_PORTS = portsForTree(REPO_ROOT, process.env, LISTENERS);
-const MANAGED = CONFIG.mode === "managed";
+const MODE = CONFIG.mode;
+const MANAGED = MODE === "managed";
+const AUTO = MODE === "auto";
 
 const BOOLEAN_FLAGS = new Set(["all", "json", "any-pid", "force", "fresh", "no-market", "no-log", "help",
   "check", "keep-up", "positions", "once", "serve", "offline", "dry-run", ...REGISTRY.booleanFlags]);
@@ -142,13 +145,13 @@ function serverLogPath(handshake = readHandshake()) {
   return (handshake && handshake.logFile) || CONFIG.logFile;
 }
 
-// The lifecycle commands belong to managed mode (e2e.config.json mode).
+// The lifecycle commands belong to managed and auto mode (e2e.config.json mode).
 function requireManaged(command) {
-  if (MANAGED) return;
+  if (MODE !== "attach") return;
   throw new CliError(
-    `\`e2e ${command}\` needs managed mode; this tree is in attach mode (${relativePath(CONFIG.file)}). ` +
-    "Start the server yourself with EVEJS_AGENT_BRIDGE=1 set, or let the CLI manage it: " +
-    "`e2e init --mode managed --force`.",
+    `\`e2e ${command}\` needs auto or managed mode; this tree is in attach mode (${relativePath(CONFIG.file)}). ` +
+    "Start the server yourself with EVEJS_AGENT_BRIDGE=1 set, or let the CLI start one when none is up: " +
+    "`e2e init --mode auto --force`.",
   );
 }
 
@@ -162,6 +165,14 @@ function readRun() {
 // pid to another process.
 function runLive(run) {
   return Boolean(run && !run.stoppedAtMs && pidAlive(run.pid));
+}
+
+// A live server that `e2e up` didn't start: one you started with
+// EVEJS_AGENT_BRIDGE=1 set. Auto mode attaches to it and never stops it.
+function startedElsewhere(handshake = readHandshake()) {
+  if (!handshake) return null;
+  const run = readRun();
+  return runLive(run) && run.pid === handshake.pid ? null : handshake;
 }
 
 function writeRun(run) {
@@ -234,7 +245,9 @@ function requireHandshake() {
   if (!handshake) {
     throw new CliError(
       `no live agent bridge (${relativePath(BRIDGE_HANDSHAKE_PATH)}). ` +
-      (MANAGED ? "Start the server with `e2e up`." : "Start the tree's server with EVEJS_AGENT_BRIDGE=1 set (attach mode)."),
+      (MANAGED ? "Start the server with `e2e up`."
+        : AUTO ? "Start one with `e2e up`, or start the tree's server yourself with EVEJS_AGENT_BRIDGE=1 set (auto mode attaches to either)."
+          : "Start the tree's server with EVEJS_AGENT_BRIDGE=1 set (attach mode)."),
     );
   }
   return handshake;
@@ -966,27 +979,33 @@ async function cmdRun(positionals, flags) {
     return;
   }
   const override = flags.world === undefined ? null : String(flags.world);
-  const { file, scenario: loaded } = loadScenarioOrFail(positionals.join(" "), { anyWorld: !MANAGED || override !== null });
+  // Managed: the run boots the scenario's world (or --world) and stops it after.
+  // Attach: it runs on the live server as it is, and leaves it running.
+  // Auto: attach when the tree's server is up, else boot as managed does.
+  const running = readHandshake();
+  const boots = MANAGED || (AUTO && !running);
+  const { file, scenario: loaded } = loadScenarioOrFail(positionals.join(" "), { anyWorld: !boots || override !== null });
   if (flags.check) {
     printScenario(file, loaded);
     return;
   }
-  // Managed: the run boots the scenario's world (or --world) and stops it after.
-  // Attach: it runs on the live server as it is, and leaves it running.
-  const running = readHandshake();
   if (MANAGED && running) {
     throw new CliError(`this tree's server is running (pid ${running.pid}); a run boots its own world. \`e2e down\` first.`);
   }
-  if (!MANAGED && !running) {
+  if (!boots && !running) {
     throw new CliError("attach mode runs on a live server, and this tree has none. Start it with EVEJS_AGENT_BRIDGE=1 " +
-      "set, or `e2e init --mode managed --force` to let runs boot their own world.");
+      "set, or `e2e init --mode auto --force` to let runs boot their own world when none is up.");
   }
-  if (MANAGED && override !== null && override !== scenarioTools.FRESH_WORLD && !savedWorldExists(override)) {
+  if (!boots && override !== null && AUTO) {
+    throw new CliError(`--world needs the server down: it's up (pid ${running.pid}), so auto mode would run on it as it is. ` +
+      `${startedElsewhere(running) ? "Stop it where you started it" : "`e2e down` it"}, or drop --world.`);
+  }
+  if (boots && override !== null && override !== scenarioTools.FRESH_WORLD && !savedWorldExists(override)) {
     throw new CliError(`no saved world ${override} (e2e world list)`);
   }
-  if (MANAGED && override === null && loaded.recipe) await ensureRecipeWorld(loaded.recipe);
-  const world = MANAGED ? override || loaded.world : null;
-  const scenario = MANAGED ? { ...loaded, world } : { ...loaded, world: `attached to pid ${running.pid}`, up: {} };
+  if (boots && override === null && loaded.recipe) await ensureRecipeWorld(loaded.recipe);
+  const world = boots ? override || loaded.world : null;
+  const scenario = boots ? { ...loaded, world } : { ...loaded, world: `attached to pid ${running.pid}`, up: {} };
   const runID = flags.run ? String(flags.run).replace(/[^A-Za-z0-9._-]/g, "_") : `${runStamp(Date.now())}-${scenario.name}`;
   const runDir = path.join(RUNS_DIR, runID);
   if (fs.existsSync(runDir)) throw new CliError(`run ${runID} already exists (${relativePath(runDir)}); pass another --run`);
@@ -1000,11 +1019,12 @@ async function cmdRun(positionals, flags) {
   const onInterrupt = () => controller.abort();
   process.on("SIGINT", onInterrupt);
   const ops = {
-    up: MANAGED
+    up: boots
       ? () => cmdUp({ ...(world === scenarioTools.FRESH_WORLD ? { fresh: true } : { world }), ...upFlagsFor(scenario.up) })
       : async () => {
-        console.log(`run: attach mode: scenario world ${loaded.world} and its up options are not applied; ` +
-          `running on the live server, pid ${running.pid}`);
+        console.log(`run: ${AUTO ? "auto mode found the server up" : "attach mode"}: scenario world ${loaded.world} ` +
+          "and its up options are not applied; " +
+          `running on the live server, pid ${running.pid}, and leaving it up`);
       },
     step: runScenarioStep,
     startWatch: (onEvent) => openWatch(requireLogin(readState()), requireHandshake(), {
@@ -1022,7 +1042,7 @@ async function cmdRun(positionals, flags) {
       onEvent,
     }),
     down: async () => {
-      if (!MANAGED) return;
+      if (!boots) return;
       if (flags["keep-up"]) console.log("--keep-up: the server stays up; `e2e down` stops it");
       else await cmdDown({});
     },
@@ -1189,7 +1209,10 @@ function describeLeases(leases) {
 // server waits out a lease before taking the world.
 function requireWorldIdle() {
   const handshake = readHandshake();
-  if (handshake) throw new CliError(`this tree's server is running (pid ${handshake.pid}); \`e2e down\` first`);
+  if (handshake) {
+    throw new CliError(`this tree's server is running (pid ${handshake.pid}); ` +
+      `${AUTO && startedElsewhere(handshake) ? "you started it, so stop it where you started it" : "`e2e down` first"}`);
+  }
   const leases = worlds.liveLeases(WORLD_PATH);
   const held = leases.filter((lease) => !lease.pid || pidAlive(lease.pid));
   if (held.length) {
@@ -1300,7 +1323,8 @@ async function cmdUp(flags) {
   requireManaged("up");
   const running = readHandshake();
   if (running && await bridgeReady(running)) {
-    console.log(`already up: pid ${running.pid}, ${describePorts(activePorts())}`);
+    console.log(`already up: pid ${running.pid}, ${describePorts(activePorts())}` +
+      `${AUTO && startedElsewhere(running) ? "; you started it, and auto mode attaches to it" : ""}`);
     return;
   }
   if (flags.world && flags.fresh) throw new CliError("--world and --fresh both choose the world; pass one");
@@ -1439,6 +1463,10 @@ async function cmdDown(flags) {
   requireManaged("down");
   const run = readRun() || {};
   const handshake = readHandshake();
+  if (AUTO && startedElsewhere(handshake)) {
+    throw new CliError(`the server up (pid ${handshake.pid}) wasn't started by \`e2e up\`, so auto mode leaves it running; ` +
+      "stop it where you started it");
+  }
   const serverPid = handshake ? handshake.pid : runLive(run) ? run.pid : null;
   if (serverPid) {
     const timeoutMs = Math.max(5, Number(flags.timeout) || 120) * 1000;
@@ -1693,8 +1721,8 @@ function cmdPatch(positionals, flags) {
 
 // Probes the tree and writes its e2e.config.json.
 function cmdInit(flags) {
-  const mode = flags.mode === undefined ? "attach" : String(flags.mode);
-  if (!treeConfig.MODES.includes(mode)) throw new CliError(`--mode takes ${treeConfig.MODES.join(" or ")}`);
+  const mode = flags.mode === undefined ? treeConfig.DEFAULT_MODE : String(flags.mode);
+  if (!treeConfig.MODES.includes(mode)) throw new CliError(`--mode takes ${treeConfig.MODES.join(", ")}`);
   const { config, notes } = treeConfig.probeTree(REPO_ROOT, { pluginListeners: LISTENERS, mode });
   const dryRun = Boolean(flags["dry-run"]);
   let file;
@@ -1717,11 +1745,70 @@ function cmdInit(flags) {
     ...(dryRun ? ["nothing was written (--dry-run). The file would be:", JSON.stringify(config, null, 2)] : []),
     dryRun ? null : config.mode === "managed"
       ? "next: e2e up --fresh (a new world) or e2e up --world <name>, then e2e login"
-      : "next: start the server with EVEJS_AGENT_BRIDGE=1 set (`npm start` in the server folder, or StartServer.bat " +
-        "from a shell that has it), then e2e login",
+      : config.mode === "auto"
+        ? "next: e2e world build starter, then e2e run <scenario>. A run boots its own world when no server is up, and " +
+          "attaches to one you started with EVEJS_AGENT_BRIDGE=1 set"
+        : "next: start the server with EVEJS_AGENT_BRIDGE=1 set (`npm start` in the server folder, or StartServer.bat " +
+          "from a shell that has it), then e2e login",
   ].filter((line) => line !== null);
   for (const line of lines) console.log(line);
   return lines.join("\n");
+}
+
+// The agents on this machine and whether each runs this tree's MCP server;
+// `agents setup` registers it with them (core/agents.js).
+function cmdAgents(positionals, flags) {
+  const [action = "status", ...ids] = positionals;
+  const call = (fn) => {
+    try {
+      return fn();
+    } catch (error) {
+      throw error instanceof agentTools.AgentsError ? new CliError(error.message) : error;
+    }
+  };
+  if (action === "status") {
+    const rows = call(() => agentTools.agentStatus(REPO_ROOT));
+    if (flags.json) {
+      console.log(JSON.stringify(rows, null, 2));
+      return rows;
+    }
+    for (const row of rows) {
+      const found = row.installed ? `found (${row.evidence.join(", ")})` : "not found on this machine";
+      const where = row.problem ? `problem: ${row.problem}`
+        : row.registered ? `runs this tree's server as ${row.serverName} (${row.file})`
+          : `not set up; setup would add ${row.serverName} to ${row.file}`;
+      console.log(`${row.name.padEnd(12)} ${found}\n${"".padEnd(12)} ${where}`);
+    }
+    return rows;
+  }
+  if (action !== "setup") throw new CliError("agents takes status [--json] or setup [claude] [codex] [--dry-run]");
+  const dryRun = Boolean(flags["dry-run"]);
+  const results = call(() => agentTools.setupAgents(REPO_ROOT, ids.length ? ids : null, { dryRun }));
+  if (!results.length) {
+    throw new CliError("found neither Claude Code nor Codex on this machine; name one to set it up anyway, e.g. " +
+      "`e2e agents setup claude`");
+  }
+  for (const { name, installed, plan } of results) {
+    const file = relativePath(plan.file).startsWith("..") ? plan.file.split(path.sep).join("/") : relativePath(plan.file);
+    if (plan.change === "none") {
+      console.log(`${name}: already runs this tree's server as ${plan.serverName} (${file})`);
+      continue;
+    }
+    const verb = plan.change === "replace" ? (dryRun ? "would replace" : "replaced") : (dryRun ? "would add" : "added");
+    console.log(`${name}: ${verb} server ${plan.serverName} ${plan.change === "replace" ? "in" : "to"} ${file}` +
+      `${plan.gone ? `; its old entry ran ${plan.gone}, which is gone` : ""}${installed ? "" : " (not found on this machine)"}`);
+    for (const line of plan.replaced || []) console.log(`  - ${line}`);
+    for (const line of plan.added) console.log(`  + ${line}`);
+  }
+  const changed = results.filter((row) => row.plan.change !== "none");
+  if (dryRun) console.log(changed.length ? "nothing was written (--dry-run)" : "nothing to write");
+  if (changed.some((row) => row.id === "claude")) {
+    console.log("next, Claude Code: start it in this tree's folder; it asks once to approve the project's MCP server");
+  }
+  if (changed.some((row) => row.id === "codex")) {
+    console.log("next, Codex: start a new session; the server is in every Codex session, and names this tree by path");
+  }
+  return results;
 }
 
 function formatDoctor(report) {
@@ -1731,7 +1818,7 @@ function formatDoctor(report) {
     `${tool.vendored ? " (vendored)" : " (checkout)"}`);
   const config = report.tree && report.tree.config;
   lines.push(`tree       ${report.tree ? report.tree.root : "?"}; ` +
-    (config && config.exists ? `${treeConfig.CONFIG_NAME}, mode ${config.mode}` : `no ${treeConfig.CONFIG_NAME} (defaults, mode attach; e2e init writes one)`));
+    (config && config.exists ? `${treeConfig.CONFIG_NAME}, mode ${config.mode}` : `no ${treeConfig.CONFIG_NAME} (defaults, mode ${treeConfig.DEFAULT_MODE}; e2e init writes one)`));
   for (const problem of (config && config.problems) || []) lines.push(`           config problem: ${problem}`);
   lines.push(`checked    ${report.source || "?"}`);
   const gateway = report.gateway || {};
@@ -1814,7 +1901,10 @@ async function cmdStatus() {
   const state = readState();
   const ports = activePorts();
   const [gatewayUp, marketUp] = await Promise.all([gatewayReady(ports), ports.marketHttp ? httpOK(marketHealthURL(ports)) : false]);
-  console.log(`mode   ${CONFIG.mode}${CONFIG.exists ? "" : ` (no ${treeConfig.CONFIG_NAME}; e2e init writes one)`}`);
+  const elsewhere = startedElsewhere(handshake);
+  const now = !AUTO ? "" : elsewhere ? `: attached to pid ${elsewhere.pid}, a server you started; runs use it and leave it up`
+    : handshake ? `: e2e up's server is up, pid ${handshake.pid}; runs use it` : ": no server up; a run boots its own world";
+  console.log(`mode   ${CONFIG.mode}${CONFIG.exists ? "" : ` (no ${treeConfig.CONFIG_NAME}; e2e init writes one)`}${now}`);
   console.log(`ports  ${describePorts(ports)}`);
   if (runLive(run)) {
     console.log(run.readyAtMs
@@ -1848,8 +1938,12 @@ function upUsage() {
 // (registry.commands) run with pluginIO() and can't take a core name.
 const CORE_COMMANDS = {
   init: {
-    usage: ["init [--mode attach|managed] [--force] [--dry-run]"],
+    usage: ["init [--mode auto|attach|managed] [--force] [--dry-run]"],
     run: (_positionals, flags) => cmdInit(flags),
+  },
+  agents: {
+    usage: ["agents [status] [--json] | agents setup [claude] [codex] [--dry-run]"],
+    run: cmdAgents,
   },
   doctor: {
     usage: ["doctor [--offline] [--json]"],
@@ -1933,7 +2027,7 @@ function helpText() {
 }
 
 // Commands that run even when e2e.config.json is broken: they fix or report it.
-const CONFIG_EXEMPT = new Set(["init", "doctor", "help", "vendor", "gui"]);
+const CONFIG_EXEMPT = new Set(["init", "doctor", "help", "vendor", "gui", "agents"]);
 
 async function main(argv) {
   const { command, positionals, flags } = parseArgs(argv);

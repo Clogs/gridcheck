@@ -23,7 +23,8 @@ const { defaultTreeConfig } = require("../core/treeConfig");
 const REPO_ROOT = DEFAULT_TREE_ROOT;
 const REGISTRY = defaultRegistry();
 const CONFIG = defaultTreeConfig();
-const MANAGED = CONFIG.mode === "managed";
+const MODE = CONFIG.mode;
+const MANAGED = MODE === "managed";
 const CLI_PATH = path.join(__dirname, "e2e.js");
 const E2E_DIR = CONFIG.e2eDir;
 const RUNS_DIR = CONFIG.runsDir;
@@ -39,6 +40,12 @@ const WATCH_DEFAULT_SECONDS = 60;
 const MAX_WAIT_SECONDS = 600;
 const NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/;
 
+const MODE_TEXT = Object.freeze({
+  managed: "This tree is in managed mode: the CLI boots and stops its server (e2e_up, e2e_down), and a run boots its own world, so call e2e_down first if the server is up.",
+  attach: "This tree is in attach mode: its server is started by hand with EVEJS_AGENT_BRIDGE=1 set, and the tools work on that live server. e2e_up and e2e_down refuse, and a run uses the server as it is: its world is not restored and the server stays up. If no server is up, ask the user to start one.",
+  auto: "This tree is in auto mode. When its server is up (one the user started with EVEJS_AGENT_BRIDGE=1 set, or one e2e_up started), the tools and runs use it as it is: a run doesn't restore its world, and the server stays up. When none is up, a run boots its own world and stops it after, and e2e_up starts one. e2e_down stops only a server e2e_up started. e2e_status says which applies now.",
+});
+
 // The core's instructions, then each plugin's primer.
 function instructions(registry = REGISTRY) {
   const upKeys = ["market", "timeout", ...registry.upFlags.map((flag) => flag.key)].join(", ");
@@ -49,9 +56,7 @@ function instructions(registry = REGISTRY) {
 
 Start with e2e_status: it shows whether this tree's server is up, the saved worlds, the scenarios and the plugins that are active. e2e_doctor says what this tree supports: the gateway calls, the client view, the optional patches and the ports.
 
-${MANAGED
-    ? "This tree is in managed mode: the CLI boots and stops its server (e2e_up, e2e_down), and a run boots its own world, so call e2e_down first if the server is up."
-    : "This tree is in attach mode: its server is started by hand with EVEJS_AGENT_BRIDGE=1 set, and the tools work on that live server. e2e_up and e2e_down refuse, and a run uses the server as it is: its world is not restored and the server stays up. If no server is up, ask the user to start one."}
+${MODE_TEXT[MODE] || MODE_TEXT.auto}
 
 To verify a feature, write a scenario and run it (e2e_run_scenario). A scenario is JSON:
 { "description": "...", "world": "<a saved world e2e_status lists, or fresh>" (or "recipe": "starter" instead, a world the run builds from worlds/starter.recipe.json: every skill and a fitted Tristan docked in Amamake),
@@ -104,6 +109,11 @@ function pidAlive(pid) {
   } catch (error) {
     return Boolean(error && error.code === "EPERM");
   }
+}
+
+function serverUp() {
+  const handshake = readJSON(CONFIG.handshake);
+  return Boolean(handshake && handshake.port && pidAlive(Math.trunc(Number(handshake.pid) || 0)));
 }
 
 // Same form as the CLI's run IDs.
@@ -524,7 +534,7 @@ const TOOLS = [
   },
   {
     name: "e2e_up",
-    description: "Managed mode only. Start this tree's server (and market daemon) in the background and wait until a character can log in, " +
+    description: "Managed and auto mode. Start this tree's server (and market daemon) in the background and wait until a character can log in, " +
       "about 25 s warm. For grid checks pass world (a saved world e2e_status lists). Without world or fresh it keeps " +
       "the current world. Refuses if the server is already up. e2e_run_scenario does its own up and down, so don't " +
       "call this before a run.",
@@ -672,8 +682,11 @@ const TOOLS = [
     name: "e2e_run_scenario",
     description: (MANAGED
       ? "Run a scenario: boot its world, run setup, watch until a stop condition, shut down, and write a "
-      : "Run a scenario on the live server (attach mode: its world is not restored and the server stays up): run setup, " +
-        "watch until a stop condition, and write a ") +
+      : MODE === "attach"
+        ? "Run a scenario on the live server (attach mode: its world is not restored and the server stays up): run setup, " +
+          "watch until a stop condition, and write a "
+        : "Run a scenario (auto mode): when the server is up, on it as it is (its world is not restored and it stays up); " +
+          "when none is, boot the scenario's world and shut it down after. Run setup, watch until a stop condition, and write a ") +
       "report of expected against observed with tactical frames. Pass name to run a scenario file, or name and scenario " +
       "(the JSON object) to write one first. check: true only validates it, which boots nothing; do that first. " +
       (MANAGED ? "The server must be down (e2e_down). " : "") +
@@ -686,7 +699,7 @@ const TOOLS = [
       check: bool("Only load and check the scenario; boot nothing."),
       run: str("Run ID (default: start time and scenario name). Must be new."),
       keepUp: bool("Leave the server running after the run, to look around with the other tools."),
-      world: str("Managed mode: boot this saved world (or fresh) instead of the scenario's."),
+      world: str("When the run boots its own world (managed mode, or auto with no server up): this saved world (or fresh) instead of the scenario's."),
       wait: bool("Wait for the run to finish (default true). false: start it in the background and return its run ID."),
     }),
     async run(params, context) {
@@ -733,10 +746,12 @@ const TOOLS = [
           "to wait for it and read the verdict.");
       }
 
+      // Auto mode boots only when no server is up; a server it attached to isn't the run's to stop.
+      const boots = MANAGED || (MODE === "auto" && !serverUp());
       const reply = await runCli(args, context);
       if (reply.aborted) {
-        // A killed CLI can't run its own `down`. In attach mode the server isn't the run's to stop.
-        const down = MANAGED ? (await runCli(["down"])).output : "";
+        // A killed CLI can't run its own `down`.
+        const down = boots ? (await runCli(["down"])).output : "";
         return textResult(`${prefix}run ${runID} cancelled.\n${tailLines(reply.output, 20)}\n${down}`, true);
       }
       const state = runState(runID);

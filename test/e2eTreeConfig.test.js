@@ -1,7 +1,7 @@
 "use strict";
 
 // A tree's e2e.config.json (core/treeConfig.js): defaults, the file, the
-// environment, the listener probe, and the CLI's attach and managed modes.
+// environment, the listener probe, and the CLI's auto, attach and managed modes.
 
 const test = require("node:test");
 const assert = require("node:assert");
@@ -30,12 +30,12 @@ function scratchTree(t, files = {}) {
 
 const NO_ENV = {};
 
-test("a tree with no file gets the stock layout, in attach mode", (t) => {
+test("a tree with no file gets the stock layout, in auto mode", (t) => {
   const root = scratchTree(t, { "_local/gameStore/manifest.json": "{}" });
   const config = loadTreeConfig(root, { env: NO_ENV });
   assert.equal(config.exists, false);
   assert.deepEqual(config.problems, []);
-  assert.equal(config.mode, "attach");
+  assert.equal(config.mode, "auto");
   assert.deepEqual(config.start, ["node", "--max-old-space-size=8192", "."]);
   assert.equal(config.dataDir, path.join(root, "_local", "gameStore", "data"));
   assert.equal(config.gameStore, path.join(root, "_local", "gameStore", "gamestore.sqlite"));
@@ -91,16 +91,16 @@ test("the file sets paths relative to the tree, and the worlds follow it", (t) =
 
 test("every problem in the file is reported, and the defaults stand in", (t) => {
   assert.deepEqual(validateConfig({ configVersion: 1 }), []);
-  const problems = validateConfig({ configVersion: 2, mode: "auto", colour: "red", start: ["npm", "start"], runsDir: "",
+  const problems = validateConfig({ configVersion: 2, mode: "sometimes", colour: "red", start: ["npm", "start"], runsDir: "",
     listeners: { xmpp: { movable: "no" } }, daemons: { redis: {}, market: { enabled: "yes", port: 1 } } });
-  for (const pattern of [/configVersion is 2/, /mode is attach or managed/, /unknown key colour/, /start is an argv/,
+  for (const pattern of [/configVersion is 2/, /mode is auto, attach or managed/, /unknown key colour/, /start is an argv/,
     /runsDir is a path/, /listeners.xmpp.movable/, /daemons.redis/, /daemons.market: unknown key port/, /market.enabled/]) {
     assert.ok(problems.some((problem) => pattern.test(problem)), `${pattern} in ${problems.join("; ")}`);
   }
-  const root = scratchTree(t, { [CONFIG_NAME]: JSON.stringify({ configVersion: 1, mode: "auto",
+  const root = scratchTree(t, { [CONFIG_NAME]: JSON.stringify({ configVersion: 1, mode: "sometimes",
     gameStore: "somewhere/else.sqlite" }) });
   const config = loadTreeConfig(root, { env: NO_ENV });
-  assert.equal(config.mode, "attach", "a bad mode falls back to attach");
+  assert.equal(config.mode, "auto", "a bad mode falls back to auto");
   assert.ok(config.problems.some((problem) => /gameStore must sit beside the data dir/.test(problem)), config.problems.join("; "));
   fs.writeFileSync(path.join(root, CONFIG_NAME), "{ not json");
   assert.match(loadTreeConfig(root, { env: NO_ENV }).problems[0], /not JSON/);
@@ -133,7 +133,7 @@ test("writing refuses to replace a file without force, and refuses a bad config"
   assert.throws(() => writeTreeConfig(root, config), /exists; pass --force/);
   writeTreeConfig(root, { ...config, mode: "managed" }, { force: true });
   assert.equal(loadTreeConfig(root, { env: NO_ENV }).mode, "managed");
-  assert.throws(() => writeTreeConfig(root, { ...config, mode: "auto" }, { force: true }), /refusing to write/);
+  assert.throws(() => writeTreeConfig(root, { ...config, mode: "sometimes" }, { force: true }), /refusing to write/);
 });
 
 function cli(root, args) {
@@ -143,32 +143,59 @@ function cli(root, args) {
   return { code: result.status, out: `${result.stdout}${result.stderr}` };
 }
 
-test("attach mode refuses the lifecycle and runs only on a live server", (t) => {
+test("auto mode attaches to a server you started, and won't stop it, replace its world or boot over it", (t) => {
   const root = scratchTree(t, { "_local/gameStore/manifest.json": "{}" });
+  const status = cli(root, ["status"]);
+  assert.match(status.out, /^mode {3}auto \(no e2e.config.json; e2e init writes one\): no server up; a run boots its own world$/m, status.out);
+  // A live bridge handshake with no `e2e up` run behind it: a server started by hand.
+  const handshake = path.join(root, "_local", "agentBridge", "bridge.json");
+  fs.mkdirSync(path.dirname(handshake), { recursive: true });
+  fs.writeFileSync(handshake, JSON.stringify({ host: "127.0.0.1", port: 1, token: "t", pid: process.pid }));
+  assert.match(cli(root, ["status"]).out, new RegExp(`attached to pid ${process.pid}, a server you started`));
+  const down = cli(root, ["down"]);
+  assert.equal(down.code, 1, down.out);
+  assert.match(down.out, /wasn't started by `e2e up`, so auto mode leaves it running/);
+  for (const args of [["world", "save", "x"], ["up", "--fresh"]]) {
+    const refused = cli(root, args);
+    assert.equal(refused.code, 1, `${args.join(" ")}: ${refused.out}`);
+    assert.match(refused.out, /you started it, so stop it where you started it/, args.join(" "));
+  }
+  const world = cli(root, ["run", "smoke-undock", "--world", "fresh"]);
+  assert.equal(world.code, 1, world.out);
+  assert.match(world.out, /--world needs the server down: it's up \(pid \d+\), so auto mode would run on it as it is/);
+  // The run attaches: it goes straight to setup on the live server, which here answers nothing.
+  const run = cli(root, ["run", "smoke-undock", "--run", "attached"]);
+  assert.match(run.out, /auto mode found the server up: .*running on the live server, pid \d+, and leaving it up/, run.out);
+  assert.doesNotMatch(run.out, /starting server pid/);
+});
+
+test("attach mode refuses the lifecycle and runs only on a live server", (t) => {
+  const root = scratchTree(t, { "_local/gameStore/manifest.json": "{}",
+    [CONFIG_NAME]: JSON.stringify({ configVersion: 1, mode: "attach" }) });
   for (const args of [["up"], ["down"], ["world", "save", "x"], ["world", "copy", "--from", root]]) {
     const result = cli(root, args);
     assert.equal(result.code, 1, `${args.join(" ")}: ${result.out}`);
-    assert.match(result.out, /needs managed mode; this tree is in attach mode/);
+    assert.match(result.out, /needs auto or managed mode; this tree is in attach mode/);
   }
   const run = cli(root, ["run", "smoke-undock"]);
   assert.equal(run.code, 1, run.out);
   assert.match(run.out, /attach mode runs on a live server/);
   const check = cli(root, ["run", "smoke-undock", "--check"]);
   assert.equal(check.code, 0, `a check boots nothing, in either mode: ${check.out}`);
-  assert.match(cli(root, ["status"]).out, /mode {3}attach \(no e2e.config.json/);
+  assert.match(cli(root, ["status"]).out, /^mode {3}attach$/m);
 });
 
-test("init writes the config, refuses to overwrite it, and managed mode turns the lifecycle on", (t) => {
+test("init writes the config in auto mode, refuses to overwrite it, and managed mode turns the lifecycle on", (t) => {
   const root = scratchTree(t, { "_local/gameStore/manifest.json": "{}" });
   const first = cli(root, ["init"]);
   assert.equal(first.code, 0, first.out);
-  assert.match(first.out, /wrote e2e.config.json, mode attach/);
-  assert.match(first.out, /next: start the server with EVEJS_AGENT_BRIDGE=1/);
+  assert.match(first.out, /wrote e2e.config.json, mode auto/);
+  assert.match(first.out, /next: e2e world build starter, then e2e run <scenario>/);
   assert.equal(cli(root, ["init"]).code, 1, "an existing config needs --force");
   const managed = cli(root, ["init", "--mode", "managed", "--force"]);
   assert.match(managed.out, /mode managed/);
   const up = cli(root, ["up", "--fresh", "--timeout", "10"]);
-  assert.doesNotMatch(up.out, /needs managed mode/);
+  assert.doesNotMatch(up.out, /needs auto or managed mode/);
   assert.match(up.out, /server start|server exited|not ready|no world|reference data|port/i, up.out);
 });
 
@@ -176,6 +203,6 @@ test("a broken config stops every command but init, doctor, help and vendor", (t
   const root = scratchTree(t, { [CONFIG_NAME]: JSON.stringify({ configVersion: 1, mode: "sometimes" }) });
   const status = cli(root, ["status"]);
   assert.equal(status.code, 1);
-  assert.match(status.out, /mode is attach or managed.*e2e init --force/s);
+  assert.match(status.out, /mode is auto, attach or managed.*e2e init --force/s);
   assert.equal(cli(root, ["help"]).code, 0);
 });

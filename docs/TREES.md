@@ -1,7 +1,7 @@
 # Running evejs-e2e in an EveJS tree
 
 evejs-e2e runs in stock EveJS and in forks of it. This page covers how a tree tells the tool where
-things are, the two ways to run its server, what `e2e doctor` checks, and how the tool itself is
+things are, the three ways to run its server, what `e2e doctor` checks, and how the tool itself is
 tested against real trees.
 
 ## The tree's config
@@ -11,14 +11,15 @@ server and the agent bridge use comes from that file. Paths are relative to the 
 file can be committed with the tree.
 
 ```
-node tools/evejs-e2e/bin/e2e.js init                  # attach mode, the default
-node tools/evejs-e2e/bin/e2e.js init --mode managed   # the CLI starts and stops the server
+node tools/evejs-e2e/bin/e2e.js init                  # auto mode, the default
+node tools/evejs-e2e/bin/e2e.js init --mode managed   # the CLI always starts and stops the server
+node tools/evejs-e2e/bin/e2e.js init --mode attach    # you always start the server
 node tools/evejs-e2e/bin/e2e.js init --force          # replace an existing file
 ```
 
 | Key | What it is | Default |
 | --- | --- | --- |
-| `mode` | `attach` or `managed` | `attach` |
+| `mode` | `auto`, `attach` or `managed` | `auto` |
 | `serverDir`, `start` | where the server is, and its `npm start` command as argv | `server`, read from `server/package.json` |
 | `dataDir` | the generated reference data | `_local/gameStore/data` |
 | `gameStore`, `manifest` | the world and its manifest, beside the data dir | `_local/gameStore/` |
@@ -32,10 +33,18 @@ node tools/evejs-e2e/bin/e2e.js init --force          # replace an existing file
 The environment wins over the file, as it does for the server: `EVEJS_GAMESTORE_DATA_DIR` moves the
 data dir and the world beside it, `EVEJS_DATA_ROOT` moves the log, and
 `EVEJS_AGENT_BRIDGE_HANDSHAKE` moves the handshake. A tree with no file runs with the defaults. A
-file with a mistake stops every command except `init`, `doctor`, `help`, `vendor` and `gui`, and
-says what is wrong. `init --dry-run` prints the file it would write without writing it.
+file with a mistake stops every command except `init`, `doctor`, `help`, `vendor`, `gui` and
+`agents`, and says what is wrong. `init --dry-run` prints the file it would write without writing it.
 
-## Attach and managed
+## Auto, attach and managed
+
+In **auto** mode, the default, the tool uses the tree's server when it's up and starts its own when
+it isn't. If a server is up, whether you started it with `EVEJS_AGENT_BRIDGE=1` set or `e2e up`
+did, a run uses it as attach mode does: the scenario's world isn't restored, and the server stays
+up afterwards. If none is up, a run boots the scenario's world and stops the server at the end, as
+managed mode does. `up` starts a server, and says so when one is already up. `down` stops only a
+server `e2e up` started; it refuses one you started. `world copy`, `world save`, `world build`,
+`up` and `run --world` need the server down. `e2e status` says which case applies now.
 
 In **attach** mode you start the server and the tool talks to it. Set `EVEJS_AGENT_BRIDGE=1` in
 the shell that starts it, for example `npm start` in the server folder, or `StartServer.bat`
@@ -116,7 +125,8 @@ reuses the unpacked tree while the zip is unchanged. It builds the zip's referen
 extracted SDE (`--sde`, `EVEJS_E2E_SDE_DIR`, or the one the LU tree's data comes from) and vendors
 this checkout's HEAD into each tree. Then it runs `init`, `doctor`, `login`, `undock`, `grid`,
 `watch` and `smoke-undock`: on stock in managed and in attach mode, on LU in managed mode on its
-saved world `lowsec-docked`. On stock with the three patches applied it also checks that a
+saved world `lowsec-docked`. On stock in auto mode it runs `smoke-undock` with no server up, then
+with a server started by hand, which `down` must refuse to stop and the run must leave up. On stock with the three patches applied it also checks that a
 fresh character's loadout is refused with its missing skills, builds `starter`, and runs the five
 core scenarios on it. It drives `e2e gui` through its API against the stock tree: the tree's
 summary, its patches, a run's report and frame, and one patch applied and reverted by preview. It
