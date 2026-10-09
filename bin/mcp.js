@@ -233,6 +233,86 @@ const CLI_ARGS = {
     flag("json", p.json);
     return args;
   },
+  client_launch(p) {
+    const { args, flag } = argList("client");
+    flag("user", p.user);
+    flag("name", p.name);
+    flag("exe", p.exe);
+    flag("wait", p.wait);
+    args.push("--", "launch");
+    return args;
+  },
+  client_status: () => ["client", "--", "status"],
+  client_stop(p) {
+    const { args, flag } = argList("client");
+    flag("user", p.user);
+    args.push("--", "stop");
+    return args;
+  },
+  client_eval(p) {
+    const { args, flag } = argList("client");
+    flag("user", p.user);
+    flag("timeout", p.timeout);
+    flag("json", p.json);
+    args.push("--", "eval", String(p.code));
+    return args;
+  },
+  client_console(p) {
+    const { args, flag } = argList("client");
+    flag("user", p.user);
+    flag("lines", p.lines);
+    flag("grep", p.grep);
+    args.push("--", "console");
+    return args;
+  },
+  client_ui(p) {
+    const { args, flag } = argList("client");
+    flag("user", p.user);
+    flag("class", p.cls);
+    flag("name", p.name);
+    flag("text", p.text);
+    flag("depth", p.depth);
+    flag("hidden", p.hidden);
+    flag("limit", p.limit);
+    flag("json", p.json);
+    args.push("--", "ui");
+    return args;
+  },
+  client_ballpark(p) {
+    const { args, flag } = argList("client");
+    flag("user", p.user);
+    flag("range", p.range);
+    flag("json", p.json);
+    args.push("--", "ballpark");
+    return args;
+  },
+  client_diff(p) {
+    const { args, flag } = argList("client");
+    flag("user", p.user);
+    flag("tolerance", p.tolerance);
+    flag("json", p.json);
+    args.push("--", "diff");
+    return args;
+  },
+  client_events(p) {
+    const { args, flag } = argList("client");
+    flag("user", p.user);
+    flag("since", p.since);
+    // An empty list is a value here: it stops recording notify events.
+    if (Array.isArray(p.notify)) args.push(`--notify=${p.notify.join(",")}`);
+    flag("json", p.json);
+    args.push("--", "events");
+    return args;
+  },
+  client_screenshot(p) {
+    const { args, flag } = argList("client");
+    flag("user", p.user);
+    flag("run", p.run);
+    flag("max-width", p.maxWidth === undefined ? 1600 : p.maxWidth);
+    flag("format", p.format || "jpg");
+    args.push("--json", "--", "screenshot");
+    return args;
+  },
 };
 
 function cliArgs(tool, params = {}) {
@@ -484,6 +564,139 @@ const TOOLS = [
       json: bool("The whole report as JSON."),
     }),
     run: simple("doctor"),
+  },
+  {
+    name: "client_launch",
+    description: "Start a real EVE client (the tree's Play.bat client) logged in by token as its own account (e2eclient, " +
+      "character Client Observer by default) and wait until it is in game, about 20 s. Needs the opt-in client-agent patch: " +
+      "doctor says whether it is applied. The client then runs the client agent, which the other client_ tools talk to.",
+    inputSchema: schema({
+      user: str("Account name (default e2eclient). Not the headless character's account."),
+      name: str("Character name, for a new character (default Client Observer)."),
+      exe: str("exefile.exe to start (default the one the tree's launcher config names)."),
+      wait: int("Seconds to wait for the client to reach the game (default 240; 0 returns at once).", { minimum: 0 }),
+    }),
+    run: simple("client_launch"),
+  },
+  {
+    name: "client_status",
+    description: "Whether the client agent is on in this server, and each client that attached: account, character, " +
+      "online or gone, pid and build.",
+    inputSchema: schema(),
+    run: simple("client_status"),
+  },
+  {
+    name: "client_stop",
+    description: "End an attached EVE client's process (the pid its agent reported).",
+    inputSchema: schema({ user: str("The client's account, when more than one is online.") }),
+    run: simple("client_stop"),
+  },
+  {
+    name: "client_eval",
+    description: "Run Python 2.7 inside the EVE client, on its own tasklet. An expression answers its repr; statements " +
+      "answer what they leave in `result`. sm, session, uicore and agent are defined, and names persist between calls. " +
+      "Code that loops without yielding stalls the client.",
+    inputSchema: schema({
+      code: str("Python, e.g. cfg.evelocations.Get(session.solarsystemid2).name"),
+      user: str("The client's account, when more than one is online."),
+      timeout: int("Seconds to wait for the answer (default 15).", { minimum: 1, maximum: 300 }),
+      json: bool("The value as JSON too, when it is plain data."),
+    }, ["code"]),
+    run: simple("client_eval"),
+  },
+  {
+    name: "client_console",
+    description: "The end of the EVE client's own console window, where it prints its startup, its log lines and full " +
+      "exception reports (EXCEPTION #n ... EXCEPTION END), and the agent's GRIDCHECK_CLIENT: lines.",
+    inputSchema: schema({
+      lines: int("How many lines from the end (default 60; 0 for all).", { minimum: 0 }),
+      grep: str("Keep lines matching this case-insensitive regex."),
+      user: str("The client's account, when more than one is online."),
+    }),
+    run: simple("client_console"),
+  },
+  {
+    name: "client_ui",
+    description: "The EVE client's open windows and its UI tree from uicore.desktop: each node's class, name, text, " +
+      "absolute rect, whether it is shown and enabled. With cls, name or text, every node at any depth containing it " +
+      "(case-insensitive), with its path, instead of the tree.",
+    inputSchema: schema({
+      cls: str("Class name contains this, e.g. Button."),
+      name: str("Node name contains this."),
+      text: str("Label or caption contains this, e.g. Undock."),
+      depth: int("How deep to walk (default 3, or 40 with a filter).", { minimum: 0, maximum: 60 }),
+      hidden: bool("Also walk hidden nodes."),
+      limit: int("Most nodes (tree) or matches to list.", { minimum: 1, maximum: 20000 }),
+      user: str("The client's account, when more than one is online."),
+      json: bool("The answer as JSON."),
+    }),
+    run: simple("client_ui"),
+  },
+  {
+    name: "client_screenshot",
+    description: "A picture of the EVE client's window, drawn with PrintWindow from outside, so it works when the window " +
+      "is covered but not when it is minimized. Saved under _local/gridcheck/client/ (or the run's client/ folder) and " +
+      "returned as an image.",
+    inputSchema: schema({
+      run: str("Save it in this run's folder."),
+      maxWidth: int("Scale down to this width in pixels (default 1600; 0 keeps full size).", { minimum: 0 }),
+      format: str("jpg (default) or png.", { enum: ["jpg", "png"] }),
+      user: str("The client's account, when more than one is online."),
+    }),
+    async run(params, context) {
+      const reply = await runCli(cliArgs("client_screenshot", params), context);
+      if (reply.code !== 0) return cliResult(reply);
+      let shot;
+      try {
+        shot = JSON.parse(reply.output.slice(reply.output.indexOf("{")));
+      } catch (_error) {
+        return cliResult(reply);
+      }
+      const data = fs.readFileSync(shot.file).toString("base64");
+      return {
+        content: [
+          { type: "image", data, mimeType: /\.png$/i.test(shot.file) ? "image/png" : "image/jpeg" },
+          { type: "text", text: `${relativePath(shot.file)} (${shot.width}x${shot.height}${shot.title ? `, "${shot.title}"` : ""})` },
+        ],
+        isError: false,
+      };
+    },
+  },
+  {
+    name: "client_ballpark",
+    description: "What the EVE client's ballpark (michelle) holds: every ball with an item, its position, velocity, " +
+      "mode and distance from the client's ship, nearest first. Empty when docked.",
+    inputSchema: schema({
+      range: num("Only balls within this many km of the ship.", { exclusiveMinimum: 0 }),
+      user: str("The client's account, when more than one is online."),
+      json: bool("The answer as JSON."),
+    }),
+    run: simple("client_ballpark"),
+  },
+  {
+    name: "client_diff",
+    description: "The EVE client's ballpark against the server's grid for the same character: balls the server sent " +
+      "that the client lacks, balls only the client holds (celestials aside), balls further apart than tolerance plus " +
+      "2 s of their speed, and mode differences. Errors (exit 1) when they disagree.",
+    inputSchema: schema({
+      tolerance: num("Metres two positions may differ before speed (default 1000).", { minimum: 0 }),
+      user: str("The client's account, when more than one is online."),
+      json: bool("The answer as JSON."),
+    }),
+    run: simple("client_diff"),
+  },
+  {
+    name: "client_events",
+    description: "The EVE client's logged exceptions (unhandled tasklet errors included), the notify events it records " +
+      "(OnSessionChanged by default) and the agent's own errors, oldest first. A watch shows the same as CLIENT_EXCEPTION " +
+      "and CLIENT_EVENT lines beside the server's.",
+    inputSchema: schema({
+      since: int("Only events after this sequence number.", { minimum: 0 }),
+      notify: { type: "array", items: { type: "string" }, description: "Record these notify events from now on instead, e.g. [\"OnSessionChanged\", \"OnDamageStateChange\"]; [] records none." },
+      user: str("The client's account, when more than one is online."),
+      json: bool("The answer as JSON."),
+    }),
+    run: simple("client_events"),
   },
   {
     name: "run_scenario",

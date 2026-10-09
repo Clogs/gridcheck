@@ -62,6 +62,16 @@ const EVENT_FIELDS = Object.freeze({
     balls: { list: { itemID: "id", typeID: "id", mode: "str", label: "str" } },
     attachedAtMs: "ms", baselineAtMs: "ms", notifications: "num", decodeErrors: "num", lastError: "str",
   },
+  // From a real EVE client's agent (gridcheck client launch): its logged
+  // exceptions, and the notify events and agent errors it records.
+  CLIENT_EXCEPTION: {
+    username: "str", characterID: "id", type: "str", message: "str", extra: "str", channel: "str", where: "str",
+    traceback: { list: "str" }, clientSeq: "num", clientAtMs: "ms",
+  },
+  CLIENT_EVENT: {
+    username: "str", characterID: "id", event: "str", args: "str", op: "str", error: "str", count: "num",
+    clientSeq: "num", clientAtMs: "ms",
+  },
   FX: {
     itemID: "id", label: "str", guid: "str", targetID: "id", targetLabel: "str", moduleID: "id", moduleTypeID: "id",
     offensive: "bool", durationMs: "ms", repeat: "num", knownBall: "bool", repeatsBefore: "num",

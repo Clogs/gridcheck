@@ -59,8 +59,8 @@ by hand. When an entry already runs this tree's `mcp.js`, setup leaves it as it 
 | Tool | CLI | Notes |
 | --- | --- | --- |
 | `status` | `status`, `world list`, `run` | Start here: server, character, saved worlds and recipes, scenarios, active plugins, recent runs and background runs. |
-| `guide` | `primer [<topic>]` | How to drive the tool, by `topic`: `start`, `scenarios`, `conditions`, `events` (every kind's fields), `perf`, `plugins`. No topic returns them all. |
-| `doctor` | `doctor` | What the tree supports: gateway calls, the client view, patches, plugins, ports, loadouts. |
+| `guide` | `primer [<topic>]` | How to drive the tool, by `topic`: `start`, `scenarios`, `conditions`, `events` (every kind's fields), `perf`, `client`, `plugins`. No topic returns them all. |
+| `doctor` | `doctor` | What the tree supports: gateway calls, the client view, patches, plugins, ports, loadouts, the real client. |
 | `up`, `down` | `up`, `down` | Auto and managed mode. In auto mode `down` stops only a server `up` started. |
 | `login`, `undock`, `teleport` | `login`, `undock`, `teleport` | `teleport` is stock `/tr`. |
 | `loadout` | `loadout` | A ship and its fit by item name, skills checked first. |
@@ -72,6 +72,8 @@ by hand. When an entry already runs this tree's `mcp.js`, setup leaves it as it 
 | `perf` | `perf` | `seconds` (default 10) to sample, or `now`. See [Performance testing](#performance-testing). `up` takes `profile` and `profileEvery`, and `watch` takes `perf` and `perfEvery`. |
 | `run_scenario` | `run` | Writes a scenario it is handed, checks it, runs it. See below. |
 | `report` | none | Reads a run's `report.md` and `result.json`; waits for a background run. |
+| `client_launch`, `client_status`, `client_stop`, `client_eval`, `client_console`, `client_ui`, `client_ballpark`, `client_diff`, `client_events` | `client <subcommand>` | A real EVE client; see [A real EVE client](#a-real-eve-client). `client_events` takes `notify` as a list; `[]` records none. |
+| `client_screenshot` | `client screenshot --json` | Returns the picture itself, as a JPEG 1,600 pixels wide unless `format` or `maxWidth` say otherwise. |
 
 A plugin's tools are named `<plugin>_<tool>`. The server's MCP instructions are a brief of under
 2,000 characters, because clients cut long instructions off: what the tool is, the server mode, the
@@ -413,6 +415,76 @@ ball the client has and a ring of the last 2,048 decoded events. A watch that fa
 prints how many events it missed, and the `END` line reports decode time. On 2026-10-01 a Dominix
 fought 20 `/npc` hostiles for 150 s; the tee decoded 740 destiny notifications at 0.011 ms each on
 average and 0.69 ms at most, under 0.1% of the tick.
+
+## A real EVE client
+
+Some bugs show only in the real client: its UI, what its ballpark holds, the exceptions it logs.
+`gridcheck client` starts the EVE client the tree's Play.bat starts, logged in and in game, and
+talks to an agent running inside it. It needs the opt-in `client-agent` patch
+([PATCHES.md](PATCHES.md#client-agent)), then a server restart. `gridcheck doctor` shows the
+patch, the bridge's `gridcheckClient` service and the client it found, with the fix for each part
+that's missing.
+
+```
+gridcheck client launch            # account e2eclient, character Client Observer; in game in about 15 s
+gridcheck client status            # attached clients: character, online or gone, pid, build
+gridcheck client ui --text undock  # the windows, and every UI node whose text contains "undock"
+gridcheck client screenshot        # the window as a PNG under _local/gridcheck/client/
+gridcheck client ballpark          # what michelle's ballpark holds, nearest first
+gridcheck client diff              # that ballpark against the server's grid for the same character
+gridcheck client events            # exceptions and notify events the client recorded
+gridcheck client console           # the end of the client's own "[CCP]" console window
+gridcheck client eval "cfg.evelocations.Get(session.solarsystemid2).name"
+gridcheck client stop
+```
+
+**Launch.** `launch` makes the account and its character when they're missing, asks the bridge
+for a token, and starts `exefile.exe /ssoToken=<token> /autoSelectCharacter:<id>` with Play.bat's
+environment: the `ResFiles` cache beside `tq`, and the gateway as HTTP proxy. The client logs in
+with no login screen and enters the game from character select. It connects to the tree's own game
+port, wherever `gridcheck up` moved it. `--exe`, `EVEJS_CLIENT_EXE`
+or `EVEJS_CLIENT_PATH` choose another client. Use an account of its own: the headless character's
+account must not be logged in by a client at the same time.
+
+`exefile.exe` hands off to a second process, so the pid `launch` and `status` print is the one the
+agent reports from inside the client, and `stop` ends that one. A client that closes is listed as
+gone for ten minutes, then dropped. The client writes its log to its own console window, not to
+stdout, which is why Play.bat's stdio logs stay empty. `client console` reads that window's buffer.
+`--grep` filters it, and `--pid` works before an agent attaches.
+
+**Inside the client.** The agent runs on the client's own tasklets, in its Python 2.7. Each command
+is one notification to the client and one call back. A command that loops without yielding stalls
+the client, as any client code would.
+
+- `ui` walks `uicore.desktop`. With no filter it prints the tree to `--depth` (default 3). With
+  `--class`, `--name` or `--text` it prints every node at any depth whose class, name or label text
+  contains the value, case-insensitively, with its path. Each node has its absolute rect in UI
+  pixels and its state (`normal`, `disabled`, `hidden` or `pickChildren`). Hidden subtrees are skipped
+  unless you pass `--hidden`.
+- `screenshot` draws the window from outside with `PrintWindow`, so it works when the window is
+  covered, but not when it's minimized. `--run <id>` saves it in the run's `client/` folder. Use
+  `--out x.jpg` or `--max-width` for a smaller file.
+- `ballpark` lists every ball with a slim item: position, velocity, mode, radius and distance from
+  your ship. Docked, there's no ballpark.
+- `diff` reads the client's ballpark and the bridge's grid for the client's character at the same
+  moment. It lists balls the server shows that the client lacks, balls only the client holds,
+  shared balls further apart than `--tolerance` (1,000 m) plus 2 s of their speed, and mode
+  differences. Celestials and stations are only counted: the client holds every one in the system,
+  and the server's grid lists only those near you. It exits 1 when the two disagree.
+- `events`: the agent wraps the client's `logmodule._LogException`, which every `LogException`
+  passes through, unhandled tasklet errors included. It keeps those exceptions, the notify events
+  it's told to record (`--notify OnA,OnB`, default `OnSessionChanged`) and its own failed commands
+  in a ring, and sends them to the bridge in batches.
+
+While a client is attached, every watch and every run carries its events beside the server's:
+
+| Kind | When |
+| --- | --- |
+| `CLIENT_EXCEPTION` | The client logged an exception: `type`, `message`, `where` (the last frame), `traceback`, `extra` (the text it was logged with). |
+| `CLIENT_EVENT` | A recorded notify event (`event`, `args`), an agent command that failed (`event: "agent-error"`, `op`, `error`), or `dropped` with a `count` when the client produced events faster than they were sent. |
+
+Each line is stamped when the bridge got it; `clientAtMs` is when the client recorded it. So
+`"no CLIENT_EXCEPTION"` is an expectation a scenario can hold while a client is attached.
 
 ## Player actions
 

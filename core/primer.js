@@ -19,6 +19,7 @@ const TOPICS = Object.freeze({
   conditions: "the syntax of until, expect and waitFor conditions",
   events: "every event kind and the fields a condition can test",
   perf: "performance runs: tick figures, the tick profiler, named phases",
+  client: "a real EVE client: launch it, read its UI, ballpark and exceptions, screenshot it, run Python in it",
   plugins: "the active plugins' own notes",
 });
 
@@ -104,7 +105,7 @@ By hand: ${byHand.join(", ")}${pluginTools.length ? `, and the plugins' ${plugin
 ${writeAndCheck} ${trustCheck}`;
 
   const conditions = `Conditions (until.any, expect, waitFor) are KIND then field tests, all of which must hold: ARRIVE who=npc count>=3, TARGET self locked, DAMAGE itemID=$mark, MODE self to=STOP.
-- Kinds: ${kinds}, and CLIENT (needs "watch": { "client": "all" }), FX (needs "client": "fx" or "all") and DIVERGE. ${see("events")} lists each kind's fields.
+- Kinds: ${kinds}, and CLIENT (needs "watch": { "client": "all" }), FX (needs "client": "fx" or "all") and DIVERGE. CLIENT_EXCEPTION and CLIENT_EVENT come from a real EVE client while one is attached (${see("client")}). ${see("events")} lists each kind's fields.
 - Tests: field=value, field!=value, field~regex (case-insensitive), field>=N (also > < <=), bare field (set), !field (unset). Units: 30km, 90s, 5min.
 - "self" = the event is about your ship. $name = the IDs a step bound with "as".
 - A field is looked up on the event, then one level down (mode on an ARRIVE is members.mode), then in the plugins' data. A list matches when any element does.
@@ -129,12 +130,22 @@ ${writeAndCheck} ${trustCheck}`;
 In a scenario, "up": { "profile": true } streams PERF (a window of ticks every 5 s: tickAvgMs, tickP95Ms, tickP99Ms, tickMaxMs, overBudget, loopP99Ms, cpuPct, heapMB, entities) and PROFILE (sections with msPerTick) into the timeline. The report's performance table splits the ticks into phases: at every step by default, so the time before a spawn is the baseline for the time after it, or, once any step has "perf": "<name>", only where those steps begin, each phase named for its step: { "wait": 15, "perf": "baseline" }, { "slash": "/npc 20", "perf": "fight" }, then a during { "repeat": [{ "slash": "/heal" }], "every": 5 } keeps the fight in one phase. The report also says when the slowest tick and the longest event-loop stall happened, and in which phase.
 Expect a budget like "no PERF overBudget>=5" (no 5 s window with 5 ticks over the 100 ms a tick has) or "no PERF tickP99Ms>=100". A run on a server that is already up can't add the profiler; the report says so when the scenario asked for it. The perf-npc-load scenario does all of this.`;
 
+  const c = (name, mcpArgs = "", cliArgs = "") => (cli ? `\`gridcheck client ${name}${cliArgs ? ` ${cliArgs}` : ""}\`` : t(`client_${name}`, mcpArgs));
+  const client = `Some bugs only show in the real EVE client: its UI, what its ballpark holds, its own exceptions. ${c("launch")} starts the client Play.bat starts, logged in by token as its own account (e2eclient, character Client Observer; never the headless character's account) and waits until it is in game, about 20 s. It needs the opt-in client-agent patch (\`gridcheck patch apply client-agent\`, then restart the server): the server then sends that client a small agent that runs inside it. ${t("doctor")} says whether the patch, the service and the client are there, and the fix for each.
+- ${c("status")}: the attached clients, with pid and build. ${c("stop")} ends one.
+- ${c("ui", "{ text: \"Undock\" }", "--text Undock")}: the open windows and every UI node whose class, name or text contains it, with its path, absolute rect and whether it is shown and enabled. With no filter, the tree from the desktop to a depth.
+- ${c("screenshot")}: the client's window as a picture (not while it is minimized).
+- ${c("ballpark")}: the balls the client holds, with position, velocity and mode; ${c("diff")} compares them with the server's grid for the same character (missing, extra, moved, other mode), which is how to check that the client was sent what the server thinks it was.
+- ${c("events")}: the client's logged exceptions (unhandled tasklet errors included) and the notify events it records (OnSessionChanged unless told otherwise). While a client is attached, every watch and run also carries them as CLIENT_EXCEPTION and CLIENT_EVENT, so "no CLIENT_EXCEPTION" is an expectation.
+- ${c("eval", "{ code }", "\"<python>\"")}: Python 2.7 inside the client, on its own tasklet: sm, session, uicore are defined; an expression answers its value, statements answer what they leave in result. Long loops stall the client.
+The client takes a GPU window on the user's desktop; stop it when done.`;
+
   const plugins = registry.primers.map((entry) => entry.text);
   if (cli && plugins.length) {
     plugins.unshift("The plugin notes below name MCP tools: the tool `<plugin>_<name>` is the CLI command `gridcheck <name>`, and any other tool `<name>` is `gridcheck <name>`.");
   }
 
-  return { start, scenarios, conditions, events, perf, plugins: plugins.length ? plugins.join("\n\n") : "No plugins are active in this tree." };
+  return { start, scenarios, conditions, events, perf, client, plugins: plugins.length ? plugins.join("\n\n") : "No plugins are active in this tree." };
 }
 
 // The whole primer, or one topic of it. Throws on a topic it doesn't have.

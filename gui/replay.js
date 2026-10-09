@@ -105,6 +105,8 @@
         `${e.serverMode ? `  server ${e.serverMode}` : ""}${e.clientMode ? `  client ${e.clientMode}` : ""}`;
       case "FX": return `${e.label || e.itemID} ${String(e.guid || "").replace(/^effects\./, "")}${e.targetLabel ? ` → ${e.targetLabel}` : ""}`;
       case "CLIENT": return `${e.op || ""} ${e.label || ""}${e.mode ? ` ${e.mode}` : ""}${e.error ? ` ${e.error}` : ""}`;
+      case "CLIENT_EXCEPTION": return `${e.username || "client"}: ${e.type || "?"}: ${e.message || ""}${e.where ? `  at ${e.where}` : ""}`;
+      case "CLIENT_EVENT": return `${e.username || "client"}: ${e.event || "?"}${e.error ? ` ${e.error}` : e.args ? ` ${e.args}` : ""}`.slice(0, 200);
       case "STEP": return `${e.phase === "during" ? "during: " : ""}${e.ok ? "" : "FAILED "}${e.step}${e.text ? `: ${e.text}` : ""}`;
       case "STOP": return e.reason === "until" ? `stop condition met: ${e.condition}` : `stopped: ${e.reason}`;
       case "GRID": return `${e.systemName || e.systemID}${e.self && e.self.typeName ? `, self in a ${e.self.typeName}` : ""}`;
@@ -127,7 +129,7 @@
       case "TARGET": return "k-target";
       case "MODE": case "DECISION": case "LEAVE": case "MOVED": case "DOCKED": return "k-mode";
       case "FX": return "k-fx";
-      case "DAMAGE": return "k-damage";
+      case "DAMAGE": case "CLIENT_EXCEPTION": return "k-damage";
       case "DESTROYED": case "KILLMAIL": return "k-destroyed";
       case "DIVERGE": return "k-div";
       default: return "k-log";

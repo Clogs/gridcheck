@@ -148,6 +148,13 @@ function eventBody(event, registry) {
       return profileLine(event);
     case "CLIENT":
       return clientBody(event);
+    case "CLIENT_EXCEPTION":
+      return [`${event.username || "client"}: ${event.type || "?"}: ${event.message || ""}`.slice(0, 200),
+        [event.where, event.extra].filter(Boolean).join("; ").slice(0, 200)];
+    case "CLIENT_EVENT":
+      return [`${event.username || "client"}: ${event.event || "?"}` +
+        `${event.op ? ` (${event.op})` : ""}${event.count ? ` ${event.count}` : ""}`,
+      String(event.error || event.args || "").slice(0, 200)];
     case "FX":
       return [`${event.label || `#${event.itemID}`} ${event.guid || "?"}` +
         `${event.targetID ? ` -> ${event.targetLabel || `#${event.targetID}`}` : ""}`,
@@ -244,10 +251,12 @@ function eventBody(event, registry) {
 
 // One line per event. `registry` is the plugins' (core/plugins.js); the
 // default is this tree's, also when called from .map() with an index.
-function formatTimelineEvent(event, registry) {
+// clock: the line starts with the local time of atMs instead of the offset t.
+function formatTimelineEvent(event, registry, { clock = false } = {}) {
   const [body, tail] = eventBody(event, registry && registry.formatters ? registry : defaultRegistry());
   const kind = String(event.kind);
-  const head = `${formatOffset(event.t)}  ${kind.padEnd(KIND_WIDTH)}${kind.length >= KIND_WIDTH ? " " : ""}`;
+  const when = clock ? new Date(Number(event.atMs) || 0).toLocaleTimeString("en-GB", { hour12: false }) : formatOffset(event.t);
+  const head = `${when}  ${kind.padEnd(KIND_WIDTH)}${kind.length >= KIND_WIDTH ? " " : ""}`;
   if (!tail) return `${head}${body}`;
   return `${head}${body.length < BODY_WIDTH ? body.padEnd(BODY_WIDTH) : `${body}  `}${tail}`;
 }

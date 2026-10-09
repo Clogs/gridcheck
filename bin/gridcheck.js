@@ -63,6 +63,7 @@ const recipeTools = require("../core/recipes");
 const vendor = require("../core/vendor");
 const patchEngine = require("../core/patches");
 const agentTools = require("../core/agents");
+const clientTools = require("../core/client");
 
 const REPO_ROOT = DEFAULT_TREE_ROOT;
 const REGISTRY = defaultRegistry();
@@ -91,7 +92,7 @@ const MANAGED = MODE === "managed";
 const AUTO = MODE === "auto";
 
 const BOOLEAN_FLAGS = new Set(["all", "json", "any-pid", "force", "fresh", "no-market", "no-log", "help",
-  "check", "keep-up", "reuse", "positions", "once", "serve", "offline", "dry-run", "profile", "perf", "now", "detach", "mcp", "save",
+  "check", "keep-up", "reuse", "positions", "once", "serve", "offline", "dry-run", "profile", "perf", "now", "detach", "mcp", "save", "hidden",
   ...REGISTRY.booleanFlags]);
 
 class CliError extends Error {}
@@ -475,26 +476,11 @@ async function ensureCharacter(username, wantedName) {
   return { username, accountID, characterID };
 }
 
-// The EVE client the tree's Play.bat starts: --exe, EVEJS_CLIENT_EXE, or the client
-// folder EVEJS_CLIENT_PATH names, in the environment or the launcher's EvEJSConfig.bat.
+// The EVE client the tree's Play.bat starts (core/client.js findClientExe).
 function clientExe(flags) {
-  if (flags.exe) return path.resolve(String(flags.exe));
-  if (process.env.EVEJS_CLIENT_EXE) return process.env.EVEJS_CLIENT_EXE;
-  let clientPath = process.env.EVEJS_CLIENT_PATH || null;
-  if (!clientPath) {
-    const configBat = path.join(REPO_ROOT, "tools", "ClientSETUP", "scripts", "EvEJSConfig.bat");
-    const text = fs.existsSync(configBat) ? fs.readFileSync(configBat, "utf8") : "";
-    const match = /^\s*set\s+"EVEJS_CLIENT_PATH=([^"]+)"/im.exec(text);
-    clientPath = match ? match[1].trim() : null;
-  }
-  if (!clientPath) {
-    throw new CliError("no EVE client found: pass --exe <exefile.exe>, or run the tree's Play.bat once so its launcher config names the client");
-  }
-  for (const bin of ["bin64", "bin"]) {
-    const exe = path.join(clientPath, bin, "exefile.exe");
-    if (fs.existsSync(exe)) return exe;
-  }
-  throw new CliError(`no exefile.exe under ${path.join(clientPath, "bin64")}; pass --exe`);
+  const found = clientTools.findClientExe({ treeRoot: REPO_ROOT, exe: flags.exe });
+  if (found.error) throw new CliError(found.error);
+  return found.exe;
 }
 
 async function clientCommand(op, args, flags) {
@@ -514,87 +500,50 @@ async function clientCommand(op, args, flags) {
 
 async function cmdClient(positionals, flags) {
   const [sub, ...rest] = positionals;
+  const handshake = requireHandshake();
+  const json = (value) => console.log(JSON.stringify(value, null, 2));
   if (sub === "status") {
-    const handshake = requireHandshake();
-    const { status, json } = await requestJSON(`http://${handshake.host}:${handshake.port}/client/agents`, {
+    const { status, json: listed } = await requestJSON(`http://${handshake.host}:${handshake.port}/client/agents`, {
       headers: { authorization: `Bearer ${handshake.token}` },
     });
     if (status === 404) {
       console.log("client agent: off. The server log's [AgentBridge] lines say why; it needs a restart after an update.");
       return;
     }
-    if (flags.json) {
-      console.log(JSON.stringify(json, null, 2));
-      return;
+    if (flags.json) return json(listed);
+    console.log(`client agent: ${listed.patched ? "on" : "off: the client-agent patch isn't applied (gridcheck patch apply client-agent)"}`);
+    for (const agent of listed.agents || []) {
+      const state = agent.online ? "online" : `gone since ${new Date(agent.goneAtMs || agent.lastSeenMs).toLocaleTimeString()}`;
+      console.log(`  ${agent.username} account ${agent.accountID}, character ${agent.characterID || "(selecting)"}, ${state}, ` +
+        `pid ${agent.pid || "?"}, build ${agent.build || "?"}, attached ${new Date(agent.attachedAtMs).toLocaleTimeString()}`);
     }
-    console.log(`client agent: ${json.patched ? "on" : "off: the client-agent patch isn't applied (gridcheck patch apply client-agent)"}`);
-    for (const agent of json.agents || []) {
-      console.log(`  ${agent.username} account ${agent.accountID}, character ${agent.characterID || "(selecting)"}, ` +
-        `${agent.online ? "online" : "gone"}, attached ${new Date(agent.attachedAtMs).toLocaleTimeString()}`);
-    }
-    if (!(json.agents || []).length) console.log("  no client has attached");
+    if (!(listed.agents || []).length) console.log("  no client has attached");
     return;
   }
-  if (sub === "launch") {
-    const username = String(flags.user || "e2eclient");
-    const handshake = requireHandshake();
-    const game = handshake.ports && handshake.ports.game;
-    if (!game) throw new CliError("the bridge handshake names no game port; `gridcheck status` says whether the server is up");
-    const exe = clientExe(flags);
-    // Character names are unique server-wide, so not login's "Agent Observer".
-    const { accountID, characterID } = await ensureCharacter(username, flags.name ? String(flags.name) : "Client Observer");
-    const minted = await callBridge(handshake, "POST", "/client/token", { username });
-    // The gateway serves /resfiles; Play.bat names stock's gateway port, which gridcheck moves.
-    const gateway = handshake.ports && handshake.ports.gateway;
-    const resfileserver = String(flags.resfileserver || (gateway ? `http://127.0.0.1:${gateway}/resfiles/` : "http://127.0.0.1:26002/resfiles/"));
-    const args = ["/noCrashReportUpload", `/resfileserver=${resfileserver}`, `/port:${game}`,
-      `/ssoToken=${minted.token}`, `/autoSelectCharacter:${characterID}`];
-    fs.mkdirSync(E2E_DIR, { recursive: true });
-    const logPath = path.join(E2E_DIR, `client-${username}.log`);
-    const out = fs.openSync(logPath, "a");
-    // What Play.bat sets: the resource cache beside tq (else the client reads the
-    // registry's CACHEFOLDER), and the gateway as the client's HTTP proxy.
-    const resfiles = flags.resfiles ? path.resolve(String(flags.resfiles)) : path.resolve(path.dirname(exe), "..", "..", "ResFiles");
-    if (!fs.existsSync(resfiles)) throw new CliError(`no resource cache at ${resfiles}; pass --resfiles <ResFiles folder>`);
-    const proxy = gateway ? `http://127.0.0.1:${gateway}/` : null;
-    const env = {
-      ...process.env,
-      EO_REMOTEFILECACHEFOLDER: resfiles,
-      ...(proxy ? {
-        http_proxy: proxy, https_proxy: proxy, HTTP_PROXY: proxy, HTTPS_PROXY: proxy, all_proxy: proxy, ALL_PROXY: proxy,
-        EVE_CLIENT_SENTRY_DSN: `http://evejs@127.0.0.1:${gateway}/1`,
-      } : {}),
-      no_proxy: "127.0.0.1,localhost,::1",
-      NO_PROXY: "127.0.0.1,localhost,::1",
-    };
+  if (sub === "launch") return clientLaunch(handshake, flags);
+  if (sub === "stop") {
+    const agent = await clientAgentRow(handshake, flags);
+    if (!agent.pid) throw new CliError(`the ${agent.username} client's agent didn't report its pid; close that client by hand`);
+    try {
+      process.kill(agent.pid);
+    } catch (error) {
+      throw new CliError(`couldn't end pid ${agent.pid}: ${error.message}`);
+    }
     const startedAtMs = Date.now();
-    const child = spawn(exe, args, { cwd: path.dirname(exe), env, detached: true, stdio: ["ignore", out, out] });
-    child.unref();
-    fs.closeSync(out);
-    console.log(`started the EVE client (pid ${child.pid}) as ${username} (account ${accountID}), entering as character ${characterID}`);
-    console.log(`  client output: ${relativePath(logPath)}`);
-    const waitSeconds = flags.wait === undefined ? 240 : Number(flags.wait);
-    if (!(waitSeconds > 0)) return;
-    let attached = false;
-    while (Date.now() - startedAtMs < waitSeconds * 1000) {
-      await sleep(2000);
+    while (Date.now() - startedAtMs < 30000) {
+      await sleep(1000);
       const listed = await callBridge(handshake, "GET", "/client/agents");
-      const agent = (listed.agents || []).find((row) => row.username === username && row.online && row.attachedAtMs >= startedAtMs);
-      if (agent && !attached) {
-        attached = true;
-        console.log(`client agent attached after ${Math.round((Date.now() - startedAtMs) / 1000)} s`);
-      }
-      if (agent && agent.characterID === characterID) {
-        console.log(`in game as character ${characterID} after ${Math.round((Date.now() - startedAtMs) / 1000)} s`);
+      const row = (listed.agents || []).find((candidate) => candidate.pid === agent.pid);
+      if (!row || !row.online) {
+        console.log(`stopped the ${agent.username} client (pid ${agent.pid})`);
         return;
       }
     }
-    throw new CliError(`${attached ? "the client attached but didn't enter the game" : "no client agent attached"} within ${waitSeconds} s. ` +
-      `\`gridcheck log --grep "client"\` shows whether the server saw the token login; the client's output is in ${relativePath(logPath)}.`);
+    throw new CliError(`pid ${agent.pid} was ended, but the server still holds the ${agent.username} session after 30 s`);
   }
   if (sub === "ping") {
     const reply = await clientCommand("ping", {}, flags);
-    console.log(JSON.stringify(reply.value, null, 2));
+    json(reply.value);
     return;
   }
   if (sub === "eval") {
@@ -602,11 +551,207 @@ async function cmdClient(positionals, flags) {
     if (!code.trim()) throw new CliError("client eval needs Python, e.g. gridcheck client eval \"session.charid\"");
     const reply = await clientCommand("eval", { code }, flags);
     const value = reply.value || {};
-    if (flags.json) console.log(JSON.stringify(value, null, 2));
+    if (flags.json) json(value);
     else console.log(value.repr + (value.truncated ? "\n(truncated)" : ""));
     return;
   }
-  throw new CliError(`client needs status, launch, ping or eval; got ${sub === undefined ? "nothing" : JSON.stringify(sub)}`);
+  if (sub === "ui") {
+    const args = { depth: flags.depth, cls: flags.class, name: flags.name, text: flags.text, hidden: flags.hidden === true,
+      limit: flags.limit };
+    const reply = await clientCommand("ui", Object.fromEntries(Object.entries(args).filter(([, value]) => value !== undefined)), flags);
+    if (flags.json) return json(reply.value);
+    printClientUi(reply.value);
+    return;
+  }
+  if (sub === "ballpark") {
+    const range = flags.range === undefined ? undefined : Number(flags.range) * 1000;
+    if (range !== undefined && !(range > 0)) throw new CliError("--range takes km above 0");
+    const reply = await clientCommand("ballpark", { range, limit: flags.limit }, flags);
+    if (flags.json) return json(reply.value);
+    printClientBallpark(reply.value);
+    return;
+  }
+  if (sub === "diff") {
+    const agent = await clientAgentRow(handshake, flags);
+    if (!agent.characterID) throw new CliError(`the ${agent.username} client hasn't entered the game yet`);
+    const tolerance = flags.tolerance === undefined ? 1000 : Number(flags.tolerance);
+    if (!(tolerance >= 0)) throw new CliError("--tolerance takes metres, 0 or more");
+    const [park, served] = await Promise.all([
+      clientCommand("ballpark", {}, { ...flags, user: agent.username }),
+      callBridge(handshake, "GET", `/grid?characterID=${agent.characterID}`),
+    ]);
+    const diff = clientTools.diffBallpark(park.value, served.grid, { toleranceMeters: tolerance });
+    if (flags.json) json({ username: agent.username, characterID: agent.characterID, ...diff });
+    else printClientDiff(agent, served.grid, diff);
+    if (!diff.ok) process.exitCode = 1;
+    return;
+  }
+  if (sub === "events") {
+    if (flags.notify !== undefined) {
+      const notify = String(flags.notify).split(",").map((name) => name.trim()).filter(Boolean);
+      const reply = await clientCommand("events", { notify, limit: 0 }, flags);
+      console.log(`recording notify events: ${(reply.value.notify || []).join(", ") || "none"}`);
+    }
+    const query = new URLSearchParams({ since: String(flags.since || 0), limit: String(flags.limit || 200),
+      ...(flags.user ? { user: String(flags.user) } : {}) });
+    const listed = await callBridge(handshake, "GET", `/client/events?${query}`);
+    if (flags.json) return json(listed);
+    for (const event of listed.events || []) console.log(`#${event.seq} ${formatTimelineEvent(event, REGISTRY, { clock: true })}`);
+    if (!(listed.events || []).length) console.log(`no client events after #${flags.since || 0}`);
+    return;
+  }
+  if (sub === "console") {
+    const pid = flags.pid ? Number(flags.pid) : (await clientAgentRow(handshake, flags)).pid;
+    if (!(pid > 0)) throw new CliError("the client's agent didn't report its pid; pass --pid (its console window's title names it)");
+    const read = clientTools.readConsole({ pid });
+    if (read.error) throw new CliError(`console of pid ${pid}: ${read.error}`);
+    let lines = read.lines;
+    if (flags.grep) {
+      const pattern = new RegExp(String(flags.grep), "i");
+      lines = lines.filter((line) => pattern.test(line));
+    }
+    const count = flags.lines === undefined ? 60 : Number(flags.lines);
+    if (!(count >= 0)) throw new CliError("--lines takes a count; 0 prints them all");
+    console.log((count ? lines.slice(-count) : lines).join("\n"));
+    return;
+  }
+  if (sub === "screenshot") {
+    const agent = await clientAgentRow(handshake, flags);
+    if (!agent.pid) throw new CliError(`the ${agent.username} client's agent didn't report its pid`);
+    const format = flags.format ? String(flags.format) : flags.out && /\.jpe?g$/i.test(String(flags.out)) ? "jpg" : "png";
+    if (!["png", "jpg"].includes(format)) throw new CliError("--format takes png or jpg");
+    const name = `screenshot-${runStamp(Date.now())}-${agent.username}.${format}`;
+    const out = flags.out ? path.resolve(String(flags.out))
+      : flags.run ? path.join(RUNS_DIR, String(flags.run).replace(/[^A-Za-z0-9._-]/g, "_"), "client", name)
+        : path.join(E2E_DIR, "client", name);
+    const maxWidth = flags["max-width"] === undefined ? 0 : Number(flags["max-width"]);
+    if (!(maxWidth >= 0)) throw new CliError("--max-width takes pixels");
+    const shot = clientTools.takeScreenshot({ pid: agent.pid, out, maxWidth, format });
+    if (shot.error) throw new CliError(`screenshot of pid ${agent.pid}: ${shot.error}`);
+    if (flags.json) return json(shot);
+    console.log(`saved ${relativePath(shot.file)} (${shot.width}x${shot.height}${shot.title ? `, "${shot.title}"` : ""})`);
+    return;
+  }
+  throw new CliError("client needs status, launch, stop, ping, eval, console, ui, screenshot, ballpark, diff or events; " +
+    `got ${sub === undefined ? "nothing" : JSON.stringify(sub)}`);
+}
+
+// The attached client a command is for: --user's, else the only online one.
+async function clientAgentRow(handshake, flags) {
+  const listed = await callBridge(handshake, "GET", "/client/agents");
+  const rows = (listed.agents || []).filter((row) => row.online && (!flags.user || row.username === String(flags.user)));
+  if (rows.length === 1) return rows[0];
+  if (!rows.length) {
+    throw new CliError(flags.user ? `no client agent is online for ${flags.user}` : "no client agent is online; gridcheck client launch starts one");
+  }
+  throw new CliError(`${rows.length} client agents are online; name one with --user`);
+}
+
+async function clientLaunch(handshake, flags) {
+  const username = String(flags.user || "e2eclient");
+  const game = handshake.ports && handshake.ports.game;
+  if (!game) throw new CliError("the bridge handshake names no game port; `gridcheck status` says whether the server is up");
+  const exe = clientExe(flags);
+  const resfiles = flags.resfiles ? path.resolve(String(flags.resfiles)) : clientTools.defaultResFiles(exe);
+  if (!fs.existsSync(resfiles)) throw new CliError(`no resource cache at ${resfiles}; pass --resfiles <ResFiles folder>`);
+  // Character names are unique server-wide, so not login's "Agent Observer".
+  const { accountID, characterID } = await ensureCharacter(username, flags.name ? String(flags.name) : "Client Observer");
+  const minted = await callBridge(handshake, "POST", "/client/token", { username });
+  // The gateway serves /resfiles; Play.bat names stock's gateway port, which gridcheck moves.
+  const gateway = handshake.ports && handshake.ports.gateway;
+  const resfileserver = String(flags.resfileserver || (gateway ? `http://127.0.0.1:${gateway}/resfiles/` : "http://127.0.0.1:26002/resfiles/"));
+  const args = ["/noCrashReportUpload", `/resfileserver=${resfileserver}`, `/port:${game}`,
+    `/ssoToken=${minted.token}`, `/autoSelectCharacter:${characterID}`];
+  const startedAtMs = Date.now();
+  clientTools.startClient({ exe, args, env: clientTools.clientEnvironment({ resfiles, gatewayPort: gateway }) });
+  console.log(`started the EVE client as ${username} (account ${accountID}), entering as character ${characterID}`);
+  const waitSeconds = flags.wait === undefined ? 240 : Number(flags.wait);
+  if (!(waitSeconds > 0)) return;
+  let attached = false;
+  let pidShown = false;
+  while (Date.now() - startedAtMs < waitSeconds * 1000) {
+    await sleep(2000);
+    const listed = await callBridge(handshake, "GET", "/client/agents");
+    const agent = (listed.agents || []).find((row) => row.username === username && row.online && row.attachedAtMs >= startedAtMs);
+    if (!agent) continue;
+    if (!attached) {
+      attached = true;
+      console.log(`client agent attached after ${Math.round((Date.now() - startedAtMs) / 1000)} s`);
+    }
+    // The client's own pid: exefile.exe hands off to a second process.
+    if (agent.pid && !pidShown) {
+      pidShown = true;
+      console.log(`  client pid ${agent.pid}, build ${agent.build || "?"}`);
+    }
+    if (agent.characterID === characterID) {
+      console.log(`in game as character ${characterID} after ${Math.round((Date.now() - startedAtMs) / 1000)} s`);
+      return;
+    }
+  }
+  throw new CliError(`${attached ? "the client attached but didn't enter the game" : "no client agent attached"} within ${waitSeconds} s. ` +
+    "`gridcheck log --grep \"client\"` shows whether the server saw the token login. The client writes to its own console " +
+    "window (\"[CCP] ... pid=N\"); `gridcheck client console --pid N` reads it.");
+}
+
+function printClientUi(value) {
+  const describe = (node) => `${node.cls}${node.name && node.name !== node.cls ? ` ${node.name}` : ""}` +
+    `${node.text ? ` "${node.text}"` : ""}${node.rect ? ` [${node.rect.join(",")}]` : ""}` +
+    `${node.state && node.state !== "normal" ? ` ${node.state}` : ""}${node.display ? "" : " not displayed"}`;
+  console.log(`windows (${(value.windows || []).length}):`);
+  for (const window of value.windows || []) {
+    console.log(`  ${describe(window)}${window.windowID ? ` id=${window.windowID}` : ""}${window.minimized ? " minimized" : ""}`);
+  }
+  if (value.matches) {
+    console.log(`matches (${value.matches.length}${value.truncated ? ", cut at --limit" : ""}, ${value.visited} nodes walked):`);
+    for (const node of value.matches) console.log(`  ${node.path}  ${describe(node)}`);
+    return;
+  }
+  const walk = (node, indent) => {
+    const kids = node.kids || [];
+    const more = node.children > kids.length ? ` (${node.children - kids.length} ${kids.length ? "more " : ""}not shown)` : "";
+    console.log(`${"  ".repeat(indent)}${describe(node)}${more}`);
+    for (const kid of kids) walk(kid, indent + 1);
+  };
+  console.log("tree:");
+  if (value.tree) walk(value.tree, 1);
+  if (value.truncated) console.log("(cut at --limit nodes)");
+}
+
+function printClientBallpark(value) {
+  if (!value.inSpace) {
+    console.log(`not in space: the client has no ballpark (system ${value.solarSystemID || "?"})`);
+    return;
+  }
+  console.log(`ballpark in ${value.solarSystemID}: ego ${value.egoID}, stamp ${value.currentTime}, ` +
+    `${value.count} ball(s) with items of ${value.ballCount} in all${value.truncated ? ", cut at --limit" : ""}`);
+  for (const ball of value.balls || []) {
+    const distance = ball.distanceMeters === undefined ? "?" : ball.distanceMeters < 10000
+      ? `${Math.round(ball.distanceMeters)} m` : `${(ball.distanceMeters / 1000).toFixed(1)} km`;
+    const speed = Math.hypot(...(ball.velocity || []).map((v) => Number(v) || 0));
+    console.log(`  ${distance.padStart(12)}  ${String(ball.mode || "-").padEnd(8)} ${String(ball.itemID).padEnd(14)} ` +
+      `${ball.name || `type ${ball.typeID}`}${speed >= 1 ? `  ${Math.round(speed)} m/s` : ""}`);
+  }
+}
+
+function printClientDiff(agent, grid, diff) {
+  console.log(`${agent.username} (character ${agent.characterID}): server grid in ${grid.systemName || grid.solarSystemID || "?"}, ` +
+    `${diff.inSpace.server ? "in space" : "docked"}; client ${diff.inSpace.client ? "in space" : "has no ballpark"}` +
+    `${diff.sameSystem ? "" : ", in another system"}`);
+  console.log(`  server ${diff.counts.server}, client ${diff.counts.client}, shared ${diff.counts.shared}; ` +
+    `${diff.counts.staticOnlyInClient} celestial(s) and station(s) only the client lists, as it holds the whole system`);
+  const section = (title, rows, line) => {
+    if (!rows.length) return;
+    console.log(`  ${title} (${rows.length}):`);
+    for (const row of rows.slice(0, 40)) console.log(`    ${line(row)}`);
+    if (rows.length > 40) console.log(`    ... ${rows.length - 40} more (--json lists all)`);
+  };
+  section("on the server's grid, not in the client", diff.missing,
+    (row) => `${row.itemID} ${row.label}${row.kind ? ` (${row.kind})` : ""}${row.distanceMeters !== null ? ` at ${row.distanceMeters} m` : ""}`);
+  section("in the client, not on the server's grid", diff.extra,
+    (row) => `${row.itemID} ${row.label}${row.mode ? ` ${row.mode}` : ""}${row.distanceMeters !== null ? ` at ${row.distanceMeters} m` : ""}`);
+  section("further apart than allowed", diff.moved, (row) => `${row.itemID} ${row.label}: ${row.errorMeters} m (allowed ${row.allowedMeters} m)`);
+  section("in another mode", diff.modes, (row) => `${row.itemID} ${row.label}: server ${row.server}, client ${row.client}`);
+  console.log(diff.ok ? "  the client holds what the server sent" : "  the client and the server disagree");
 }
 
 function describeFlight(flight) {
@@ -2384,6 +2529,13 @@ function formatDoctor(report) {
     lines.push(report.loadout.ok ? "loadout    the stock ship helpers are there; gridcheck loadout can build a ship"
       : `loadout    OFF: ${report.loadout.missing.join("; ")}`);
   }
+  const client = report.client;
+  if (client) {
+    const patchText = { applied: "patched", detected: "patched (unmarked)", absent: "not patched (opt-in)" }[client.patch] || `patch ${client.patch}`;
+    lines.push(`client     ${patchText}; gridcheckClient service ${client.service}; ` +
+      `${client.exe ? `client ${client.exe} (${client.exeSource})` : "no client found"}`);
+    for (const fix of client.fixes || []) lines.push(`           ${fix}`);
+  }
   const live = report.live;
   if (live && live.ports) {
     lines.push(`server     pid ${live.pid}: game :${live.ports.game || "?"}, gateway :${live.ports.gateway || "?"}, agent bridge :${live.ports.agentBridge || "?"}`);
@@ -2607,7 +2759,10 @@ const CORE_COMMANDS = {
   logout: { usage: ["logout"], run: () => cmdLogout() },
   client: {
     usage: ["client launch [--user e2eclient] [--name \"...\"] [--exe <exefile.exe>] [--resfiles <folder>] [--resfileserver <url>] [--wait 240]",
-      "client status [--json] | client ping [--user] | client eval \"<python>\" [--file <py>] [--user] [--timeout 15] [--json]"],
+      "client status [--json] | client stop [--user] | client ping [--user] | client eval \"<python>\" [--file <py>] [--user] [--timeout 15] [--json]",
+      "client console [--lines 60] [--grep <regex>] [--pid N] | client ui [--class <text>] [--name <text>] [--text <text>] [--depth N] [--hidden] [--limit N] [--json]",
+      "client screenshot [--out <file.png|.jpg>] [--run <id>] [--max-width <px>] | client ballpark [--range <km>] [--json]",
+      "client diff [--tolerance 1000] [--json] | client events [--since <seq>] [--notify OnA,OnB] [--json]"],
     run: cmdClient,
   },
   undock: { usage: ["undock"], run: () => cmdUndock() },
@@ -2648,7 +2803,7 @@ const CORE_COMMANDS = {
   scenario: { usage: ["scenario new <name> [--from <scenario>] [--save] [--force]"], run: cmdScenario },
   log: { usage: ["log [--grep NpcController] [--lines 40] [--any-pid]"], run: (_positionals, flags) => cmdLog(flags) },
   perf: { usage: ["perf [--for 10] [--now] [--json]"], run: (_positionals, flags) => cmdPerf(flags) },
-  primer: { usage: ["primer [start|scenarios|conditions|events|perf|plugins] [--mcp]"], run: (positionals, flags) => cmdPrimer(positionals, flags) },
+  primer: { usage: ["primer [start|scenarios|conditions|events|perf|client|plugins] [--mcp]"], run: (positionals, flags) => cmdPrimer(positionals, flags) },
   help: { usage: ["help [--json]"], run: (_positionals, flags) => { console.log(flags.json ? JSON.stringify(commandCatalog(), null, 2) : helpText()); } },
 };
 

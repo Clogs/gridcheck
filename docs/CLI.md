@@ -34,7 +34,7 @@ Work through these in order. Each step ends on its own criterion.
 2. **Learn the format.** `gridcheck primer` prints the scenario format, the setup steps and player
    actions, the condition syntax, every event kind's fields, performance runs and each plugin's
    notes; `gridcheck primer <topic>` prints one part (`start`, `scenarios`, `conditions`, `events`,
-   `perf`, `plugins`). Done when you have read it in this session: it is the only reference for
+   `perf`, `client`, `plugins`). Done when you have read it in this session: it is the only reference for
    those, and it matches this tree's plugins.
 3. **Draft the scenario.** `gridcheck scenario new <name>` writes a draft to `_local/gridcheck/scenarios/` that
    checks out as it stands; `--from <scenario>` copies one closer to your case (`gridcheck run` lists
@@ -82,6 +82,26 @@ gridcheck down
 
 Start `gridcheck watch --for 60` in the background before you act, to see the action's effect. `gridcheck
 perf --for 10` measures server ticks; the primer covers performance runs.
+
+## A real EVE client
+
+When the bug is in the client itself (its UI, what its ballpark holds, an exception it logs),
+`gridcheck client` starts the real EVE client and reads it from inside. The tree needs the opt-in
+`client-agent` patch; `gridcheck doctor` says whether it's applied and what else is missing.
+
+```
+gridcheck client launch            # logged in and in game; its own account, e2eclient
+gridcheck client ui --text undock  # UI nodes whose text contains it, with path, rect and state
+gridcheck client screenshot        # the window, saved as a PNG; not while minimized
+gridcheck client ballpark          # the balls the client holds
+gridcheck client diff              # those against the server's grid; exit 1 when they disagree
+gridcheck client events            # its exceptions; watches and runs carry them as CLIENT_EXCEPTION
+gridcheck client console --grep EXCEPTION
+gridcheck client eval "<python>"   # Python 2.7 inside the client
+gridcheck client stop              # stop the client when you're done
+```
+
+`gridcheck primer client` has the details. The client opens a window on the user's desktop.
 
 ## Keeping to your files
 

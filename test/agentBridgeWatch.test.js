@@ -393,6 +393,38 @@ function sink() {
   return { lines, write: (event) => lines.push(event), closed: () => false };
 }
 
+test("a watch carries the client agent's events while it runs, and lets go of them when it ends", async () => {
+  let clock = 0;
+  let listener = null;
+  let unsubscribed = false;
+  const clientEvents = {
+    subscribe(fn) {
+      listener = fn;
+      return () => { unsubscribed = true; listener = null; };
+    },
+  };
+  let samples = 0;
+  const watch = createGridWatch({
+    findSession: () => (samples < 2 ? { characterID: 7 } : null),
+    readGrid: () => { samples += 1; return grid([]); },
+    clientEvents,
+    now: () => clock,
+    perfNow: () => clock,
+    wait: async (ms) => {
+      clock += ms;
+      listener({ seq: 41, atMs: 1, kind: "CLIENT_EXCEPTION", username: "e2eclient", type: "ZeroDivisionError", clientAtMs: 5 });
+    },
+  });
+  const out = sink();
+  await watch.run({ characterID: 7, forMs: 60_000, everyMs: 2000, offGridEveryMs: 2000 }, out);
+  const client = out.lines.filter((event) => event.kind === "CLIENT_EXCEPTION");
+  assert.strictEqual(client.length, 2);
+  assert.deepStrictEqual([client[0].t, client[0].type, client[0].clientAtMs], [2000, "ZeroDivisionError", 5],
+    "stamped when the bridge got it, with the bridge ring's own seq replaced by the watch's");
+  assert.notStrictEqual(client[0].seq, 41);
+  assert.strictEqual(unsubscribed, true);
+});
+
 test("a watch runs on its clock, streams START ... END and stops when the session goes", async () => {
   let clock = 0;
   let sessionAlive = true;

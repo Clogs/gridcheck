@@ -665,6 +665,8 @@ function createGridWatch({
   destinyTee = null,
   describeType = null,
   perf = null,
+  // { subscribe(listener) -> unsubscribe }: the client agent's CLIENT_EXCEPTION and CLIENT_EVENT lines.
+  clientEvents = null,
   now = Date.now,
   perfNow = () => Number(process.hrtime.bigint()) / 1e6,
   wait = sleep,
@@ -764,6 +766,12 @@ function createGridWatch({
       ...(destinyTee && destinyTee.off && clientMode !== "off" ? { clientOff: destinyTee.off } : {}),
       positions: positions === true,
       ...(sampler ? { perf: { everyMs: perfEveryMs, profiler: perf.profiler.enabled, everyTicks: perf.profiler.everyTicks } } : {}) });
+    // Stamped when the bridge got them; clientAtMs is when the client recorded them.
+    if (clientEvents && typeof clientEvents.subscribe === "function") {
+      closers.push(clientEvents.subscribe(({ seq: _seq, atMs: _atMs, ...event }) => {
+        if (!sink.closed()) emit(event);
+      }));
+    }
     for (;;) {
       if (sink.closed()) { reason = "client-closed"; break; }
       const session = findSession(characterID);

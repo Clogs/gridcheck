@@ -38,6 +38,7 @@ main { display: grid; grid-template-columns: minmax(320px, 640px) minmax(260px, 
 #events li.k-DIVERGE { color: #8250df; }
 #events li.k-DESTROYED, #events li.k-KILLMAIL { font-weight: bold; }
 #events li.k-DAMAGE { color: #bc4c00; }
+#events li.k-CLIENT_EXCEPTION { color: #cf222e; }
 #events li.k-STEP, #events li.k-STOP { color: #0969da; }
 #events li.k-LOG { color: #57606a; }
 #events li.fail { color: #cf222e; }

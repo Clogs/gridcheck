@@ -11,12 +11,15 @@
 //   plugins    active, and skipped with the reason
 //   listeners  which ports `gridcheck up` can move (gridcheck.config.json)
 //   loadout    whether the stock exports POST /loadout builds a ship from are there
+//   client     what `gridcheck client` needs: the client-agent patch, the
+//              bridge's gridcheckClient service, an EVE client to start
 
 const fs = require("node:fs");
 const path = require("node:path");
 const { spawnSync } = require("node:child_process");
 
 const patchEngine = require("./patches");
+const { findClientExe } = require("./client");
 const { LOADOUT_EXPORTS } = require("../bridge/loadout");
 
 const COPY_ROOT = path.join(__dirname, "..");
@@ -168,7 +171,7 @@ function sessionShape(session) {
 // One report from what the caller could find. Offline, `probe` is
 // probeTreeOffline's answer; live, the bridge passes the same shape.
 function buildReport({ treeRoot, serverRoot, config = null, registry = null, probe = null, live = null,
-  patches = detectPatches(serverRoot) }) {
+  patches = detectPatches(serverRoot), env = process.env }) {
   const gateway = checkGatewayCalls(probe ? probe.allowlist : null, probe ? probe.allowlistError : null);
   const destiny = probe && probe.destiny ? probe.destiny : { ok: false, error: "not probed", balls: 0 };
   const loadout = probe && probe.loadout ? probe.loadout : probeLoadoutExports(serverRoot);
@@ -182,7 +185,31 @@ function buildReport({ treeRoot, serverRoot, config = null, registry = null, pro
     plugins: pluginReport(registry),
     listeners: config ? config.listeners : {},
     loadout: { ok: !loadout.missing.length, missing: loadout.missing },
+    client: clientReport({ treeRoot, patches, service: probe && probe.client ? probe.client : null, env }),
     ...(live ? { live } : {}),
+  };
+}
+
+// What `gridcheck client` needs, each part with its fix: the opt-in patch, the
+// bridge's gridcheckClient service (only a running server knows), the client.
+function clientReport({ treeRoot, patches, service, env }) {
+  const patch = (patches || []).find((row) => row.id === "client-agent");
+  const patchState = patch ? patch.state : "unknown";
+  const found = findClientExe({ treeRoot, env });
+  const fixes = [];
+  if (patchState === "absent") fixes.push("gridcheck patch apply client-agent, then restart the server (opt-in: the client then runs code the server sends)");
+  else if (patchState === "no-target") fixes.push("this tree's network/tcp/handshake.js has neither the patch's anchors nor the hook; the client agent can't be patched in");
+  else if (patchState === "partial") fixes.push("gridcheck patch status client-agent shows which hunk is missing");
+  if (service && service.service === "off") fixes.push(`the bridge's gridcheckClient service is off: ${service.reason}`);
+  if (found.error) fixes.push(found.error);
+  return {
+    ok: (patchState === "applied" || patchState === "detected") && (!service || service.service === "on") && !found.error,
+    patch: patchState,
+    service: service ? service.service : "unknown",
+    serviceReason: service ? service.reason : "only the running server knows",
+    exe: found.exe || null,
+    exeSource: found.source || null,
+    fixes,
   };
 }
 

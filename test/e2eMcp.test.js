@@ -80,7 +80,8 @@ test("the instructions are a brief clients won't cut off; the guide tool has the
   assert.match(topic("scenarios"), /\{ "repeat": \[<steps>\], "every": 5, "times": 12 \}/);
   assert.match(topic("scenarios"), /quote a value that has one \(name~"Asteroid Belt"\)/);
   assert.match(topic("perf"), /"perf": "<name>"/);
-  assert.throws(() => topic("nope"), /no topic "nope"; the topics are start, scenarios, conditions, events, perf, plugins/);
+  assert.match(topic("client"), /`client_launch`[\s\S]*`client_diff`[\s\S]*CLIENT_EXCEPTION/);
+  assert.throws(() => topic("nope"), /no topic "nope"; the topics are start, scenarios, conditions, events, perf, client, plugins/);
   const whole = primer({ registry, surface: "mcp" });
   assert.ok(whole.length < 20_000, `the whole guide fits one reply (${whole.length})`);
   for (const name of ["start", "scenarios", "events", "plugins"]) assert.ok(whole.includes(topic(name)), `${name} is in the whole guide`);

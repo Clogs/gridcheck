@@ -169,6 +169,13 @@ function createService({ serverRoot, stock: givenStock = null, pluginsDir = DEFA
       env,
     });
     if (perf.profiler.enabled) log.info(`[AgentBridge] tick profiler on: a PROFILE window every ${perf.profiler.everyTicks} ticks`);
+    // Inert until the client-agent patch calls its hook from the login handshake.
+    const handshakeSource = path.join(serverRoot, "src", "network", "tcp", "handshake.js");
+    const clientAgent = createClientAgent({
+      log,
+      patched: () => Boolean(optional(() => fs.readFileSync(handshakeSource, "utf8").includes("gridcheck:patch client-agent"))),
+    });
+    const clientAgentOn = clientAgent.install(runtimeContext && runtimeContext.serviceManager, optional(() => stock.baseService));
     const watcher = createGridWatch({
       findSession: seams.findSession,
       readGrid: grid.readGrid,
@@ -177,14 +184,8 @@ function createService({ serverRoot, stock: givenStock = null, pluginsDir = DEFA
       describeType: seams.describeType,
       destinyTee,
       perf,
+      clientEvents: clientAgentOn ? clientAgent : null,
     });
-    // Inert until the client-agent patch calls its hook from the login handshake.
-    const handshakeSource = path.join(serverRoot, "src", "network", "tcp", "handshake.js");
-    const clientAgent = createClientAgent({
-      log,
-      patched: () => Boolean(optional(() => fs.readFileSync(handshakeSource, "utf8").includes("gridcheck:patch client-agent"))),
-    });
-    const clientAgentOn = clientAgent.install(runtimeContext && runtimeContext.serviceManager, optional(() => stock.baseService));
     const routes = createAgentBridgeRoutes({
       findSession: seams.findSession,
       executeChatCommand: seams.executeChatCommand,
@@ -218,6 +219,7 @@ function createService({ serverRoot, stock: givenStock = null, pluginsDir = DEFA
           allowlistError: "the gateway exports no WEB_CALL_ALLOWLIST",
           destiny: layout,
           loadout: { missing: loadout().missing },
+          client: clientAgent.status(),
         },
         live: {
           pid: process.pid,

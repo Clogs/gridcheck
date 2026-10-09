@@ -1,6 +1,6 @@
 # Optional stock patches
 
-Stock EveJS lacks three things the tool can use. Each is an optional patch in `patches/`. The tool
+Stock EveJS lacks four things the tool can use. Each is an optional patch in `patches/`. The tool
 works without them, with less.
 
 | Patch | What it adds | Without it |
@@ -8,9 +8,11 @@ works without them, with less.
 | `xmpp-port` | `EVEJS_XMPP_SERVER_PORT` moves the XMPP chat listener | Two trees both want port 5222, so only one server runs at a time |
 | `last-decision` | each NPC controller records the branch its last think took | grid rows carry no `decision`, and a watch reports no `DECISION` events |
 | `slash-success` | the slash commands the tool drives say whether they refused | `gridcheck slash` can't tell a refusal from a success, and says so |
+| `client-agent` (opt-in) | a real EVE client started by `gridcheck client launch` logs in by token and runs the client agent | Gridcheck flies headless characters only |
 
-The LU fork has its own code for all three, so `gridcheck doctor` and `gridcheck patch status` show them there
-as `detected`, and apply refuses them.
+The LU fork has its own code for the first three, so `gridcheck doctor` and `gridcheck patch status` show them there
+as `detected`, and apply refuses them. `client-agent` is opt-in: `gridcheck setup` applies the others
+for you, but never this one.
 
 ## Commands
 
@@ -125,3 +127,36 @@ Every other command still answers with no `success`.
 The survey behind the list found that no stock command reports success when it refused, because
 none reports anything. It also found 37 dispatch sites in `chatCommands.js` that call a helper
 returning `success`, then pass on only its message.
+
+### `client-agent`
+
+The patch adds two hunks in `network/tcp/handshake.js`. Both call a hook the agent bridge installs
+(`bridge/client.js`), and do nothing when the bridge isn't running:
+
+- **Login.** After the handshake decodes the client's login dict, the hook looks for a token the
+  bridge minted. `gridcheck client launch` starts the client with `/ssoToken=<token>`, and the client
+  then logs in as `user_name='EVE-SSO-CONNECTION'` with the token in `user_sso_token`. The hook puts
+  the token's account name and stored password hash in the dict, so stock's own checks that follow
+  log it in. A login without a minted token is left exactly as it was.
+- **The login expression.** The handshake sends the client a Python expression that it runs at
+  login (the signedFunc). For a login the hook just resolved, it wraps that expression so it also
+  runs `bridge/client/bootstrap.py`. Stock's expression still runs, and its result is still the
+  result. The bootstrap fetches `bridge/client/agent.py` from the bridge's `gridcheckClient` service
+  once the session is up, and the agent answers `gridcheck client` commands from inside the client.
+
+Only a client started with a token the bridge minted runs anything. Every other client, and every
+login in a tree whose bridge is off, sees stock's handshake.
+
+**Why it's opt-in.** With the patch on, the server sends code that the client runs. That is the
+point of the patch, but nobody should get it by running `setup`. Apply it in a test tree only,
+never in a tree players use.
+
+**What `EVE-SSO-CONNECTION` means.** That's the name the client sends when it logs in by SSO
+token. A token the bridge didn't mint reaches stock unchanged, so stock looks for an account named
+`EVE-SSO-CONNECTION` and the login fails as any unknown account does. Without the patch, the bridge
+won't mint a token (`POST /client/token` answers 409), so `client launch` stops before it starts a
+client that would fail that way.
+
+`gridcheck doctor` shows whether the patch is applied, whether the running server registered the
+`gridcheckClient` service, and which client `client launch` would start. Each part that's missing
+comes with its fix. `docs/GUIDE.md` "A real EVE client" covers the commands.
