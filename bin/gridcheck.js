@@ -410,31 +410,7 @@ async function currentSystemID(state) {
 async function cmdLogin(flags) {
   const state = readState();
   const username = String(flags.user || state.username || "e2eagent");
-  const wantedName = flags.name ? String(flags.name) : null;
-  const created = await gateway("POST", "/account/create", { username });
-  const accountID = Number(created.account && created.account.accountID);
-  if (!accountID) throw new CliError(`account/create returned no accountID for ${username}`);
-
-  const listed = await gateway("GET", `/characters?accountID=${accountID}`);
-  const characters = Array.isArray(listed.characters) ? listed.characters : [];
-  const character = wantedName
-    ? characters.find((row) => String(row.characterName || row.name || "") === wantedName)
-    : characters[0];
-  let characterID = character ? Number(character.characterID || character.id) : 0;
-  if (!characterID) {
-    const name = wantedName || "Agent Observer";
-    const made = await gateway("POST", "/call", {
-      service: "charUnboundMgr",
-      method: "CreateCharacterWithDoll",
-      // Legacy signature: name, bloodline, gender, ancestry, charInfo, portraitInfo, school.
-      args: [name, 1, 1, 1, {}, {}, 11],
-      confirm: true,
-      session: { userid: accountID },
-    });
-    characterID = Number(made.result);
-    if (!characterID) throw new CliError(`CreateCharacterWithDoll returned ${JSON.stringify(made.result)}`);
-    console.log(`created character ${name} (${characterID})`);
-  }
+  const { accountID, characterID } = await ensureCharacter(username, flags.name ? String(flags.name) : null);
 
   if (state.bridgeSessionID && state.characterID === characterID && state.accountID === accountID) {
     try {
@@ -468,6 +444,169 @@ async function cmdLogin(flags) {
   console.log(text);
   await attachTee({ characterID });
   return text;
+}
+
+// The account, made if it's missing, and its character by name or its first, made if it has none.
+async function ensureCharacter(username, wantedName) {
+  const created = await gateway("POST", "/account/create", { username });
+  const accountID = Number(created.account && created.account.accountID);
+  if (!accountID) throw new CliError(`account/create returned no accountID for ${username}`);
+
+  const listed = await gateway("GET", `/characters?accountID=${accountID}`);
+  const characters = Array.isArray(listed.characters) ? listed.characters : [];
+  const character = wantedName
+    ? characters.find((row) => String(row.characterName || row.name || "") === wantedName)
+    : characters[0];
+  let characterID = character ? Number(character.characterID || character.id) : 0;
+  if (!characterID) {
+    const name = wantedName || "Agent Observer";
+    const made = await gateway("POST", "/call", {
+      service: "charUnboundMgr",
+      method: "CreateCharacterWithDoll",
+      // Legacy signature: name, bloodline, gender, ancestry, charInfo, portraitInfo, school.
+      args: [name, 1, 1, 1, {}, {}, 11],
+      confirm: true,
+      session: { userid: accountID },
+    });
+    characterID = Number(made.result);
+    if (!characterID) throw new CliError(`CreateCharacterWithDoll returned ${JSON.stringify(made.result)}`);
+    console.log(`created character ${name} (${characterID})`);
+  }
+  return { username, accountID, characterID };
+}
+
+// The EVE client the tree's Play.bat starts: --exe, EVEJS_CLIENT_EXE, or the client
+// folder EVEJS_CLIENT_PATH names, in the environment or the launcher's EvEJSConfig.bat.
+function clientExe(flags) {
+  if (flags.exe) return path.resolve(String(flags.exe));
+  if (process.env.EVEJS_CLIENT_EXE) return process.env.EVEJS_CLIENT_EXE;
+  let clientPath = process.env.EVEJS_CLIENT_PATH || null;
+  if (!clientPath) {
+    const configBat = path.join(REPO_ROOT, "tools", "ClientSETUP", "scripts", "EvEJSConfig.bat");
+    const text = fs.existsSync(configBat) ? fs.readFileSync(configBat, "utf8") : "";
+    const match = /^\s*set\s+"EVEJS_CLIENT_PATH=([^"]+)"/im.exec(text);
+    clientPath = match ? match[1].trim() : null;
+  }
+  if (!clientPath) {
+    throw new CliError("no EVE client found: pass --exe <exefile.exe>, or run the tree's Play.bat once so its launcher config names the client");
+  }
+  for (const bin of ["bin64", "bin"]) {
+    const exe = path.join(clientPath, bin, "exefile.exe");
+    if (fs.existsSync(exe)) return exe;
+  }
+  throw new CliError(`no exefile.exe under ${path.join(clientPath, "bin64")}; pass --exe`);
+}
+
+async function clientCommand(op, args, flags) {
+  const handshake = requireHandshake();
+  const seconds = flags.timeout === undefined ? 15 : Number(flags.timeout);
+  if (!(seconds >= 1 && seconds <= 300)) throw new CliError("--timeout takes seconds from 1 through 300");
+  const { status, json } = await requestJSON(`http://${handshake.host}:${handshake.port}/client/command`, {
+    method: "POST",
+    body: { op, args, user: flags.user ? String(flags.user) : undefined, timeoutMs: seconds * 1000 },
+    headers: { authorization: `Bearer ${handshake.token}` },
+    timeoutMs: (seconds + 10) * 1000,
+  });
+  if (status === 404) throw new CliError("this server's bridge has no client agent. `gridcheck client status` says why.");
+  if (status >= 400 || json.ok === false) throw new CliError(`client ${op}: ${json.error || `HTTP ${status}`}`);
+  return json;
+}
+
+async function cmdClient(positionals, flags) {
+  const [sub, ...rest] = positionals;
+  if (sub === "status") {
+    const handshake = requireHandshake();
+    const { status, json } = await requestJSON(`http://${handshake.host}:${handshake.port}/client/agents`, {
+      headers: { authorization: `Bearer ${handshake.token}` },
+    });
+    if (status === 404) {
+      console.log("client agent: off. The server log's [AgentBridge] lines say why; it needs a restart after an update.");
+      return;
+    }
+    if (flags.json) {
+      console.log(JSON.stringify(json, null, 2));
+      return;
+    }
+    console.log(`client agent: ${json.patched ? "on" : "off: the client-agent patch isn't applied (gridcheck patch apply client-agent)"}`);
+    for (const agent of json.agents || []) {
+      console.log(`  ${agent.username} account ${agent.accountID}, character ${agent.characterID || "(selecting)"}, ` +
+        `${agent.online ? "online" : "gone"}, attached ${new Date(agent.attachedAtMs).toLocaleTimeString()}`);
+    }
+    if (!(json.agents || []).length) console.log("  no client has attached");
+    return;
+  }
+  if (sub === "launch") {
+    const username = String(flags.user || "e2eclient");
+    const handshake = requireHandshake();
+    const game = handshake.ports && handshake.ports.game;
+    if (!game) throw new CliError("the bridge handshake names no game port; `gridcheck status` says whether the server is up");
+    const exe = clientExe(flags);
+    // Character names are unique server-wide, so not login's "Agent Observer".
+    const { accountID, characterID } = await ensureCharacter(username, flags.name ? String(flags.name) : "Client Observer");
+    const minted = await callBridge(handshake, "POST", "/client/token", { username });
+    // The gateway serves /resfiles; Play.bat names stock's gateway port, which gridcheck moves.
+    const gateway = handshake.ports && handshake.ports.gateway;
+    const resfileserver = String(flags.resfileserver || (gateway ? `http://127.0.0.1:${gateway}/resfiles/` : "http://127.0.0.1:26002/resfiles/"));
+    const args = ["/noCrashReportUpload", `/resfileserver=${resfileserver}`, `/port:${game}`,
+      `/ssoToken=${minted.token}`, `/autoSelectCharacter:${characterID}`];
+    fs.mkdirSync(E2E_DIR, { recursive: true });
+    const logPath = path.join(E2E_DIR, `client-${username}.log`);
+    const out = fs.openSync(logPath, "a");
+    // What Play.bat sets: the resource cache beside tq (else the client reads the
+    // registry's CACHEFOLDER), and the gateway as the client's HTTP proxy.
+    const resfiles = flags.resfiles ? path.resolve(String(flags.resfiles)) : path.resolve(path.dirname(exe), "..", "..", "ResFiles");
+    if (!fs.existsSync(resfiles)) throw new CliError(`no resource cache at ${resfiles}; pass --resfiles <ResFiles folder>`);
+    const proxy = gateway ? `http://127.0.0.1:${gateway}/` : null;
+    const env = {
+      ...process.env,
+      EO_REMOTEFILECACHEFOLDER: resfiles,
+      ...(proxy ? {
+        http_proxy: proxy, https_proxy: proxy, HTTP_PROXY: proxy, HTTPS_PROXY: proxy, all_proxy: proxy, ALL_PROXY: proxy,
+        EVE_CLIENT_SENTRY_DSN: `http://evejs@127.0.0.1:${gateway}/1`,
+      } : {}),
+      no_proxy: "127.0.0.1,localhost,::1",
+      NO_PROXY: "127.0.0.1,localhost,::1",
+    };
+    const startedAtMs = Date.now();
+    const child = spawn(exe, args, { cwd: path.dirname(exe), env, detached: true, stdio: ["ignore", out, out] });
+    child.unref();
+    fs.closeSync(out);
+    console.log(`started the EVE client (pid ${child.pid}) as ${username} (account ${accountID}), entering as character ${characterID}`);
+    console.log(`  client output: ${relativePath(logPath)}`);
+    const waitSeconds = flags.wait === undefined ? 240 : Number(flags.wait);
+    if (!(waitSeconds > 0)) return;
+    let attached = false;
+    while (Date.now() - startedAtMs < waitSeconds * 1000) {
+      await sleep(2000);
+      const listed = await callBridge(handshake, "GET", "/client/agents");
+      const agent = (listed.agents || []).find((row) => row.username === username && row.online && row.attachedAtMs >= startedAtMs);
+      if (agent && !attached) {
+        attached = true;
+        console.log(`client agent attached after ${Math.round((Date.now() - startedAtMs) / 1000)} s`);
+      }
+      if (agent && agent.characterID === characterID) {
+        console.log(`in game as character ${characterID} after ${Math.round((Date.now() - startedAtMs) / 1000)} s`);
+        return;
+      }
+    }
+    throw new CliError(`${attached ? "the client attached but didn't enter the game" : "no client agent attached"} within ${waitSeconds} s. ` +
+      `\`gridcheck log --grep "client"\` shows whether the server saw the token login; the client's output is in ${relativePath(logPath)}.`);
+  }
+  if (sub === "ping") {
+    const reply = await clientCommand("ping", {}, flags);
+    console.log(JSON.stringify(reply.value, null, 2));
+    return;
+  }
+  if (sub === "eval") {
+    const code = flags.file ? fs.readFileSync(path.resolve(String(flags.file)), "utf8") : rest.join(" ");
+    if (!code.trim()) throw new CliError("client eval needs Python, e.g. gridcheck client eval \"session.charid\"");
+    const reply = await clientCommand("eval", { code }, flags);
+    const value = reply.value || {};
+    if (flags.json) console.log(JSON.stringify(value, null, 2));
+    else console.log(value.repr + (value.truncated ? "\n(truncated)" : ""));
+    return;
+  }
+  throw new CliError(`client needs status, launch, ping or eval; got ${sub === undefined ? "nothing" : JSON.stringify(sub)}`);
 }
 
 function describeFlight(flight) {
@@ -2466,6 +2605,11 @@ const CORE_COMMANDS = {
   },
   login: { usage: ["login [--user e2eagent] [--name \"Agent Observer\"]"], run: (_positionals, flags) => cmdLogin(flags) },
   logout: { usage: ["logout"], run: () => cmdLogout() },
+  client: {
+    usage: ["client launch [--user e2eclient] [--name \"...\"] [--exe <exefile.exe>] [--resfiles <folder>] [--resfileserver <url>] [--wait 240]",
+      "client status [--json] | client ping [--user] | client eval \"<python>\" [--file <py>] [--user] [--timeout 15] [--json]"],
+    run: cmdClient,
+  },
   undock: { usage: ["undock"], run: () => cmdUndock() },
   dock: { usage: ["dock"], run: () => runSlash("/dock") },
   slash: {

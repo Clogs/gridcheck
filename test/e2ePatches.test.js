@@ -174,7 +174,7 @@ test("a file that isn't UTF-8 is refused rather than rewritten", (t) => {
 
 test("the shipped patches load with hunks and a check for equivalent code", () => {
   const patches = loadPatches();
-  assert.deepEqual(patches.map((patch) => patch.id), ["last-decision", "slash-success", "xmpp-port"]);
+  assert.deepEqual(patches.map((patch) => patch.id), ["client-agent", "last-decision", "slash-success", "xmpp-port"]);
   for (const patch of patches) {
     assert.ok(patch.hunks.length > 0, `${patch.id} has hunks`);
     assert.equal(typeof patch.detect, "function", `${patch.id} has detect`);

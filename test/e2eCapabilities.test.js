@@ -64,7 +64,7 @@ test("a patch reads as applied by its marker, detected by its check, absent, unk
     ["elsewhere", "no-target", null],
     ["throws", "unknown", null],
   ]);
-  assert.deepEqual(loadPatches().map((patch) => patch.id), ["last-decision", "slash-success", "xmpp-port"]);
+  assert.deepEqual(loadPatches().map((patch) => patch.id), ["client-agent", "last-decision", "slash-success", "xmpp-port"]);
 });
 
 test("the shipped patches' checks find the LU fork's equivalent code and nothing in stock", (t) => {
@@ -79,8 +79,9 @@ test("the shipped patches' checks find the LU fork's equivalent code and nothing
     "function handledResult(a, b, c, message, success = true) { return { handled: true, success, message }; }\n" +
     "function rejectedResult(a, b, c, message) { return handledResult(a, b, c, message, false); }\n");
   const states = (serverRoot) => Object.fromEntries(detectPatches(serverRoot).map((row) => [row.id, row.state]));
-  assert.deepEqual(states(stock), { "last-decision": "absent", "slash-success": "no-target", "xmpp-port": "absent" });
-  assert.deepEqual(states(fork), { "last-decision": "detected", "slash-success": "detected", "xmpp-port": "detected" });
+  // Neither has the handshake client-agent patches, so it has no target in either.
+  assert.deepEqual(states(stock), { "client-agent": "no-target", "last-decision": "absent", "slash-success": "no-target", "xmpp-port": "absent" });
+  assert.deepEqual(states(fork), { "client-agent": "no-target", "last-decision": "detected", "slash-success": "detected", "xmpp-port": "detected" });
 });
 
 test("a session's shape is what the client view checks before it attaches", () => {

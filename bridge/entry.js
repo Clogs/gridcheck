@@ -16,6 +16,7 @@
 
 "use strict";
 
+const fs = require("fs");
 const path = require("path");
 
 const { createAgentBridgeHttp, removeHandshake } = require("./http");
@@ -24,6 +25,7 @@ const { createGridReader } = require("./grid");
 const { annotateRow, createGridWatch } = require("./watch");
 const { createDestinyTee, probeDestinyLayout } = require("./destiny");
 const { createAgentBridgeViewer } = require("./viewer");
+const { createClientAgent } = require("./client");
 const { createLoadout, loadLoadoutModules } = require("./loadout");
 const { createPerfMonitor } = require("./perf");
 const { createStock, serverRequire } = require("./stock");
@@ -115,7 +117,7 @@ function createService({ serverRoot, stock: givenStock = null, pluginsDir = DEFA
   let bridge = null;
   let pluginStatus = null;
 
-  function start() {
+  function start(runtimeContext = null) {
     if (bridge) return bridge;
     const stock = givenStock || createStock(serverRoot);
     const log = optional(() => stock.logger) || quietLogger();
@@ -176,6 +178,13 @@ function createService({ serverRoot, stock: givenStock = null, pluginsDir = DEFA
       destinyTee,
       perf,
     });
+    // Inert until the client-agent patch calls its hook from the login handshake.
+    const handshakeSource = path.join(serverRoot, "src", "network", "tcp", "handshake.js");
+    const clientAgent = createClientAgent({
+      log,
+      patched: () => Boolean(optional(() => fs.readFileSync(handshakeSource, "utf8").includes("gridcheck:patch client-agent"))),
+    });
+    const clientAgentOn = clientAgent.install(runtimeContext && runtimeContext.serviceManager, optional(() => stock.baseService));
     const routes = createAgentBridgeRoutes({
       findSession: seams.findSession,
       executeChatCommand: seams.executeChatCommand,
@@ -193,7 +202,10 @@ function createService({ serverRoot, stock: givenStock = null, pluginsDir = DEFA
         nowMs: Date.now(),
         characterID: session && session.characterID,
       }),
-      extraRoutes: hooks.map((hook) => ({ owner: `plugin ${hook.name}`, routes: hook.routes })),
+      extraRoutes: [
+        ...(clientAgentOn ? [{ owner: "client agent", routes: clientAgent.routes }] : []),
+        ...hooks.map((hook) => ({ owner: `plugin ${hook.name}`, routes: hook.routes })),
+      ],
       viewer: createAgentBridgeViewer({ runsDir: config.runsDir,
         registry: createToolRegistry({ active: loaded.active.filter((entry) => hooks.some((hook) => hook.name === entry.name)), skipped }) }),
       capabilities: ({ session, characterID }) => buildReport({
@@ -232,6 +244,7 @@ function createService({ serverRoot, stock: givenStock = null, pluginsDir = DEFA
     bridge.start().catch(() => { bridge = null; });
     stock.gameStore.registerShutdownHook("agent-bridge", () => {
       stopPlugins(hooks, log);
+      clientAgent.uninstall();
       perf.stop();
       const stopping = bridge ? bridge.stop() : Promise.resolve();
       bridge = null;
@@ -243,12 +256,12 @@ function createService({ serverRoot, stock: givenStock = null, pluginsDir = DEFA
   return {
     enabled: true,
     serviceName: "agentBridge",
-    exec() {
+    exec(runtimeContext) {
       if (!isEnabled(env, loadTreeConfig(treeRoot, { env }).exists)) {
         removeHandshake(handshakePath(treeRoot, env), { onlyIfOurs: true });
         return null;
       }
-      return start();
+      return start(runtimeContext);
     },
     __testing: {
       DEFAULT_HANDSHAKE_PATH: handshakePath(treeRoot, {}),

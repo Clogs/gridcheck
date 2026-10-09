@@ -213,6 +213,7 @@ function patchState(patch, read) {
   const row = { id: patch.id, title: patch.title || "" };
   for (const key of ["headline", "gain", "without"]) if (typeof patch[key] === "string" && patch[key]) row[key] = patch[key];
   if (Array.isArray(patch.commands) && patch.commands.length) row.commands = patch.commands;
+  if (patch.optIn === true) row.optIn = true;
   Object.assign(row, { files, hunks: patch.hunks.length, state: "absent" });
   if (patch.broken) return { ...row, state: "unknown" };
   const missing = files.filter((file) => read(file) === null && !(read.isBinary && read.isBinary(file)));

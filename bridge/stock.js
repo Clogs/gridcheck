@@ -25,6 +25,8 @@ const STOCK_MODULES = Object.freeze({
   dataRoot: "config/dataRoot",
   storeRoot: "gameStore/storeRoot",
   statePayloads: "space/destiny/stream/statePayloads",
+  // The client agent's remote service (client.js) extends it.
+  baseService: "services/baseService",
 });
 
 function createStock(serverRoot, { load = require } = {}) {

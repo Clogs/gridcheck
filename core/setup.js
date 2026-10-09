@@ -233,7 +233,8 @@ async function runSetup(options, io = defaultIO(), context = ownContext()) {
       patchPlan = { skip: "the copy's `patch status --json` didn't answer; `gridcheck patch status` shows why" };
     } else {
       const partial = rows.filter((row) => row.state === "partial");
-      const absent = rows.filter((row) => row.state === "absent" && row.applies !== false).map((row) => row.id);
+      // An opt-in patch (client-agent runs server-sent code in the EVE client) is never applied for you.
+      const absent = rows.filter((row) => row.state === "absent" && row.applies !== false && !row.optIn).map((row) => row.id);
       if (partial.length) {
         say("");
         say(`[4/${total}] Apply the optional patches`);
