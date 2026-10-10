@@ -73,11 +73,11 @@ try:
 except ImportError:
     import builtins
 
-VERSION = 6
+VERSION = 7
 # The build the client names above were checked against. Ops that use them
 # refuse on another build unless the command passes anyBuild; these don't.
 CHECKED_BUILD = 3396210
-BUILD_FREE_OPS = ('ping', 'eval', 'events')
+BUILD_FREE_OPS = ('ping', 'eval', 'events', 'flush')
 REPR_LIMIT = 20000
 # How long a drive op waits for what it started before answering; past it the
 # action carries on (a dialog it opened may be waiting for an answer).
@@ -105,6 +105,8 @@ EVENT_RING = 500
 EVENT_BATCH = 100
 EVENT_PENDING_MAX = 1000
 FLUSH_MS = 500
+DRAIN_MS = 10000
+DRAIN_POLL_MS = 50
 MAX_SEND_FAILURES = 5
 UI_MAX_VISITED = 50000
 SESSION_KEYS = ('userid', 'charid', 'corpid', 'allianceid', 'solarsystemid2', 'solarsystemid',
@@ -240,7 +242,9 @@ class EventLog(object):
         self.pending = []
         self.dropped = 0
         self.seq = 0
-        self.flushing = False
+        # scheduled: a flush tasklet waits out FLUSH_MS. sending: one is in Events; only one at a time, so no batch goes twice.
+        self.scheduled = False
+        self.sending = False
         self.failures = 0
         self.listeners = {}
         self.logmodule = None
@@ -324,25 +328,49 @@ class EventLog(object):
             excess = len(self.pending) - EVENT_PENDING_MAX
             del self.pending[:excess]
             self.dropped += excess
-        if not self.flushing and self.failures < MAX_SEND_FAILURES and self.agent.active:
-            self.flushing = True
+        # A send in progress picks this event up before it ends.
+        if not self.scheduled and not self.sending and self.failures < MAX_SEND_FAILURES and self.agent.active:
+            self.scheduled = True
             uthread.new(self.flush)
 
     def flush(self):
         try:
             blue.pyos.synchro.SleepWallclock(FLUSH_MS)
+        finally:
+            self.scheduled = False
+        if not self.sending:
+            self.send()
+
+    # Sends everything pending, in batches; answers how many went.
+    def send(self):
+        sent = 0
+        self.sending = True
+        try:
             while self.pending and self.agent.active:
                 batch = self.pending[:EVENT_BATCH]
                 payload = dumps({'events': batch, 'dropped': self.dropped})
                 self.agent.remote().Events(self.agent.token, payload)
                 del self.pending[:len(batch)]
+                sent += len(batch)
                 self.dropped = 0
                 self.failures = 0
         except Exception as error:
             self.failures += 1
             print('GRIDCHECK_CLIENT:EVENTS_FAILED %r' % (error,))
         finally:
-            self.flushing = False
+            self.sending = False
+        return sent
+
+    # What is pending, sent now rather than with the next batch: before the
+    # client is ended, or a run stops listening.
+    def drain(self):
+        waited = 0
+        while self.sending and waited < DRAIN_MS:
+            blue.pyos.synchro.SleepWallclock(DRAIN_POLL_MS)
+            waited += DRAIN_POLL_MS
+        if self.sending:
+            raise RuntimeError('a send of events was still running after %d ms' % DRAIN_MS)
+        return self.send()
 
     def since(self, seq, limit):
         rows = [event for event in self.ring if event['seq'] > seq]
@@ -779,6 +807,11 @@ class Agent(object):
             'exceptions': self.events.logmodule is not None,
             'events': self.events.since(since, limit),
         }
+
+    # Sends the events still pending to the bridge before it answers.
+    def op_flush(self, args):
+        sent = self.events.drain()
+        return {'sent': sent, 'pending': len(self.events.pending), 'seq': self.events.seq}
 
     # ---- driving the client ----
 

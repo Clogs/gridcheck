@@ -687,8 +687,16 @@ function buildWarning(agent) {
 }
 
 // Ends the client's process and waits until the server lets its session go.
+// The agent sends its events in 500 ms batches; this has each named client send
+// the rest now, so ending it or a run doesn't lose its last ones. Best effort:
+// an agent before version 7 has no flush op.
+async function flushClientEvents(usernames) {
+  await Promise.all(usernames.map((user) => clientCommand("flush", {}, { user, timeout: 5 }).catch(() => null)));
+}
+
 async function stopClient(handshake, agent) {
   if (!agent.pid) throw new CliError(`the ${agent.username} client's agent didn't report its pid; close that client by hand`);
+  await flushClientEvents([agent.username]);
   try {
     process.kill(agent.pid);
   } catch (error) {
@@ -1738,6 +1746,21 @@ function startBallparkSampler(handshake, everySeconds, push) {
 }
 
 // Stops the clients the run launched, unless --keep-up leaves the server and them up.
+// Before a run stops its watch: every online client's last events, then a
+// moment for the watch stream to carry them, so "no CLIENT_EXCEPTION" sees them.
+async function flushRunClients() {
+  let online = [];
+  try {
+    const listed = await callBridge(requireHandshake(), "GET", "/client/agents");
+    online = (listed.agents || []).filter((row) => row.online).map((row) => row.username);
+  } catch {
+    return; // a bridge without the client agent has no clients
+  }
+  if (!online.length) return;
+  await flushClientEvents(online);
+  await sleep(300);
+}
+
 async function stopRunClients(keep) {
   const launched = activeRun ? activeRun.launched : [];
   if (!launched.length) return;
@@ -2095,6 +2118,7 @@ async function cmdRun(positionals, flags) {
       const sampler = scenario.watch.ballpark ? startBallparkSampler(requireHandshake(), scenario.watch.ballpark, watch.push) : null;
       return { ...watch, stop: async () => {
         if (sampler) await sampler.stop();
+        await flushRunClients();
         return watch.stop();
       } };
     },

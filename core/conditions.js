@@ -63,10 +63,12 @@ const EVENT_FIELDS = Object.freeze({
     attachedAtMs: "ms", baselineAtMs: "ms", notifications: "num", decodeErrors: "num", lastError: "str",
   },
   // From a real EVE client's agent (gridcheck client launch): its logged
-  // exceptions, and the notify events and agent errors it records.
+  // exceptions, and the notify events and agent errors it records. noise names
+  // an exception the retail client logs on its own (bridge/client.js
+  // CLIENT_NOISE); a condition skips those unless it names noise.
   CLIENT_EXCEPTION: {
     username: "str", characterID: "id", type: "str", message: "str", extra: "str", channel: "str", where: "str",
-    traceback: { list: "str" }, clientSeq: "num", clientAtMs: "ms",
+    traceback: { list: "str" }, clientSeq: "num", clientAtMs: "ms", noise: "str",
   },
   CLIENT_EVENT: {
     username: "str", characterID: "id", event: "str", args: "str", op: "str", error: "str", count: "num",
@@ -434,6 +436,9 @@ function parseCondition(text, { bindings = new Set(), registry = defaultRegistry
     throw new Error(`unknown event kind "${kind}". Kinds: ${tables.kinds.join(", ")}`);
   }
   const terms = tokens.map((token) => compileTerm(kind, token, { bindings, registry }));
+  if (kind === "CLIENT_EXCEPTION" && !tokens.some((token) => OPERATOR.exec(token)?.[2] === "noise")) {
+    terms.push((event) => !event.noise);
+  }
   return {
     text: text.trim(),
     kind,

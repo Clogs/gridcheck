@@ -138,7 +138,7 @@ const DOCS = {
     flags: [["launch", null, "Start the client as the account's character and wait until it's in game, docked or in space. A client already in game on that account is used as it is."],
       ["console", null, "The end of the client's own console (its \"[CCP]\" window), where it prints its log and exceptions. --lines 0 for all, --grep to filter, --pid before an agent attaches."],
       ["status", null, "Whether the client agent is on, and which clients have attached, with their pid and build."],
-      ["stop", null, "End the client's process."],
+      ["stop", null, "Have the client send its last events, then end its process."],
       ["ping", null, "The attached client's session, build and pid, and where it is (docked, in space, its ship's mode and speed)."],
       ["eval \"<python>\"", null, "Run Python in the client. An expression prints its value; statements print their last expression's, else what they leave in `result`. sm, session, uicore, blue and uthread are defined."],
       ["ui", null, "The client's windows and UI tree from uicore.desktop. --class, --name or --text list every node containing it, with its path."],

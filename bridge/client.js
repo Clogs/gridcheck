@@ -54,6 +54,20 @@ function alive(session) {
   return Boolean(session && session.socket && !session.socket.destroyed);
 }
 
+// Exceptions the retail client logs on its own, each named by what it means. A
+// condition on CLIENT_EXCEPTION skips them unless it names noise
+// (core/conditions.js). Match where it is raised, so the same type from
+// anywhere else still counts.
+const CLIENT_NOISE = [
+  // The content repository can't reach its host: at login, and at every undock and dock.
+  { name: "content-host", type: "gaierror", where: /[\\/]content[\\/]client[\\/]flatbuffer[\\/]repository\.py\(\d+\) _request_update_task$/ },
+];
+
+function clientNoise({ type, where }) {
+  const hit = CLIENT_NOISE.find((known) => known.type === type && known.where.test(where || ""));
+  return hit ? hit.name : null;
+}
+
 // patched: () -> whether the tree's handshake has the client-agent patch. Without
 // it the client's token login reaches stock as the account "EVE-SSO-CONNECTION",
 // so no token is minted.
@@ -179,9 +193,10 @@ function createClientAgent({ log, patched = () => false, testTree = () => false,
     };
     const str = (value) => (value === undefined || value === null ? null : String(value));
     if (raw.kind === "exception") {
-      return { kind: "CLIENT_EXCEPTION", ...who, type: str(raw.type), message: str(raw.message), extra: str(raw.extra),
+      const line = { kind: "CLIENT_EXCEPTION", ...who, type: str(raw.type), message: str(raw.message), extra: str(raw.extra),
         channel: str(raw.channel), where: str(raw.where),
         traceback: Array.isArray(raw.traceback) ? raw.traceback.map(String) : [] };
+      return { ...line, noise: clientNoise(line) };
     }
     if (raw.kind === "notify") return { kind: "CLIENT_EVENT", ...who, event: str(raw.event), args: str(raw.args) };
     return { kind: "CLIENT_EVENT", ...who, event: str(raw.kind) || "unknown", op: str(raw.op), error: str(raw.error),

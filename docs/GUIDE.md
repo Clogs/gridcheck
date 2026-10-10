@@ -552,7 +552,7 @@ While a client is attached, every watch and every run carries its events beside 
 
 | Kind | When |
 | --- | --- |
-| `CLIENT_EXCEPTION` | The client logged an exception: `type`, `message`, `where` (the last frame), `traceback`, `extra` (the text it was logged with). |
+| `CLIENT_EXCEPTION` | The client logged an exception: `type`, `message`, `where` (the last frame), `traceback`, `extra` (the text it was logged with), `noise` (which known retail noise it is, if it is; see "A real EVE client"). |
 | `CLIENT_EVENT` | A recorded notify event (`event`, `args`), an action the agent took (`event: "action"`, `op` such as `act warpTo 40491241`, `args`: finished, still running, done in N s, why it isn't done, or the error), an agent command other than `eval` that failed (`event: "agent-error"`, `op`, `error`), or `dropped` with a `count` when the client produced events faster than they were sent. |
 
 Each line is stamped when the bridge got it; `clientAtMs` is when the client recorded it. So
@@ -718,13 +718,12 @@ second account beside it. `scenarios/client-undock.json` uses each piece:
     { "clientAct": "undock" },
     { "clientDiff": true, "timeout": 60 },
     { "clientScreenshot": "in space" },
-    { "wait": 15 },
     { "clientAct": "dock" },
     { "clientUi": { "name": "undockButton" }, "timeout": 60 }
   ],
   "until": { "any": ["CLIENT_BALLPARK"], "from": "start", "timeout": 30, "grace": 5 },
   "expect": ["CLIENT_BALLPARK ok=true", "no CLIENT_BALL status=missing", "no CLIENT_BALL status=extra",
-    "no CLIENT_EXCEPTION type!=gaierror"]
+    "no CLIENT_EXCEPTION"]
 }
 ```
 
@@ -733,7 +732,7 @@ second account beside it. `scenarios/client-undock.json` uses each piece:
 | `"clientLaunch"` or `{ "clientLaunch": { "user": ..., "name": ... } }` | `gridcheck client launch`, and waits until the client is in game (`timeout`, default 240 s). The account is `e2eclient` unless `user` names another. A client already in game on that account carries on, and the run leaves it up. One the step started is stopped when the run ends, unless `--keep-up`. |
 | `{ "clientUi": <node>, "timeout": 30 }` | Waits until a shown UI node matches: `{ "class", "name", "text", "hidden" }`, each a case-insensitive "contains", or a string for its text. Fails setup if none shows in time. |
 | `{ "clientClick": <node> }` | `gridcheck client click`. The node can also be a `path` from `client ui`, with `index` to pick among several matches. `double: true` double-clicks. |
-| `{ "clientAct": "undock" }` | `gridcheck client act`: `undock`, `dock` (the nearest station unless `target`), `jump`, `warpTo`, `approach`, `orbit`, `keepAtRange`, `stop`, `lock`, `unlock`, `activate`, `deactivate`, `logoff`, `select`. Keys: `target` (an itemID or a `$name`), `range`, `module` (`high1` or an itemID). The step ends when the action is done, as `client act` does; one that isn't done in time fails the step, and so does an error the action raises or a lock the client dropped. A refusal on a tasklet of the client's own is a `CLIENT_EXCEPTION`; `no CLIENT_EXCEPTION type!=gaierror` catches those. |
+| `{ "clientAct": "undock" }` | `gridcheck client act`: `undock`, `dock` (the nearest station unless `target`), `jump`, `warpTo`, `approach`, `orbit`, `keepAtRange`, `stop`, `lock`, `unlock`, `activate`, `deactivate`, `logoff`, `select`. Keys: `target` (an itemID or a `$name`), `range`, `module` (`high1` or an itemID). The step ends when the action is done, as `client act` does; one that isn't done in time fails the step, and so does an error the action raises or a lock the client dropped. A refusal on a tasklet of the client's own is a `CLIENT_EXCEPTION`; `no CLIENT_EXCEPTION` catches those. |
 | `{ "clientEval": "<python>", "as": "station" }` | `gridcheck client eval`. A Python error fails the step. `as` binds the value when it's an ID or a list of IDs: `{ "clientEval": "session.stationid2", "as": "station" }`, then `{ "clientAct": "dock", "target": "$station" }`. |
 | `{ "clientDiff": true, "timeout": 30 }` | `gridcheck client diff` every 2 s until the client is in space and holds what the server's grid holds, or the timeout. The last diff becomes one `CLIENT_BALLPARK` line. The step passes either way: say `CLIENT_BALLPARK ok=true` in `expect`. `tolerance` is metres, as `--tolerance`. |
 | `{ "clientScreenshot": "in space" }` | A picture of the client, labelled, taken as `client screenshot` takes it. A picture that fails doesn't fail the step; the report says why. |
@@ -765,8 +764,15 @@ mostly new grid, it starts a new baseline. So:
   client.
 
 `CLIENT_EXCEPTION` and `CLIENT_EVENT` lines come with every watch while a client is attached. The
-retail client logs `gaierror` exceptions at login and at every undock and dock (it can't reach a
-content host), so `no CLIENT_EXCEPTION type!=gaierror` allows those.
+retail client logs some exceptions on its own. These lines carry `noise`, and a condition skips them
+unless it names `noise`. So far there's one: `content-host`, the `gaierror` it logs at login and at
+every undock and dock because its content repository can't reach its host. A `gaierror` raised
+anywhere else isn't noise. `no CLIENT_EXCEPTION` holds through that noise;
+`CLIENT_EXCEPTION noise=content-host` matches only it. The timeline marks those lines
+`(noise: content-host)`.
+
+`client stop`, and a run before it stops its watch, have each client send its last events first,
+so an exception from the run's last step still counts.
 
 A real client run on a server that's already up starts wherever the client's character was left.
 `client-undock` expects it docked, as a fresh world has it; when a run fails at its first

@@ -145,7 +145,7 @@ Driving it, all from inside the client, so its window can stay in the background
 - ${c("type", "{ text, name }", "\"<text>\" --name <edit>")} and ${c("key", "{ key: \"enter\" }", "enter")}: through the client's own key input. Name the edit: the client has no focus while its window is in the background. No ctrl, shift or alt: the client reads them from the real keyboard. Escape opens its settings menu, as for a player.
 - ${c("cmd", "{ name: \"OpenInventory\" }", "OpenInventory")}: a client command, as its key binding runs it; with no name, the list. Some toggle.
 Each action is a CLIENT_EVENT action line on the timeline. Several clients run at once, one account each (${cli ? "--user" : "user"} picks one; launch another with its own user and name).
-A scenario does the same as steps (clientLaunch, clientUi, clientClick, clientAct, clientEval, clientDiff, clientScreenshot; ${see("scenarios")}) and expects on CLIENT_BALLPARK and CLIENT_BALL; the client-undock scenario is the example. The retail client logs gaierror exceptions (an unreachable content host) at login and at every undock and dock, so write "no CLIENT_EXCEPTION type!=gaierror".
+A scenario does the same as steps (clientLaunch, clientUi, clientClick, clientAct, clientEval, clientDiff, clientScreenshot; ${see("scenarios")}) and expects on CLIENT_BALLPARK and CLIENT_BALL; the client-undock scenario is the example. The retail client's own gaierror (an unreachable content host) carries noise; conditions skip noise unless they name it.
 The client takes a GPU window on the user's desktop; stop it when done.`;
 
   const plugins = registry.primers.map((entry) => entry.text);

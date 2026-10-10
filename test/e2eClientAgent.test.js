@@ -176,6 +176,30 @@ test("Hello records the client's own pid and build; Events reach subscribers and
   assert.equal(agent.routes["GET /client/events"]({ query: { user: "someone-else" } }).body.events.length, 0);
 });
 
+test("the retail client's content-host gaierror is noise: conditions skip it unless they name noise", () => {
+  const { agent, service, token, session } = attached({ characterID: 140000006 });
+  const seen = [];
+  agent.subscribe((event) => seen.push(event));
+  const root = "C:\\BuildAgent\\work\\20d73f1b24eed06e\\eve\\release\\V24.01\\packages\\";
+  service.Handle_Events([token, JSON.stringify({ events: [
+    { seq: 1, kind: "exception", type: "gaierror", message: "[Errno 11001] getaddrinfo failed",
+      where: `${root}content\\client\\flatbuffer\\repository.py(107) _request_update_task` },
+    { seq: 2, kind: "exception", type: "gaierror", message: "[Errno 11001] getaddrinfo failed",
+      where: `${root}eve\\client\\script\\somewhere.py(12) Fetch` },
+    { seq: 3, kind: "exception", type: "UserError", message: "PerformSessionChangeInProgress", where: "sessions.py(429) __RaisePSCIP" },
+  ] })], session);
+  assert.deepEqual(seen.map((event) => event.noise), ["content-host", null, null], "a gaierror from anywhere else is no noise");
+
+  const matching = (text) => seen.filter((event) => parseCondition(text).test(event)).map((event) => event.clientSeq);
+  assert.deepEqual(matching("CLIENT_EXCEPTION"), [2, 3]);
+  assert.deepEqual(matching("CLIENT_EXCEPTION type=gaierror"), [2]);
+  assert.deepEqual(matching("CLIENT_EXCEPTION noise"), [1]);
+  assert.deepEqual(matching("CLIENT_EXCEPTION noise=content-host"), [1]);
+  assert.deepEqual(matching("CLIENT_EXCEPTION !noise"), [2, 3]);
+  assert.deepEqual(matching("CLIENT_EXCEPTION type!=gaierror"), [3], "the old way still reads the same");
+  assert.match(formatTimelineEvent({ t: 0, ...seen[0] }), /CLIENT_EXCEPTION \(noise: content-host\) e2eclient: gaierror/);
+});
+
 test("a closed client is listed as gone, dropped ten minutes later, and replaced at once by a new client for its account", () => {
   let clock = 1000;
   const { agent, service, session } = attached({ now: () => clock });
@@ -541,8 +565,23 @@ builtins.session.nextSessionChange = (clock[0] + 3000) * 10000
 held_from = clock[0]
 send(35, 'act', {'action': 'undock'})
 send(36, 'act', {'action': 'stop', 'wait': 0})
+# flush: a late exception's batch waits on a tasklet that hasn't run yet; flush sends it before it
+# answers, and the tasklet, when it runs, finds nothing left to send.
+tasklets = []
+uthread.new = lambda fn, *args: tasklets.append((fn, args))
+try:
+    1 / 0
+except ZeroDivisionError:
+    logmodule.LogException('late')
+batches_before = len(batches)
+owner.run(json.dumps({'id': 37, 'op': 'flush', 'args': {}}))
+flushed = [len(batches) - batches_before]
+for fn, args in tasklets:
+    fn(*args)
+flushed.append(len(batches) - batches_before)
 print(json.dumps({'replies': replies, 'hellos': hellos, 'batches': batches, 'logged': logged, 'did': did,
-                  'edit': nameEdit.value, 'shot': shot, 'undocked': [at - held_from for at in undocked]}))
+                  'edit': nameEdit.value, 'shot': shot, 'undocked': [at - held_from for at in undocked],
+                  'flushed': flushed}))
 `;
   // A file, not -c: with agent.py inside, the harness passes Windows' 32 KB command-line limit.
   const script = path.join(os.tmpdir(), `gridcheck-agent-harness-${process.pid}.py`);
@@ -552,16 +591,16 @@ print(json.dumps({'replies': replies, 'hellos': hellos, 'batches': batches, 'log
   assert.equal(run.status, 0, run.stderr || String(run.error));
   const lines = run.stdout.trim().split(/\r?\n/);
   assert.ok(lines.includes("GRIDCHECK_CLIENT:READY"), run.stdout);
-  const { replies, hellos, batches, logged, did, edit, shot, undocked } = JSON.parse(lines[lines.length - 1]);
+  const { replies, hellos, batches, logged, did, edit, shot, undocked, flushed } = JSON.parse(lines[lines.length - 1]);
   const byID = Object.fromEntries(replies.map((reply) => [reply.id, reply]));
   assert.deepEqual(replies.map((reply) => [reply.id, reply.ok]), [[1, true], [2, true], [3, true], [4, false], [5, false],
     [6, true], [7, true], [8, true], [9, true], [10, true], [11, true], [12, false], [13, true], [14, true], [15, true],
     [16, true], [17, true], [18, true], [19, true], [20, false], [21, true], [22, true], [23, true], [24, true], [25, false],
     [26, true], [27, false], [28, false], [29, true], [30, true], [31, true], [32, false], [33, true], [34, true], [35, true],
-    [36, true]], JSON.stringify(replies.filter((reply) => !reply.ok).map((reply) => [reply.id, reply.error.trim().split("\n").pop()])));
+    [36, true], [37, true]], JSON.stringify(replies.filter((reply) => !reply.ok).map((reply) => [reply.id, reply.error.trim().split("\n").pop()])));
 
   assert.deepEqual([hellos.length, hellos[0].agent, hellos[0].build, hellos[0].checkedBuild, typeof hellos[0].pid],
-    [1, 6, 3396210, 3396210, "number"]);
+    [1, 7, 3396210, 3396210, "number"]);
   assert.match(byID[28].error, /ui uses client code checked against build 3396210; this client is build 3400000/,
     "another build: ops that use client names refuse, eval and anyBuild still run");
   assert.equal(byID[1].value.session.charid, 90000001);
@@ -596,7 +635,7 @@ print(json.dumps({'replies': replies, 'hellos': hellos, 'batches': batches, 'log
     "a failed eval is its caller's alone, not an agent-error event");
   assert.deepEqual([early[0].op, early[1].event], ["nope", "OnDamageStateChange"]);
   assert.deepEqual([early[2].type, early[2].message, early[2].extra], ["ZeroDivisionError", "division by zero", "boom"]);
-  assert.deepEqual(logged, ["boom"], "the client's own logging still runs");
+  assert.deepEqual(logged, ["boom", "late"], "the client's own logging still runs");
   assert.deepEqual(byID[11].value.events.map((event) => event.kind), early.map((event) => event.kind));
 
   // Driving: find and click go to the nearest node with a click handler.
@@ -644,6 +683,10 @@ print(json.dumps({'replies': replies, 'hellos': hellos, 'batches': batches, 'log
     undock.state.ego.mode], [true, true, true, null, "STOP"]);
   assert.deepEqual([byID[36].value.done, byID[36].value.finished], [undefined, true], "wait 0 answers once it has started");
   assert.deepEqual(Object.keys(byID[1].value.where).sort(), ["changeMs", "charID", "docked", "ego", "inSpace", "solarSystemID"]);
+
+  assert.deepEqual([byID[37].value.sent, byID[37].value.pending, flushed], [1, 0, [1, 1]],
+    "flush sent the late exception before it answered; the waiting batch had nothing left");
+  assert.deepEqual([recorded.at(-1).type, recorded.at(-1).extra], ["ZeroDivisionError", "late"]);
 });
 
 // The client's own interpreter is Python 2.7. GRIDCHECK_PYTHON27 names one (a portable 2.7 does);

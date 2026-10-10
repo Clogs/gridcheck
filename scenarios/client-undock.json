@@ -16,6 +16,6 @@
     { "match": "CLIENT_BALLPARK ok=true", "note": "after the undock, the client held every ball the server's grid held, and nothing else" },
     { "match": "no CLIENT_BALL status=missing", "note": "no ball stayed on the server's grid for 10 s without reaching the client" },
     { "match": "no CLIENT_BALL status=extra", "note": "the client held no ball for 10 s that the server's grid didn't" },
-    { "match": "no CLIENT_EXCEPTION type!=gaierror", "note": "the content-host lookups the client fails at login and at every undock and dock are allowed" }
+    { "match": "no CLIENT_EXCEPTION", "note": "the content-host lookups the client fails at login and at every undock and dock are noise, so they don't count" }
   ]
 }

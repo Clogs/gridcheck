@@ -149,7 +149,7 @@ function eventBody(event, registry) {
     case "CLIENT":
       return clientBody(event);
     case "CLIENT_EXCEPTION":
-      return [`${event.username || "client"}: ${event.type || "?"}: ${event.message || ""}`.slice(0, 200),
+      return [`${event.noise ? `(noise: ${event.noise}) ` : ""}${event.username || "client"}: ${event.type || "?"}: ${event.message || ""}`.slice(0, 200),
         [event.where, event.extra].filter(Boolean).join("; ").slice(0, 200)];
     case "CLIENT_EVENT":
       return [`${event.username || "client"}: ${event.event || "?"}` +
