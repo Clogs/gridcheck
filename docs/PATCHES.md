@@ -149,13 +149,20 @@ login in a tree whose bridge is off, sees stock's handshake.
 
 **Why it's opt-in.** With the patch on, the server sends code that the client runs. That is the
 point of the patch, but nobody should get it by running `setup`. Apply it in a test tree only,
-never in a tree players use.
+never in a tree players use. The bridge also refuses to mint a token in a tree without
+`gridcheck.config.json`, even when `EVEJS_AGENT_BRIDGE=1` turned the bridge on there, so a patched
+`handshake.js` that reaches a players' tree still runs nothing.
 
 **What `EVE-SSO-CONNECTION` means.** That's the name the client sends when it logs in by SSO
 token. A token the bridge didn't mint reaches stock unchanged, so stock looks for an account named
 `EVE-SSO-CONNECTION` and the login fails as any unknown account does. Without the patch, the bridge
 won't mint a token (`POST /client/token` answers 409), so `client launch` stops before it starts a
 client that would fail that way.
+
+**Tokens.** A token names one account and lasts until the server restarts. The bridge keeps
+tokens in memory only, and a client that reconnects sends the same token again, so tokens aren't
+revoked when a client stops. A token only logs in an account that has no other live session, and
+the bridge listens on loopback only, behind its own bearer token.
 
 `gridcheck doctor` shows whether the patch is applied, whether the running server registered the
 `gridcheckClient` service, and which client `client launch` would start. Each part that's missing

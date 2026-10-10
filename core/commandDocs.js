@@ -135,28 +135,46 @@ const DOCS = {
   client: {
     group: "ship", needs: "up",
     summary: "Starts a real EVE client logged in by token and in game, then reads and drives it from inside. Needs the opt-in client-agent patch.",
-    flags: [["launch", null, "Start the client as the account's character and wait until it's in game."],
+    flags: [["launch", null, "Start the client as the account's character and wait until it's in game, docked or in space. A client already in game on that account is used as it is."],
       ["console", null, "The end of the client's own console (its \"[CCP]\" window), where it prints its log and exceptions. --lines 0 for all, --grep to filter, --pid before an agent attaches."],
       ["status", null, "Whether the client agent is on, and which clients have attached, with their pid and build."],
       ["stop", null, "End the client's process."],
-      ["ping", null, "The attached client's session, build and pid."],
-      ["eval \"<python>\"", null, "Run Python in the client. An expression prints its value; statements print what they leave in `result`."],
+      ["ping", null, "The attached client's session, build and pid, and where it is (docked, in space, its ship's mode and speed)."],
+      ["eval \"<python>\"", null, "Run Python in the client. An expression prints its value; statements print their last expression's, else what they leave in `result`. sm, session, uicore, blue and uthread are defined."],
       ["ui", null, "The client's windows and UI tree from uicore.desktop. --class, --name or --text list every node containing it, with its path."],
-      ["screenshot", null, "The client's window as a PNG (or --out x.jpg), under _local/gridcheck/client/ or the run's client/ with --run. Not while minimized."],
+      ["screenshot", null, "What the client draws, as a PNG (or --out x.jpg), under _local/gridcheck/client/ or the run's client/ with --run. The client saves it, so it works while the window is covered or minimized."],
       ["ballpark", null, "The balls the client's ballpark holds: position, velocity, mode, nearest first."],
       ["diff", null, "The client's ballpark against the server's grid for the same character: missing, extra, moved and mode differences. Exits 1 on any."],
-      ["events", null, "The client's exceptions and recorded notify events. A watch shows them as CLIENT_EXCEPTION and CLIENT_EVENT."],
-      ["--user", "e2eclient for launch; the one attached client otherwise", "The account."],
-      ["--exe <exefile.exe>", "EVEJS_CLIENT_PATH from the launcher config", "The client to start."],
-      ["--resfileserver <url>", "the tree's gateway /resfiles/", "Where the client fetches resources."],
-      ["--resfiles <folder>", "ResFiles beside the client's tq folder", "The client's resource cache."],
+      ["events", null, "The client's exceptions, recorded notify events and actions, since it attached (the last --limit). A watch shows them as CLIENT_EXCEPTION and CLIENT_EVENT."],
+      ["find", null, "One UI node by --path, or --class, --name and --text, and the node a click on it goes to."],
+      ["click", null, "Click that node from inside the client, through its own click handler; prints any dialog it opened."],
+      ["type \"<text>\"", null, "Type into the edit --path, --class, --name or --text names (the client has no focus while its window is in the background). --set sets the value at once, --enter presses enter after."],
+      ["key <name>", null, "Press enter, escape, tab, backspace, f1-f12, a-z ... in the client; no ctrl, shift or alt, which it reads from the real keyboard."],
+      ["cmd [<name>]", null, "Run a client command (OpenInventory, CmdStopShip ...) as its key binding would. No name lists them; --filter narrows the list."],
+      ["act <action> [<target>]", null, "A player's action through the client's services: undock, dock, jump, warpTo, approach, orbit, keepAtRange, stop, lock, unlock, activate, deactivate, modules, logoff, select. Answers once it is done (in space, docked, in the new system, out of warp ...), with where the client is then and what it logged meanwhile; exits 1 when it isn't done in time. undock, dock and jump first wait out the client's session-change timer."],
+      ["--user", "e2eclient for launch; the one attached client otherwise", "The account. Several clients run at once, one account each; never a headless pilot's."],
+      ["--exe <exefile.exe>", "EVEJS_CLIENT_PATH from the launcher config", "launch: the client to start."],
+      ["--resfileserver <url>", "the tree's gateway /resfiles/", "launch: where the client fetches resources."],
+      ["--resfiles <folder>", "ResFiles beside the client's tq folder", "launch: the client's resource cache."],
       ["--wait <s>", "240", "How long launch waits for the client to reach the game; 0 doesn't wait."],
       ["--timeout <s>", "15", "How long a command waits for the client."],
+      ["--any-build", null, "Run an op that uses the client's code on a build other than the one the agent was checked against (3396210)."],
       ["--depth N", "3, or 40 with a filter", "How deep ui walks."], ["--hidden", null, "ui also walks hidden nodes."],
+      ["--source auto|client|window", "auto", "screenshot: client saves the back buffer; window draws the window from outside with PrintWindow (not while minimized, but works when the agent can't answer); auto tries client, then window."],
       ["--tolerance <m>", "1000", "diff: how far apart a ball may be, plus 2 s of its speed."],
-      ["--notify OnA,OnB", "OnSessionChanged", "events: the notify events the client records from now on; \"\" for none."]],
+      ["--notify OnA,OnB", "OnSessionChanged", "events: the notify events the client records from now on; \"\" for none."],
+      ["--all", null, "events: every client's since the server started, not only the attached client's since it attached."],
+      ["--since <seq>", null, "events: only those after this number, from any client; each listing ends with the one to pass next."],
+      ["--limit N", "50 for events", "events: the most recent N; ui: the most nodes or matches."],
+      ["--index N", null, "find, click, type, key: which of several matching nodes, from 0."],
+      ["--wait <s>", "3", "click, cmd: how long to wait for what it started; past it, it reports still running (a dialog may be waiting)."],
+      ["--wait <s>", "act: 120 warpTo; 60 undock, dock, jump, logoff, select, deactivate; 30 lock; 10 the rest", "act: the most to wait for the action to be done; 0 answers once it has started."],
+      ["--range <m>", "warp: the client's default; orbit 5000; keepAtRange 10000", "act: the distance in metres."],
+      ["--module <slot|itemID>", null, "act activate, deactivate: high1 ... low8, or the module's itemID (act modules lists them)."]],
     examples: [["gridcheck client launch", null], ["gridcheck client eval \"session.solarsystemid2\"", null],
-      ["gridcheck client ui --text undock", null], ["gridcheck client diff", null]],
+      ["gridcheck client ui --text undock", null], ["gridcheck client diff", null],
+      ["gridcheck client click --text undock", null], ["gridcheck client act warpTo 40491241", null],
+      ["gridcheck client type \"rifter\" --name quickFilterInputBox", null], ["gridcheck client launch --user e2eclient2 --name \"Client Second\"", null]],
   },
   logout: {
     group: "ship", needs: "up",
@@ -350,4 +368,52 @@ function buildCatalog({ core = {}, plugins = {}, handlers = {}, mcpTools = [] } 
   };
 }
 
-module.exports = { DOCS, GROUPS, buildCatalog, docKeyFor, usageParts };
+const NEEDS_TEXT = { up: "a running server", down: "a stopped server" };
+
+// `gridcheck <command> --help` and `gridcheck help <command> [<sub>]`: the
+// command's usage, summary, flags and examples from the catalog, or null when
+// it has no such command. With sub, only that part: its usage, its own row, the
+// flags whose text names it or names no part at all, and its examples.
+function commandHelp(catalog, name, sub) {
+  const entries = catalog.commands.filter((entry) => entry.name === name || entry.name.startsWith(`${name} `));
+  if (!entries.length) return null;
+  const own = sub && entries.find((entry) => entry.name === `${name} ${sub}`);
+  const narrow = Boolean(sub && !own);
+  const lines = [];
+  for (const entry of own ? [own] : entries) {
+    let { usage, flags, examples } = entry;
+    if (narrow) {
+      const words = flags.filter((row) => !row.flag.startsWith("-")).map((row) => row.flag.split(/\s/)[0]);
+      if (!words.includes(sub)) {
+        throw new Error(`${name} has no ${sub}; it has ${words.join(", ")}. \`gridcheck ${name} --help\` shows them all.`);
+      }
+      const named = (text) => words.filter((word) => new RegExp(`\\b${word}\\b`).test(text));
+      usage = usage.filter((part) => part.slice(name.length).trim().split(/\s/)[0].split("|").includes(sub));
+      flags = flags.filter((row) => (row.flag.startsWith("-")
+        ? named(row.text).length === 0 || named(row.text).includes(sub)
+        : row.flag.split(/\s/)[0] === sub));
+      examples = examples.filter((example) => example.command.startsWith(`gridcheck ${name} ${sub}`));
+    }
+    for (const part of usage) lines.push(`gridcheck ${part}`);
+    if (!narrow) {
+      if (entry.summary) lines.push("", entry.summary);
+      const tags = [entry.needs && `needs ${NEEDS_TEXT[entry.needs] || entry.needs}`, entry.managed && "not in attach mode",
+        entry.writes && "changes files in the tree", entry.mcp && `MCP tool: ${entry.mcp}`].filter(Boolean);
+      if (tags.length) lines.push(`(${tags.join("; ")})`);
+    }
+    if (flags.length) {
+      const width = Math.min(28, Math.max(...flags.map((row) => row.flag.length)) + 2);
+      lines.push("");
+      for (const row of flags) lines.push(`  ${row.flag.padEnd(width)}${row.text}${row.default ? ` (default: ${row.default})` : ""}`);
+    }
+    if (examples.length) {
+      lines.push("", "Examples:");
+      for (const example of examples) lines.push(`  ${example.command}${example.note ? `   # ${example.note}` : ""}`);
+    }
+    if (entry.note && !narrow) lines.push("", entry.note);
+    lines.push("");
+  }
+  return lines.join("\n").replace(/\n+$/, "");
+}
+
+module.exports = { DOCS, GROUPS, buildCatalog, commandHelp, docKeyFor, usageParts };

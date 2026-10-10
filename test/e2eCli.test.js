@@ -36,6 +36,7 @@ test("arguments: command, positionals, valued and boolean flags", () => {
   assert.deepStrictEqual(parseArgs(["slash", "--", "--weird"]).positionals, ["--weird"]);
   assert.strictEqual(parseArgs([]).command, "help");
   assert.throws(() => parseArgs(["log", "--grep"]), /needs a value/);
+  assert.deepStrictEqual(parseArgs(["client", "ui", "--any-build"]).flags, { "any-build": true });
 });
 
 test("--reuse is a flag; a reused server is matched on the scenario's up options and cleared in the systems a run saw", () => {
@@ -245,4 +246,37 @@ test("an unknown command or scenario names the closest ones and how to list them
   assert.match(typo.stderr, /unknown command: stauts\. Did you mean .*`gridcheck status`.*`gridcheck help` lists them all/);
   const scenario = spawnSync(process.execPath, [cli, "run", "smoke-undok", "--check"], { encoding: "utf8" });
   assert.match(scenario.stderr, /no such scenario file\. Did you mean `smoke-undock`\? `gridcheck run` lists the scenarios/);
+});
+
+test("--help prints the command's docs and never runs it; with a part, only that part", () => {
+  const { buildCatalog, commandHelp } = require("../core/commandDocs");
+  const catalog = buildCatalog({ core: CORE_COMMANDS });
+  const ui = commandHelp(catalog, "client", "ui");
+  assert.match(ui, /^gridcheck client ui \[--class <text>\]/);
+  assert.match(ui, /--depth N +How deep ui walks/);
+  assert.match(ui, /--user +The account/, "a flag that names no part applies to every part");
+  assert.doesNotMatch(ui, /--exe|--module|client launch/, "launch's and act's own flags stay with them");
+  assert.match(commandHelp(catalog, "client", "act"), /--module <slot\|itemID>/);
+  assert.match(commandHelp(catalog, "client", "find"), /^gridcheck client find\|click/, "a usage line naming two parts serves both");
+  assert.throws(() => commandHelp(catalog, "client", "nope"), /client has no nope; it has launch, .*`gridcheck client --help`/);
+  assert.match(commandHelp(catalog, "world", "save"), /^gridcheck world save <name>[\s\S]*Snapshots the stopped world/);
+  assert.equal(commandHelp(catalog, "nosuch"), null);
+
+  const { spawnSync } = require("node:child_process");
+  const path = require("node:path");
+  const cli = path.join(__dirname, "..", "bin", "gridcheck.js");
+  const down = spawnSync(process.execPath, [cli, "down", "--help"], { encoding: "utf8" });
+  assert.deepStrictEqual([down.status, down.stdout.split("\n")[0]], [0, "gridcheck down [--force]"]);
+  const sub = spawnSync(process.execPath, [cli, "help", "client", "stop"], { encoding: "utf8" });
+  assert.match(sub.stdout, /^gridcheck client stop \[--user\]/);
+});
+
+test("client events shows the online clients' events since they attached, else the last client's, else everyone's", () => {
+  const { clientEventScope } = require("../bin/gridcheck");
+  const agents = [{ username: "a", online: false, attachedAtMs: 5 }, { username: "a", online: true, attachedAtMs: 9 },
+    { username: "b", online: true, attachedAtMs: 7 }, { username: "c", online: false, attachedAtMs: 3 }];
+  assert.deepStrictEqual(clientEventScope(agents).map((agent) => agent.attachedAtMs), [9, 7]);
+  assert.deepStrictEqual(clientEventScope(agents, "a").map((agent) => agent.attachedAtMs), [9]);
+  assert.deepStrictEqual(clientEventScope(agents, "c").map((agent) => agent.attachedAtMs), [3]);
+  assert.strictEqual(clientEventScope([], undefined), null);
 });

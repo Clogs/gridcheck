@@ -92,16 +92,29 @@ When the bug is in the client itself (its UI, what its ballpark holds, an except
 ```
 gridcheck client launch            # logged in and in game; its own account, e2eclient
 gridcheck client ui --text undock  # UI nodes whose text contains it, with path, rect and state
-gridcheck client screenshot        # the window, saved as a PNG; not while minimized
+gridcheck client screenshot        # what it draws, as a PNG; works while covered or minimized
 gridcheck client ballpark          # the balls the client holds
 gridcheck client diff              # those against the server's grid; exit 1 when they disagree
 gridcheck client events            # its exceptions; watches and runs carry them as CLIENT_EXCEPTION
 gridcheck client console --grep EXCEPTION
 gridcheck client eval "<python>"   # Python 2.7 inside the client
+gridcheck client act warpTo <id>   # a player's action, answered once it's done: undock, dock, warpTo, orbit, lock ...
+gridcheck client click --text undock               # a UI node's own click handler
+gridcheck client type "rifter" --name <edit>       # name the edit; key enter, escape, f1 ... too
+gridcheck client cmd OpenInventory                 # a client command; `client cmd` lists them
 gridcheck client stop              # stop the client when you're done
 ```
 
-`gridcheck primer client` has the details. The client opens a window on the user's desktop.
+Driving runs inside the client, so its window can stay in the background. Several clients run at
+once, each on its own account (`launch --user e2eclient2 --name "Client Second"`; `--user` picks
+one), never a headless pilot's. `gridcheck primer client` has the details. The client opens a
+window on the user's desktop.
+
+A scenario can do all of this as steps (`clientLaunch`, `clientUi`, `clientClick`, `clientAct`,
+`clientEval`, `clientDiff`, `clientScreenshot`), expect on what the client held (`CLIENT_BALLPARK`,
+and `CLIENT_BALL` with `"watch": { "ballpark": true }`), and put screenshots in its report.
+`gridcheck run client-undock` is the example; `gridcheck primer scenarios` lists the steps. A run
+stops the clients it launched.
 
 ## Keeping to your files
 

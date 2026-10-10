@@ -1,0 +1,21 @@
+{
+  "description": "A real EVE client undocks, holds what the server put on its grid, and docks again. Needs the client-agent patch and an EVE client: gridcheck doctor says whether both are there.",
+  "world": "fresh",
+  "watch": { "ballpark": true, "screenshots": ["stop"] },
+  "setup": [
+    { "clientLaunch": true, "note": "account e2eclient, character Client Observer, docked where a new character starts" },
+    { "clientUi": { "name": "undockButton" }, "timeout": 60, "note": "the station lobby is up" },
+    { "clientAct": "undock", "note": "answers once the client is in space" },
+    { "clientDiff": true, "timeout": 60, "note": "waits until the client holds what the server's grid holds" },
+    { "clientScreenshot": "in space" },
+    { "clientAct": "dock", "note": "the nearest station: the one it undocked from; waits out the client's session-change timer first" },
+    { "clientUi": { "name": "undockButton" }, "timeout": 60, "note": "docked again: the lobby is back" }
+  ],
+  "until": { "any": ["CLIENT_BALLPARK"], "from": "start", "timeout": 30, "grace": 5 },
+  "expect": [
+    { "match": "CLIENT_BALLPARK ok=true", "note": "after the undock, the client held every ball the server's grid held, and nothing else" },
+    { "match": "no CLIENT_BALL status=missing", "note": "no ball stayed on the server's grid for 10 s without reaching the client" },
+    { "match": "no CLIENT_BALL status=extra", "note": "the client held no ball for 10 s that the server's grid didn't" },
+    { "match": "no CLIENT_EXCEPTION type!=gaierror", "note": "the content-host lookups the client fails at login and at every undock and dock are allowed" }
+  ]
+}

@@ -174,6 +174,8 @@ function createService({ serverRoot, stock: givenStock = null, pluginsDir = DEFA
     const clientAgent = createClientAgent({
       log,
       patched: () => Boolean(optional(() => fs.readFileSync(handshakeSource, "utf8").includes("gridcheck:patch client-agent"))),
+      testTree: () => loadTreeConfig(treeRoot, { env }).exists,
+      liveSessions: () => stock.sessionRegistry.getSessions(),
     });
     const clientAgentOn = clientAgent.install(runtimeContext && runtimeContext.serviceManager, optional(() => stock.baseService));
     const watcher = createGridWatch({

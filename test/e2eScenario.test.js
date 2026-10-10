@@ -763,6 +763,126 @@ test("repeat and perf are checked: times in setup, no nesting, no login, a perf 
     "load");
 });
 
+test("client steps read as written, bind what they name, and count toward the budget", () => {
+  const scenario = scenarioOf({
+    watch: { ballpark: 5, screenshots: ["stop", "DESTROYED self"] },
+    setup: ["clientLaunch", { clientUi: "Undock", user: "pilot2" }, { clientEval: "session.stationid2", as: "station" },
+      { clientAct: "undock", settle: 10 }, "clientDiff", { clientScreenshot: "in space" }, { clientAct: "dock", target: "$station" },
+      { clientClick: { class: "Button", path: "/desktop/x" }, double: true }],
+    until: { timeout: 5 },
+    expect: ["no CLIENT_BALL status=missing"],
+  });
+  assert.deepStrictEqual(scenario.setup.map((step) => describeStep(step)), ["login", "clientLaunch e2eclient",
+    "clientUi text~Undock (up to 30s) [pilot2]", "clientEval session.stationid2 as $station", "clientAct undock", "clientDiff (up to 30s)",
+    'clientScreenshot "in space"', "clientAct dock $station", "clientClick double class~Button path /desktop/x"]);
+  assert.strictEqual(scenario.setup[4].settleMs, 10_000);
+  assert.deepStrictEqual(scenario.setup[2].node, { text: "Undock" });
+  assert.strictEqual(bindStep(scenario.setup[7], { station: [60003760] }).target, 60003760);
+  assert.strictEqual(bindStep({ type: "clientEval", code: "$x" }, {}).code, "$x", "Python is never a $name");
+  assert.strictEqual(scenario.watch.ballpark, 5);
+  assert.deepStrictEqual(scenario.watch.screenshots.map((entry) => [entry.text, entry.stop]), [["stop", true], ["DESTROYED self", false]]);
+  assert.strictEqual(scenarioOf({ watch: { ballpark: true }, until: { timeout: 5 }, expect: ["GRID"] }).watch.ballpark, 2);
+});
+
+test("client steps are checked when the scenario loads", () => {
+  let text = "";
+  try {
+    scenarioOf({
+      setup: [{ clientLaunch: { user: "x", nme: "y" } }, { clientUi: { path: "/a" } }, { clientClick: {} }, { clientAct: "fly" },
+        { clientAct: "lock" }, { clientAct: "activate" }, { clientAct: "dock", target: "$nowhere" }, { clientEval: "" },
+        { clientDiff: true, tolerance: -1, timeout: 900 }, { clientScreenshot: "a/b" }, { clientClick: "OK", wait: 2 },
+        { clientClick: "OK", settle: 99 }, { repeat: ["clientLaunch"], every: 1, times: 1 }],
+      watch: { ballpark: 0.5, screenshots: ["NOPE"] },
+      until: { timeout: 5 },
+      expect: ["CLIENT_BALL"],
+    });
+  } catch (error) {
+    text = error.problems.join("\n");
+  }
+  assert.match(text, /setup\[0\]\.clientLaunch\.nme: unknown key; user or name/);
+  assert.match(text, /setup\[1\]\.clientUi\.path: unknown key; a node is named by class, name, text, hidden/);
+  assert.match(text, /setup\[1\]: clientUi needs a node/);
+  assert.match(text, /setup\[2\]: clientClick needs a node: its class, name, text or path/);
+  assert.match(text, /setup\[3\]: clientAct: one of undock, dock/);
+  assert.match(text, /setup\[4\]: clientAct lock needs a target/);
+  assert.match(text, /setup\[5\]: clientAct activate needs a module/);
+  assert.match(text, /setup\[6\]\.target: no earlier step binds \$nowhere/);
+  assert.match(text, /setup\[7\]: clientEval: Python/);
+  assert.match(text, /setup\[8\]\.tolerance: metres/);
+  assert.match(text, /setup\[8\]\.timeout: .*at most 600/);
+  assert.match(text, /setup\[9\]: clientScreenshot: true, or what the picture shows/);
+  assert.match(text, /setup\[10\]: one step per entry, not wait and clientClick/, "a click's wait is settle");
+  assert.match(text, /setup\[11\]\.settle: seconds from 0 through 60/);
+  assert.match(text, /setup\[12\]\.repeat\[0\]: clientLaunch can't be repeated/);
+  assert.match(text, /watch\.ballpark: true/);
+  assert.match(text, /watch\.screenshots\[0\]: unknown event kind "NOPE"/);
+  assert.match(text, /expect\[0\]: CLIENT_BALL needs the ballpark sampler/);
+});
+
+test("a client step's lines go on the timeline; screenshots at a condition's first match and at the stop, then in the report", async () => {
+  const scenario = scenarioOf({
+    watch: { screenshots: ["CLIENT_EXCEPTION", "stop"] },
+    setup: ["undock", "clientDiff", { clientScreenshot: "in space" }],
+    until: { any: ["CLIENT_BALLPARK"], from: "start", timeout: 5, grace: 0.2 },
+    expect: ["CLIENT_BALLPARK ok=true", "no CLIENT_EXCEPTION type!=gaierror"],
+  });
+  const exception = { kind: "CLIENT_EXCEPTION", username: "e2eclient", type: "gaierror", message: "getaddrinfo failed" };
+  const ops = fakeOps([{ afterMs: 10, event: exception }, { afterMs: 10, event: exception }]);
+  const step = ops.step;
+  ops.step = async (bound, bindings) => {
+    if (bound.type === "clientDiff") {
+      return { ok: true, text: "agree", events: [{ kind: "CLIENT_BALLPARK", username: "e2eclient", ok: true, shared: 3 }] };
+    }
+    if (bound.type === "clientScreenshot") {
+      return { ok: true, text: "shot", events: [{ kind: "SCREENSHOT", reason: bound.label, username: "e2eclient",
+        file: "client/01-in-space-e2eclient.jpg", width: 1600, height: 900 }] };
+    }
+    return step(bound, bindings);
+  };
+  const asked = [];
+  ops.screenshot = async ({ reason }) => {
+    asked.push(reason);
+    if (reason === "stop") throw new Error("the client window is minimized");
+    return [{ kind: "SCREENSHOT", reason, username: "e2eclient", file: "client/02-client_exception-e2eclient.jpg", width: 1600, height: 900 }];
+  };
+  const result = await runScenario(scenario, ops);
+  assert.strictEqual(result.stop.reason, "until");
+  assert.deepStrictEqual(asked, ["CLIENT_EXCEPTION", "stop"], "a condition's pictures at its first match only");
+  const ballpark = result.events.find((event) => event.kind === "CLIENT_BALLPARK");
+  assert.strictEqual(ballpark.source, "runner");
+  assert.deepStrictEqual(result.events.filter((event) => ["SCREENSHOT", "STOP"].includes(event.kind))
+    .map((event) => [event.kind, event.reason, event.error || event.file]),
+  [["SCREENSHOT", "in space", "client/01-in-space-e2eclient.jpg"], ["SCREENSHOT", "CLIENT_EXCEPTION", "client/02-client_exception-e2eclient.jpg"],
+    ["SCREENSHOT", "stop", "the client window is minimized"], ["STOP", "until", undefined]]);
+  assert.deepStrictEqual(result.expectations.map((row) => [row.text, row.met]),
+    [["CLIENT_BALLPARK ok=true", true], ["no CLIENT_EXCEPTION type!=gaierror", true]]);
+
+  const report = renderReport(result, { runID: "r1", scenario });
+  assert.match(report, /## Client screenshots/);
+  assert.match(report, /\| t\+00:00:00 \| in space \| e2eclient \| \[01-in-space-e2eclient\.jpg\]\(client\/01-in-space-e2eclient\.jpg\) 1600x900 \|/);
+  assert.match(report, /\| stop \| - \| failed: the client window is minimized \|/);
+  assert.match(report, /!\[t\+00:00:00 in space, e2eclient\]\(client\/01-in-space-e2eclient\.jpg\)/);
+  assert.deepStrictEqual(resultRecord(result, { runID: "r1", scenarioFile: "t.json" }).screenshots.map((row) => [row.file, row.reason]),
+    [["client/01-in-space-e2eclient.jpg", "in space"], ["client/02-client_exception-e2eclient.jpg", "CLIENT_EXCEPTION"]]);
+
+  const failed = fakeOps([], { failStep: "clientDiff" });
+  const reasons = [];
+  failed.screenshot = async ({ reason }) => { reasons.push(reason); return []; };
+  const setupFailed = await runScenario(scenario, failed);
+  assert.strictEqual(setupFailed.failure.stage, "setup");
+  assert.deepStrictEqual(reasons, ["stop"], "a setup that fails still gets its picture at the stop");
+  assert.doesNotMatch(renderReport(await runScenario(scenarioOf({ until: { timeout: 0.05 }, expect: ["GRID"] }), fakeOps([])),
+    { runID: "r2" }), /Client screenshots/, "no section without screenshots");
+});
+
+test("the shipped client-undock scenario loads without any plugin", () => {
+  const raw = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "scenarios", "client-undock.json"), "utf8"));
+  const scenario = validateScenario(raw, { ...STUBS, registry: emptyRegistry(), defaultName: "client-undock" });
+  assert.deepStrictEqual(scenario.setup.map((step) => step.type), ["login", "clientLaunch", "clientUi", "clientAct", "clientDiff",
+    "clientScreenshot", "clientAct", "clientUi"]);
+  assert.strictEqual(scenario.watch.ballpark, 2);
+});
+
 test("a bare name is the tree's scenario first, then the core's, then a plugin's", (t) => {
   const { scenarioPath } = require("../core/scenario");
   const os = require("os");

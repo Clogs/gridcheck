@@ -96,6 +96,11 @@
       case "CLIENT": return `${e.op || ""} ${e.label || ""}${e.mode ? ` ${e.mode}` : ""}${e.error ? ` ${e.error}` : ""}`;
       case "CLIENT_EXCEPTION": return `${e.username || "client"}: ${e.type || "?"}: ${e.message || ""}${e.where ? `  at ${e.where}` : ""}`;
       case "CLIENT_EVENT": return `${e.username || "client"}: ${e.event || "?"}${e.error ? ` ${e.error}` : e.args ? ` ${e.args}` : ""}`.slice(0, 200);
+      case "CLIENT_BALLPARK": return `${e.username || "client"}: ${e.ok ? "agrees with" : "disagrees with"} the server's grid` +
+        ` shared ${e.shared}${e.missing ? `, ${e.missing} missing` : ""}${e.extra ? `, ${e.extra} extra` : ""}${e.moved ? `, ${e.moved} moved` : ""}`;
+      case "CLIENT_BALL": return `${e.username || "client"}: ${e.label || e.itemID} ${e.status}` +
+        `${e.status === "held" ? ` after ${Math.round((e.lagMs || 0) / 1000)} s` : ` for ${Math.round((e.sinceMs || 0) / 1000)} s`}`;
+      case "SCREENSHOT": return `${e.username ? `${e.username}: ` : ""}${e.file || `failed: ${e.error || "?"}`}${e.reason ? ` ${e.reason}` : ""}`;
       case "STEP": return `${e.phase === "during" ? "during: " : ""}${e.ok ? "" : "FAILED "}${e.step}${e.text ? `: ${e.text}` : ""}`;
       case "STOP": return e.reason === "until" ? `stop condition met: ${e.condition}` : `stopped: ${e.reason}`;
       case "GRID": return `${e.systemName || e.systemID}${e.self && e.self.typeName ? `, self in a ${e.self.typeName}` : ""}`;

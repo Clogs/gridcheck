@@ -150,8 +150,9 @@ function readConsole({ pid, run = spawnSync }) {
 
 // Finds the pid's largest visible window that isn't a console, and draws it
 // with PrintWindow(PW_CLIENTONLY | PW_RENDERFULLCONTENT), which captures the
-// D3D window from outside. A minimized window can't be drawn.
-const SCREENSHOT_PS1 = String.raw`param([int]$TargetPid, [string]$Out, [int]$MaxWidth = 0, [string]$Format = 'png')
+// D3D window from outside. A minimized window can't be drawn. With -FromFile
+// it scales and converts that picture instead (one the client saved itself).
+const SCREENSHOT_PS1 = String.raw`param([int]$TargetPid, [string]$Out, [int]$MaxWidth = 0, [string]$Format = 'png', [string]$FromFile = '')
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Drawing
 Add-Type @"
@@ -184,20 +185,28 @@ public static class GridcheckShot {
   }
 }
 "@
-[void][GridcheckShot]::SetProcessDPIAware()
-$h = [GridcheckShot]::Find([uint32]$TargetPid)
-if ($h -eq [IntPtr]::Zero) { Write-Output "ERROR pid $TargetPid has no visible window"; exit 2 }
-if ([GridcheckShot]::IsIconic($h)) { Write-Output "ERROR the client window is minimized; PrintWindow can't draw it"; exit 3 }
-$r = New-Object GridcheckShot+RECT
-[void][GridcheckShot]::GetClientRect($h, [ref]$r)
-$w = $r.R - $r.L; $hh = $r.B - $r.T
-if ($w -le 0 -or $hh -le 0) { Write-Output "ERROR the client window has no area"; exit 4 }
-$bmp = New-Object System.Drawing.Bitmap $w, $hh
-$g = [System.Drawing.Graphics]::FromImage($bmp)
-$dc = $g.GetHdc()
-$ok = [GridcheckShot]::PrintWindow($h, $dc, 3)
-$g.ReleaseHdc($dc); $g.Dispose()
-if (-not $ok) { $bmp.Dispose(); Write-Output "ERROR PrintWindow failed"; exit 5 }
+$h = [IntPtr]::Zero
+if ($FromFile) {
+  $src = [System.Drawing.Image]::FromFile($FromFile)
+  $bmp = New-Object System.Drawing.Bitmap $src
+  $src.Dispose()
+  $w = $bmp.Width; $hh = $bmp.Height
+} else {
+  [void][GridcheckShot]::SetProcessDPIAware()
+  $h = [GridcheckShot]::Find([uint32]$TargetPid)
+  if ($h -eq [IntPtr]::Zero) { Write-Output "ERROR pid $TargetPid has no visible window"; exit 2 }
+  if ([GridcheckShot]::IsIconic($h)) { Write-Output "ERROR the client window is minimized; PrintWindow can't draw it"; exit 3 }
+  $r = New-Object GridcheckShot+RECT
+  [void][GridcheckShot]::GetClientRect($h, [ref]$r)
+  $w = $r.R - $r.L; $hh = $r.B - $r.T
+  if ($w -le 0 -or $hh -le 0) { Write-Output "ERROR the client window has no area"; exit 4 }
+  $bmp = New-Object System.Drawing.Bitmap $w, $hh
+  $g = [System.Drawing.Graphics]::FromImage($bmp)
+  $dc = $g.GetHdc()
+  $ok = [GridcheckShot]::PrintWindow($h, $dc, 3)
+  $g.ReleaseHdc($dc); $g.Dispose()
+  if (-not $ok) { $bmp.Dispose(); Write-Output "ERROR PrintWindow failed"; exit 5 }
+}
 $outW = $w; $outH = $hh
 if ($MaxWidth -gt 0 -and $w -gt $MaxWidth) {
   $outW = $MaxWidth; $outH = [int][Math]::Round($hh * $MaxWidth / $w)
@@ -209,22 +218,77 @@ if ($MaxWidth -gt 0 -and $w -gt $MaxWidth) {
 if ($Format -eq 'jpg') { $bmp.Save($Out, [System.Drawing.Imaging.ImageFormat]::Jpeg) } else { $bmp.Save($Out, [System.Drawing.Imaging.ImageFormat]::Png) }
 $bmp.Dispose()
 $t = New-Object System.Text.StringBuilder 256
-[void][GridcheckShot]::GetWindowText($h, $t, 256)
+if ($h -ne [IntPtr]::Zero) { [void][GridcheckShot]::GetWindowText($h, $t, 256) }
 Write-Output ("OK {0} {1} {2}" -f $outW, $outH, $t.ToString())
 `;
 
-// -> { file, width, height, title } or { error }.
-function takeScreenshot({ pid, out, maxWidth = 0, format = "png", run = spawnSync }) {
-  if (process.platform !== "win32") return { error: "screenshots use Windows' PrintWindow; this isn't Windows" };
-  fs.mkdirSync(path.dirname(out), { recursive: true });
-  const reply = runPowerShell(SCREENSHOT_PS1,
-    ["-TargetPid", String(pid), "-Out", out, "-MaxWidth", String(maxWidth), "-Format", format], run);
+function screenshotArgs({ pid, out, maxWidth, format, from }) {
+  return ["-TargetPid", String(pid || 0), "-Out", out, "-MaxWidth", String(maxWidth), "-Format", format, ...(from ? ["-FromFile", from] : [])];
+}
+
+function screenshotReply(reply, out) {
   const text = `${reply.stdout || ""}`.trim();
   const ok = /^OK (\d+) (\d+) ?(.*)$/m.exec(text);
   if (ok) return { file: out, width: Number(ok[1]), height: Number(ok[2]), title: ok[3] || null };
   const failed = /^ERROR (.*)$/m.exec(text);
   return { error: failed ? failed[1] : `the screenshot script failed: ${(text || reply.stderr || String(reply.error || "")).trim().slice(0, 400)}` };
 }
+
+// The pid's window, or with from the picture in that file, saved as out. It
+// doesn't block: a run keeps reading its watch while PowerShell draws.
+// -> Promise of { file, width, height, title } or { error }.
+function captureScreenshot({ pid, from = null, out, maxWidth = 0, format = "png", spawnImpl = spawn }) {
+  if (process.platform !== "win32") return Promise.resolve({ error: "screenshots are drawn with Windows' PowerShell; this isn't Windows" });
+  fs.mkdirSync(path.dirname(out), { recursive: true });
+  const script = path.join(os.tmpdir(), `gridcheck-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.ps1`);
+  fs.writeFileSync(script, SCREENSHOT_PS1);
+  return new Promise((resolve) => {
+    let stdout = "";
+    let stderr = "";
+    let timer = null;
+    const done = (error = null) => {
+      clearTimeout(timer);
+      fs.rmSync(script, { force: true });
+      resolve(screenshotReply({ stdout, stderr, error }, out));
+    };
+    let child;
+    try {
+      child = spawnImpl("powershell.exe", ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", script,
+        ...screenshotArgs({ pid, out, maxWidth, format, from })], { windowsHide: true });
+    } catch (error) {
+      done(error);
+      return;
+    }
+    timer = setTimeout(() => child.kill(), 60000);
+    child.stdout.on("data", (chunk) => { stdout += chunk; });
+    child.stderr.on("data", (chunk) => { stderr += chunk; });
+    child.on("error", (error) => done(error));
+    child.on("close", () => done());
+  });
+}
+
+const VIRTUAL_KEYS = Object.freeze({
+  backspace: 0x08, tab: 0x09, enter: 0x0d, return: 0x0d, escape: 0x1b, esc: 0x1b, space: 0x20,
+  pageup: 0x21, pagedown: 0x22, end: 0x23, home: 0x24, left: 0x25, up: 0x26, right: 0x27, down: 0x28,
+  insert: 0x2d, delete: 0x2e, del: 0x2e,
+});
+
+// "enter", "f3", "a" -> { key } (a virtual-key code) or { error }.
+function parseKey(spec) {
+  const name = String(spec || "").toLowerCase().trim();
+  if (!name) return { error: "a key is a name such as enter, escape, tab, f3 or a" };
+  if (name.includes("+")) {
+    return { error: "the client reads ctrl, shift and alt from the real keyboard, so a combination can't be sent from inside it; " +
+      "client cmd runs what the combination is bound to" };
+  }
+  let key = VIRTUAL_KEYS[name];
+  if (key === undefined && /^[a-z0-9]$/.test(name)) key = name.toUpperCase().charCodeAt(0);
+  const fn = /^f([1-9]|1[0-2])$/.exec(name);
+  if (key === undefined && fn) key = 0x6f + Number(fn[1]);
+  if (key === undefined) return { error: `${name} isn't a key gridcheck knows: ${Object.keys(VIRTUAL_KEYS).join(", ")}, a-z, 0-9, f1-f12` };
+  return { key };
+}
+
 
 function distance(a, b) {
   if (!a || !b || a.some((v) => !Number.isFinite(v)) || b.some((v) => !Number.isFinite(v))) return null;
@@ -287,15 +351,204 @@ function diffBallpark(client, grid, { toleranceMeters = 1000, lagSeconds = 2 } =
   };
 }
 
+// A diffBallpark result as one timeline line (core/conditions.js
+// CLIENT_BALLPARK). ok also needs both sides in space in one system: docked,
+// two empty lists would agree.
+const ID_LIST_LIMIT = 50;
+
+function ballparkEvent(diff, { username, characterID, grid = null, atMs = Date.now(), waitedMs = null } = {}) {
+  const ids = (rows) => rows.slice(0, ID_LIST_LIMIT).map((row) => row.itemID);
+  return {
+    kind: "CLIENT_BALLPARK",
+    atMs,
+    username,
+    characterID,
+    ok: Boolean(diff.ok && diff.inSpace.client && diff.inSpace.server),
+    inSpace: diff.inSpace.client,
+    serverInSpace: diff.inSpace.server,
+    sameSystem: diff.sameSystem,
+    systemID: grid && grid.solarSystemID ? grid.solarSystemID : null,
+    server: diff.counts.server,
+    client: diff.counts.client,
+    shared: diff.counts.shared,
+    missing: diff.missing.length,
+    extra: diff.extra.length,
+    moved: diff.moved.length,
+    modes: diff.modes.length,
+    missingIDs: ids(diff.missing),
+    extraIDs: ids(diff.extra),
+    movedIDs: ids(diff.moved),
+    ...(waitedMs === null ? {} : { waitedMs }),
+  };
+}
+
+// How long a ball may be on one side only before the sampler says so.
+const BALLPARK_LATE_MS = 10_000;
+// A sample where at least this many balls are new, and they are most of the
+// grid, is a new grid (a warp, a jump): a baseline, not a row of arrivals.
+const NEW_GRID_MIN = 6;
+
+// The run's ballpark sampler for one client: each step takes the client's
+// ballpark and the server's grid for its character, read together, and returns
+// CLIENT_BALL lines (core/conditions.js). A ball the server lists after the
+// first sample is "held" once the client has it, lagMs after the server first
+// listed it (to within a sample). Any ball the server has listed for lateMs
+// that the client still lacks is "missing", once; a ball only the client holds
+// for lateMs is "extra", once. Celestials and stations only the client holds
+// don't count (diffBallpark). Docked, or in another system than the server's
+// grid, it starts again.
+function createBallparkSampler({ lateMs = BALLPARK_LATE_MS } = {}) {
+  let scene = null;
+  function step({ atMs, username, characterID, park, grid }) {
+    const inSpace = Boolean(park && park.inSpace && grid && grid.inSpace && Number(park.solarSystemID) === Number(grid.solarSystemID));
+    if (!inSpace) {
+      scene = null;
+      return [];
+    }
+    const serverRows = new Map((grid.entities || []).map((row) => [String(row.itemID), row]));
+    const clientRows = new Map((park.balls || []).map((ball) => [String(ball.itemID), ball]));
+    if (!scene || scene.systemID !== Number(grid.solarSystemID)) {
+      scene = { systemID: Number(grid.solarSystemID), server: new Map(), extra: new Map() };
+    }
+    const events = [];
+    const line = (status, row, fields) => ({
+      kind: "CLIENT_BALL",
+      source: "ballpark",
+      atMs,
+      username,
+      characterID,
+      status,
+      itemID: row.itemID,
+      label: row.name || row.typeName || `#${row.itemID}`,
+      typeID: row.typeID || null,
+      typeName: row.typeName || null,
+      distanceMeters: Number.isFinite(row.distanceMeters) ? Math.round(row.distanceMeters) : null,
+      ...fields,
+    });
+    const fresh = [...serverRows.keys()].filter((id) => !scene.server.has(id));
+    const baseline = !scene.server.size || (fresh.length >= NEW_GRID_MIN && fresh.length * 2 > serverRows.size);
+    for (const id of fresh) {
+      const held = clientRows.has(id);
+      scene.server.set(id, { firstAtMs: atMs, held, late: false, baseline });
+      if (held && !baseline) events.push(line("held", serverRows.get(id), { lagMs: 0 }));
+    }
+    for (const [id, entry] of scene.server) {
+      const row = serverRows.get(id);
+      if (!row) {
+        scene.server.delete(id);
+        continue;
+      }
+      if (entry.held) continue;
+      if (clientRows.has(id)) {
+        entry.held = true;
+        // A baseline ball the client loads in its first seconds is no news.
+        if (!entry.baseline || entry.late) events.push(line("held", row, { lagMs: atMs - entry.firstAtMs }));
+      } else if (!entry.late && atMs - entry.firstAtMs >= lateMs) {
+        entry.late = true;
+        events.push(line("missing", row, { sinceMs: atMs - entry.firstAtMs }));
+      }
+    }
+    for (const id of scene.extra.keys()) {
+      if (!clientRows.has(id) || serverRows.has(id)) scene.extra.delete(id);
+    }
+    for (const [id, ball] of clientRows) {
+      if (serverRows.has(id) || STATIC_CATEGORIES.has(Number(ball.categoryID))) continue;
+      const entry = scene.extra.get(id) || { firstAtMs: atMs, late: false };
+      scene.extra.set(id, entry);
+      if (!entry.late && atMs - entry.firstAtMs >= lateMs) {
+        entry.late = true;
+        events.push(line("extra", ball, { sinceMs: atMs - entry.firstAtMs }));
+      }
+    }
+    return events;
+  }
+  return { step };
+}
+
+// A scenario's node ({ "class", "name", "text", "path", "index", "hidden" })
+// as the agent's ui, find and click take it.
+function nodeArgs(selector = {}) {
+  const { class: cls, ...rest } = selector;
+  return Object.fromEntries(Object.entries({ cls, ...rest }).filter(([, value]) => value !== undefined && value !== null));
+}
+
+// Git Bash turns an argument starting with / into a Windows path
+// ("/Desktop/l_main" -> "C:/Program Files/Git/Desktop/l_main"); a node path
+// always starts at the desktop, so the part from /Desktop on is the one meant.
+function repairNodePath(value) {
+  if (typeof value !== "string" || !value) return value;
+  const at = value.search(/[\\/]Desktop([\\/]|$)/);
+  if (/^[A-Za-z]:[\\/]/.test(value) && at > 0) return value.slice(at).replace(/\\/g, "/");
+  return /^Desktop([\\/]|$)/.test(value) ? `/${value}` : value;
+}
+
+// The agent's error as the caller needs it: its own frames dropped (they name
+// only agent.py lines), the client's and the eval's kept.
+function clientErrorText(error) {
+  const lines = String(error || "").replace(/\s+$/, "").split(/\r?\n/);
+  const out = [];
+  for (let i = 0; i < lines.length; i++) {
+    if (lines[i] !== "Traceback (most recent call last):") {
+      out.push(lines[i]);
+      continue;
+    }
+    let next = i + 1;
+    while (next < lines.length && /^\s+File "<gridcheck-client-agent>"/.test(lines[next])) next++;
+    if (next < lines.length && /^\s+File /.test(lines[next])) out.push(lines[i]);
+    i = next - 1;
+  }
+  return out.join("\n");
+}
+
+// The lines `client act` prints after the action's name: whether it is done,
+// where the client is now, and what it logged meanwhile.
+function actSummary(value) {
+  const lines = [];
+  const done = value.done;
+  if (value.modal && !value.done) {
+    lines.push(`  waiting on a dialog: ${value.modal.name || value.modal.cls}${value.modal.text ? ` "${value.modal.text}"` : ""}`);
+  } else if (!done) {
+    lines.push(value.finished ? "  started" : "  still running");
+  } else {
+    const held = done.heldMs ? ` (after ${(done.heldMs / 1000).toFixed(1)} s for the client's session-change timer)` : "";
+    lines.push(done.reached ? `  done in ${(done.ms / 1000).toFixed(1)} s${held}` : `  not done: ${done.why}${held}`);
+  }
+  const state = value.state;
+  if (state) {
+    const ego = state.ego;
+    const where = state.docked ? `docked at ${state.docked}` : state.inSpace ? "in space" : "neither docked nor in space";
+    lines.push(`  now ${where} in ${state.solarSystemID}${ego ? `, ${ego.mode} ${Math.round(ego.speed || 0)} m/s` +
+      `${ego.followID ? ` on ${ego.followID}` : ""}` : ""}${state.changeMs ? `; next session change in ${Math.ceil(state.changeMs / 1000)} s` : ""}`);
+  }
+  const counts = new Map();
+  for (const event of value.events || []) {
+    const label = event.kind === "notify" ? event.event : `${event.type}: ${String(event.message || "").slice(0, 80)}`;
+    counts.set(label, (counts.get(label) || 0) + 1);
+  }
+  if (counts.size) {
+    lines.push(`  meanwhile: ${[...counts].map(([label, count]) => (count > 1 ? `${label} (x${count})` : label)).join("; ")}`);
+  }
+  if (value.result !== null && value.result !== undefined) lines.push(`  returned ${JSON.stringify(value.result)}`);
+  return lines;
+}
+
 module.exports = {
+  BALLPARK_LATE_MS,
   CONSOLE_PS1,
   LAUNCHER_CONFIG,
   SCREENSHOT_PS1,
+  actSummary,
+  ballparkEvent,
+  captureScreenshot,
   clientEnvironment,
+  clientErrorText,
+  createBallparkSampler,
   defaultResFiles,
   diffBallpark,
   findClientExe,
+  nodeArgs,
+  parseKey,
   readConsole,
+  repairNodePath,
   startClient,
-  takeScreenshot,
 };

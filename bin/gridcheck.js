@@ -93,6 +93,7 @@ const AUTO = MODE === "auto";
 
 const BOOLEAN_FLAGS = new Set(["all", "json", "any-pid", "force", "fresh", "no-market", "no-log", "help",
   "check", "keep-up", "reuse", "positions", "once", "serve", "offline", "dry-run", "profile", "perf", "now", "detach", "mcp", "save", "hidden",
+  "double", "set", "enter", "list", "any-build",
   ...REGISTRY.booleanFlags]);
 
 class CliError extends Error {}
@@ -411,6 +412,7 @@ async function currentSystemID(state) {
 async function cmdLogin(flags) {
   const state = readState();
   const username = String(flags.user || state.username || "e2eagent");
+  await refuseClientAccount(username);
   const { accountID, characterID } = await ensureCharacter(username, flags.name ? String(flags.name) : null);
 
   if (state.bridgeSessionID && state.characterID === characterID && state.accountID === accountID) {
@@ -448,6 +450,22 @@ async function cmdLogin(flags) {
 }
 
 // The account, made if it's missing, and its character by name or its first, made if it has none.
+// A headless login never takes an account a real client is online on.
+async function refuseClientAccount(username) {
+  const handshake = readHandshake();
+  if (!handshake) return;
+  let listed;
+  try {
+    listed = await callBridge(handshake, "GET", "/client/agents");
+  } catch (_error) {
+    return; // a bridge without the client agent has no clients
+  }
+  if ((listed.agents || []).some((row) => row.online && row.username === username)) {
+    throw new CliError(`a real EVE client is online as ${username}; a headless pilot and a client never share an account. ` +
+      "Pass another --user, or `gridcheck client stop --user " + username + "` first.");
+  }
+}
+
 async function ensureCharacter(username, wantedName) {
   const created = await gateway("POST", "/account/create", { username });
   const accountID = Number(created.account && created.account.accountID);
@@ -476,6 +494,29 @@ async function ensureCharacter(username, wantedName) {
   return { username, accountID, characterID };
 }
 
+// How long `client act` and a clientAct step wait for the action to be done:
+// the most the agent waits by default (a warp, bridge/client/agent.py DONE_MS),
+// and the most it may be asked to.
+const CLIENT_ACT_DEFAULT_SECONDS = 120;
+const CLIENT_ACT_MOST_SECONDS = 280;
+
+// Where the client is once it is docked or holds its ballpark (ping's where,
+// agent 6 on), or null when it isn't by deadlineMs or its agent doesn't say.
+async function clientSettledIn(username, deadlineMs) {
+  for (;;) {
+    let where = null;
+    try {
+      where = (await clientCommand("ping", {}, { user: username, timeout: 5 })).value.where;
+    } catch (_error) {
+      // not answering yet
+    }
+    if (where === undefined) return null;
+    if (where && (where.docked || where.inSpace)) return where;
+    if (Date.now() + 1000 > deadlineMs) return null;
+    await sleep(1000);
+  }
+}
+
 // The EVE client the tree's Play.bat starts (core/client.js findClientExe).
 function clientExe(flags) {
   const found = clientTools.findClientExe({ treeRoot: REPO_ROOT, exe: flags.exe });
@@ -489,12 +530,13 @@ async function clientCommand(op, args, flags) {
   if (!(seconds >= 1 && seconds <= 300)) throw new CliError("--timeout takes seconds from 1 through 300");
   const { status, json } = await requestJSON(`http://${handshake.host}:${handshake.port}/client/command`, {
     method: "POST",
-    body: { op, args, user: flags.user ? String(flags.user) : undefined, timeoutMs: seconds * 1000 },
+    body: { op, args: flags["any-build"] ? { ...args, anyBuild: true } : args, user: flags.user ? String(flags.user) : undefined,
+      timeoutMs: seconds * 1000 },
     headers: { authorization: `Bearer ${handshake.token}` },
     timeoutMs: (seconds + 10) * 1000,
   });
   if (status === 404) throw new CliError("this server's bridge has no client agent. `gridcheck client status` says why.");
-  if (status >= 400 || json.ok === false) throw new CliError(`client ${op}: ${json.error || `HTTP ${status}`}`);
+  if (status >= 400 || json.ok === false) throw new CliError(`client ${op}: ${json.error ? clientTools.clientErrorText(json.error) : `HTTP ${status}`}`);
   return json;
 }
 
@@ -516,31 +558,14 @@ async function cmdClient(positionals, flags) {
       const state = agent.online ? "online" : `gone since ${new Date(agent.goneAtMs || agent.lastSeenMs).toLocaleTimeString()}`;
       console.log(`  ${agent.username} account ${agent.accountID}, character ${agent.characterID || "(selecting)"}, ${state}, ` +
         `pid ${agent.pid || "?"}, build ${agent.build || "?"}, attached ${new Date(agent.attachedAtMs).toLocaleTimeString()}`);
+      const unchecked = buildWarning(agent);
+      if (unchecked) console.log(`    ${unchecked}`);
     }
     if (!(listed.agents || []).length) console.log("  no client has attached");
     return;
   }
   if (sub === "launch") return clientLaunch(handshake, flags);
-  if (sub === "stop") {
-    const agent = await clientAgentRow(handshake, flags);
-    if (!agent.pid) throw new CliError(`the ${agent.username} client's agent didn't report its pid; close that client by hand`);
-    try {
-      process.kill(agent.pid);
-    } catch (error) {
-      throw new CliError(`couldn't end pid ${agent.pid}: ${error.message}`);
-    }
-    const startedAtMs = Date.now();
-    while (Date.now() - startedAtMs < 30000) {
-      await sleep(1000);
-      const listed = await callBridge(handshake, "GET", "/client/agents");
-      const row = (listed.agents || []).find((candidate) => candidate.pid === agent.pid);
-      if (!row || !row.online) {
-        console.log(`stopped the ${agent.username} client (pid ${agent.pid})`);
-        return;
-      }
-    }
-    throw new CliError(`pid ${agent.pid} was ended, but the server still holds the ${agent.username} session after 30 s`);
-  }
+  if (sub === "stop") return stopClient(handshake, await clientAgentRow(handshake, flags));
   if (sub === "ping") {
     const reply = await clientCommand("ping", {}, flags);
     json(reply.value);
@@ -592,12 +617,27 @@ async function cmdClient(positionals, flags) {
       const reply = await clientCommand("events", { notify, limit: 0 }, flags);
       console.log(`recording notify events: ${(reply.value.notify || []).join(", ") || "none"}`);
     }
-    const query = new URLSearchParams({ since: String(flags.since || 0), limit: String(flags.limit || 200),
+    const limit = flags.limit === undefined ? 50 : Number(flags.limit);
+    if (!(limit >= 1)) throw new CliError("--limit takes a count, 1 or more");
+    const query = new URLSearchParams({ since: String(flags.since || 0), limit: "1000",
       ...(flags.user ? { user: String(flags.user) } : {}) });
-    const listed = await callBridge(handshake, "GET", `/client/events?${query}`);
-    if (flags.json) return json(listed);
-    for (const event of listed.events || []) console.log(`#${event.seq} ${formatTimelineEvent(event, REGISTRY, { clock: true })}`);
-    if (!(listed.events || []).length) console.log(`no client events after #${flags.since || 0}`);
+    const [listed, agents] = await Promise.all([callBridge(handshake, "GET", `/client/events?${query}`),
+      callBridge(handshake, "GET", "/client/agents")]);
+    // By default, only the attached client's events since it attached: the bridge keeps earlier clients' too.
+    const scope = flags.all || flags.since !== undefined ? null : clientEventScope(agents.agents || [], flags.user);
+    const rows = (listed.events || []).filter((event) => !scope ||
+      scope.some((agent) => event.username === agent.username && event.atMs >= agent.attachedAtMs));
+    const shown = rows.slice(-limit);
+    if (flags.json) return json({ ...listed, events: shown });
+    if (scope) {
+      console.log(`events of ${scope.map((agent) => `${agent.username} since it attached at ${new Date(agent.attachedAtMs).toLocaleTimeString()}`)
+        .join(", ")}${rows.length > shown.length ? `, the last ${shown.length} of ${rows.length}` : ""} (--all: every client's since the server started)`);
+    } else if (!flags.all && flags.since === undefined) {
+      console.log(`no client has been attached in the last 10 minutes; the last ${shown.length} event(s) of any client`);
+    }
+    for (const event of shown) console.log(`#${event.seq} ${formatTimelineEvent(event, REGISTRY, { clock: true })}`);
+    if (!shown.length) console.log(`no client events${flags.since ? ` after #${flags.since}` : ""}`);
+    console.log(`(--since ${listed.seq} for newer ones)`);
     return;
   }
   if (sub === "console") {
@@ -617,7 +657,6 @@ async function cmdClient(positionals, flags) {
   }
   if (sub === "screenshot") {
     const agent = await clientAgentRow(handshake, flags);
-    if (!agent.pid) throw new CliError(`the ${agent.username} client's agent didn't report its pid`);
     const format = flags.format ? String(flags.format) : flags.out && /\.jpe?g$/i.test(String(flags.out)) ? "jpg" : "png";
     if (!["png", "jpg"].includes(format)) throw new CliError("--format takes png or jpg");
     const name = `screenshot-${runStamp(Date.now())}-${agent.username}.${format}`;
@@ -626,14 +665,168 @@ async function cmdClient(positionals, flags) {
         : path.join(E2E_DIR, "client", name);
     const maxWidth = flags["max-width"] === undefined ? 0 : Number(flags["max-width"]);
     if (!(maxWidth >= 0)) throw new CliError("--max-width takes pixels");
-    const shot = clientTools.takeScreenshot({ pid: agent.pid, out, maxWidth, format });
-    if (shot.error) throw new CliError(`screenshot of pid ${agent.pid}: ${shot.error}`);
+    const source = flags.source === undefined ? "auto" : String(flags.source);
+    if (!SHOT_SOURCES.includes(source)) throw new CliError(`--source takes ${SHOT_SOURCES.join(", ")}`);
+    const shot = await shootClient(agent, { out, maxWidth, format, source });
+    if (shot.error) throw new CliError(`screenshot of the ${agent.username} client: ${shot.error}`);
     if (flags.json) return json(shot);
-    console.log(`saved ${relativePath(shot.file)} (${shot.width}x${shot.height}${shot.title ? `, "${shot.title}"` : ""})`);
+    console.log(`saved ${relativePath(shot.file)} (${shot.width}x${shot.height}, ` +
+      `${shot.source === "client" ? "drawn by the client" : `its window${shot.title ? ` "${shot.title}"` : ""}`})`);
     return;
   }
-  throw new CliError("client needs status, launch, stop, ping, eval, console, ui, screenshot, ballpark, diff or events; " +
-    `got ${sub === undefined ? "nothing" : JSON.stringify(sub)}`);
+  if (["find", "click", "type", "key", "cmd", "act"].includes(sub)) return clientDrive(handshake, sub, rest, flags);
+  throw new CliError("client needs status, launch, stop, ping, eval, console, ui, screenshot, ballpark, diff, events, " +
+    `find, click, type, key, cmd or act; got ${sub === undefined ? "nothing" : JSON.stringify(sub)}`);
+}
+
+// The agent names the build its client calls were checked against (bridge/client/agent.py CHECKED_BUILD).
+function buildWarning(agent) {
+  if (!agent.checkedBuild || !agent.build || agent.build === agent.checkedBuild) return null;
+  return `build ${agent.build} isn't the ${agent.checkedBuild} the agent was checked against: only ping, eval and events run; ` +
+    "--any-build runs the rest anyway";
+}
+
+// Ends the client's process and waits until the server lets its session go.
+async function stopClient(handshake, agent) {
+  if (!agent.pid) throw new CliError(`the ${agent.username} client's agent didn't report its pid; close that client by hand`);
+  try {
+    process.kill(agent.pid);
+  } catch (error) {
+    throw new CliError(`couldn't end pid ${agent.pid}: ${error.message}`);
+  }
+  const startedAtMs = Date.now();
+  while (Date.now() - startedAtMs < 30000) {
+    await sleep(1000);
+    const listed = await callBridge(handshake, "GET", "/client/agents");
+    const row = (listed.agents || []).find((candidate) => candidate.pid === agent.pid);
+    if (!row || !row.online) {
+      console.log(`stopped the ${agent.username} client (pid ${agent.pid})`);
+      return;
+    }
+  }
+  throw new CliError(`pid ${agent.pid} was ended, but the server still holds the ${agent.username} session after 30 s`);
+}
+
+// --path, --class, --name, --text, --index, --hidden: one node, as `client ui` lists them.
+function nodeSelector(flags) {
+  const selector = { path: clientTools.repairNodePath(flags.path), cls: flags.class, name: flags.name, text: flags.text,
+    index: flags.index === undefined ? undefined : Number(flags.index), hidden: flags.hidden === true || undefined };
+  return Object.fromEntries(Object.entries(selector).filter(([, value]) => value !== undefined));
+}
+
+
+// find, click, type, key, cmd and act: drive the client from inside, through
+// its own handlers and services, so its window can stay in the background.
+async function clientDrive(handshake, sub, rest, flags) {
+  const json = (value) => console.log(JSON.stringify(value, null, 2));
+  const settleSeconds = flags.wait === undefined ? undefined : Number(flags.wait);
+  // act waits until the action is done (the agent's DONE_MS: up to 120 s for a warp); the rest for what they started.
+  const most = sub === "act" ? CLIENT_ACT_MOST_SECONDS : 60;
+  if (settleSeconds !== undefined && !(settleSeconds >= 0 && settleSeconds <= most)) {
+    throw new CliError(sub === "act" ? `--wait takes seconds from 0 through ${most}: how long to wait for the action to be done (0: answer once it has started)`
+      : `--wait takes seconds from 0 through ${most}: how long to wait for what the ${sub} started`);
+  }
+  const wait = settleSeconds === undefined ? undefined : Math.round(settleSeconds * 1000);
+  const fallback = sub === "act" ? CLIENT_ACT_DEFAULT_SECONDS : 3;
+  const timing = { ...flags, timeout: flags.timeout !== undefined ? flags.timeout
+    : Math.max(15, Math.ceil((settleSeconds === undefined ? fallback : settleSeconds) + 10)) };
+  const call = (op, args) => clientCommand(op, Object.fromEntries(Object.entries({ ...args, wait })
+    .filter(([, value]) => value !== undefined)), timing);
+  const describe = (node) => (node ? `${node.path}${node.text ? ` "${node.text}"` : ""}` : "?");
+  const outcome = (value) => {
+    const lines = [value.finished ? "  finished" : "  still running: it may be waiting on a dialog"];
+    if (value.modal) lines.push(`  a dialog is open: ${value.modal.name || value.modal.cls}${value.modal.text ? ` "${value.modal.text}"` : ""}`);
+    if (value.result !== null && value.result !== undefined) lines.push(`  returned ${JSON.stringify(value.result)}`);
+    return lines.join("\n");
+  };
+  const into = nodeSelector(flags);
+  const focusText = (focus) => (focus ? `${focus.cls}${focus.name ? ` ${focus.name}` : ""}` +
+    `${focus.value !== null && focus.value !== undefined ? ` reads ${JSON.stringify(focus.value)}` : ""}` : "nothing has focus");
+
+  if (sub === "find") {
+    const reply = await call("find", into);
+    if (flags.json) return json(reply.value);
+    const value = reply.value;
+    console.log(`${describe(value.node)}${value.node.rect ? ` [${value.node.rect.join(",")}]` : ""}`);
+    console.log(value.target ? `  clicks go to ${describe(value.target)}` : "  nothing from here up takes a click");
+    return;
+  }
+  if (sub === "click") {
+    const reply = await call("click", { ...into, double: flags.double === true || undefined });
+    if (flags.json) return json(reply.value);
+    console.log(`clicked ${describe(reply.value.clicked)}\n${outcome(reply.value)}`);
+    return;
+  }
+  if (sub === "type") {
+    const text = rest.join(" ");
+    if (!text && !flags.set && !flags.enter) throw new CliError("client type needs the text, e.g. gridcheck client type \"hello\" --name chatEdit");
+    const reply = await call("type", { text, into: Object.keys(into).length ? into : undefined,
+      set: flags.set === true || undefined, enter: flags.enter === true || undefined });
+    if (flags.json) return json(reply.value);
+    console.log(focusText(reply.value.focus));
+    return;
+  }
+  if (sub === "key") {
+    const key = clientTools.parseKey(rest.join(" "));
+    if (key.error) throw new CliError(key.error);
+    const reply = await call("key", { vk: key.key, into: Object.keys(into).length ? into : undefined });
+    if (flags.json) return json(reply.value);
+    console.log(`pressed ${rest.join(" ")}; ${focusText(reply.value.focus)}`);
+    return;
+  }
+  if (sub === "cmd") {
+    const [name, ...callArgs] = rest;
+    if (!name || flags.list) {
+      const reply = await call("cmd", { name, list: true, filter: flags.filter, limit: flags.limit });
+      if (flags.json) return json(reply.value);
+      for (const row of reply.value.commands) {
+        console.log(`  ${row.name.padEnd(40)} ${(row.shortcut || "").padEnd(14)} ${row.enabled === false ? "(off) " : ""}${row.label || ""}`);
+      }
+      console.log(`${reply.value.count} command(s)${reply.value.truncated ? ", cut at --limit" : ""}`);
+      return;
+    }
+    const args = callArgs.map((arg) => (/^-?\d+(\.\d+)?$/.test(arg) ? Number(arg) : arg));
+    const reply = await call("cmd", { name, args });
+    if (flags.json) return json(reply.value);
+    console.log(`ran ${name}${reply.value.bound ? "" : " (a uicore.cmd method, not a bound command)"}\n${outcome(reply.value)}`);
+    return;
+  }
+  // act
+  const [action, target] = rest;
+  if (!action) throw new CliError("client act needs an action: undock, dock, jump, warpTo, approach, orbit, keepAtRange, stop, " +
+    "lock, unlock, activate, deactivate, modules, logoff or select");
+  const range = flags.range === undefined ? undefined : Number(flags.range);
+  if (range !== undefined && !(range >= 0)) throw new CliError("--range takes metres, 0 or more");
+  const reply = await call("act", { action, target, range, module: flags.module });
+  if (flags.json) return json(reply.value);
+  if (action === "modules") {
+    for (const row of reply.value.modules) {
+      console.log(`  ${String(row.slot || row.flag).padEnd(7)} ${String(row.itemID).padEnd(14)} ${row.name || `type ${row.typeID}`}` +
+        `${row.online === false ? " offline" : ""}${row.active ? " active" : ""}${row.activatable ? "" : " passive"}`);
+    }
+    if (!reply.value.modules.length) console.log("  no modules on the HUD");
+    console.log(`targets: ${reply.value.targets.join(", ") || "none"}`);
+    return;
+  }
+  const value = reply.value;
+  console.log(`${action}${value.target ? ` ${value.target}` : ""}${flags.module ? ` module ${flags.module}` : ""}`);
+  for (const line of clientTools.actSummary(value)) console.log(line);
+  if (value.targets) {
+    console.log(`  locked: ${value.targets.join(", ") || "none"}; locking: ${value.locking.join(", ") || "none"}` +
+      (action === "lock" && !value.done && !value.targets.concat(value.locking).map(String).includes(String(value.target))
+        ? " (the client dropped the lock: the server refused it, or it was out of range)" : ""));
+  }
+  if (value.done && !value.done.reached) process.exitCode = 1;
+}
+
+// Whose events `client events` shows by default: the online clients (--user's),
+// else the one that attached last; null (all events) when none ever attached.
+function clientEventScope(agents, user) {
+  const mine = agents.filter((agent) => !user || agent.username === String(user));
+  const online = mine.filter((agent) => agent.online);
+  if (online.length) return online;
+  const last = mine.slice().sort((a, b) => b.attachedAtMs - a.attachedAtMs)[0];
+  return last ? [last] : null;
 }
 
 // The attached client a command is for: --user's, else the only online one.
@@ -647,8 +840,32 @@ async function clientAgentRow(handshake, flags) {
   throw new CliError(`${rows.length} client agents are online; name one with --user`);
 }
 
+// The headless pilots' accounts on record: the default pilot's at the top of
+// state.json, and each named pilot's under pilots (the multi-pilot layout).
+function headlessAccounts() {
+  const file = readJSON(STATE_PATH) || {};
+  const rows = [file, ...Object.values(file.pilots || {})];
+  return new Set(rows.map((row) => row && row.username).filter(Boolean).map(String));
+}
+
 async function clientLaunch(handshake, flags) {
   const username = String(flags.user || "e2eclient");
+  if (headlessAccounts().has(username)) {
+    throw new CliError(`${username} is a headless pilot's account; a client and a headless pilot never share one. ` +
+      "Pass another --user (e2eclient by default).");
+  }
+  const listed = await callBridge(handshake, "GET", "/client/agents");
+  const running = (listed.agents || []).find((row) => row.online && row.username === username);
+  if (running && running.characterID) {
+    console.log(`the ${username} client is already in game as character ${running.characterID}, pid ${running.pid || "?"}; ` +
+      `using it (\`gridcheck client stop${flags.user ? ` --user ${username}` : ""}\` first for a new one)`);
+    return { username, accountID: running.accountID, characterID: running.characterID, pid: running.pid || null,
+      build: running.build || null, seconds: 0, already: true };
+  }
+  if (running) {
+    throw new CliError(`the ${username} client (pid ${running.pid || "?"}) is up but at character selection: ` +
+      "`gridcheck client act select <characterID>` enters the game, or `gridcheck client stop` ends it");
+  }
   const game = handshake.ports && handshake.ports.game;
   if (!game) throw new CliError("the bridge handshake names no game port; `gridcheck status` says whether the server is up");
   const exe = clientExe(flags);
@@ -656,7 +873,7 @@ async function clientLaunch(handshake, flags) {
   if (!fs.existsSync(resfiles)) throw new CliError(`no resource cache at ${resfiles}; pass --resfiles <ResFiles folder>`);
   // Character names are unique server-wide, so not login's "Agent Observer".
   const { accountID, characterID } = await ensureCharacter(username, flags.name ? String(flags.name) : "Client Observer");
-  const minted = await callBridge(handshake, "POST", "/client/token", { username });
+  const minted = await callBridge(handshake, "POST", "/client/token", { username, accountID });
   // The gateway serves /resfiles; Play.bat names stock's gateway port, which gridcheck moves.
   const gateway = handshake.ports && handshake.ports.gateway;
   const resfileserver = String(flags.resfileserver || (gateway ? `http://127.0.0.1:${gateway}/resfiles/` : "http://127.0.0.1:26002/resfiles/"));
@@ -666,7 +883,7 @@ async function clientLaunch(handshake, flags) {
   clientTools.startClient({ exe, args, env: clientTools.clientEnvironment({ resfiles, gatewayPort: gateway }) });
   console.log(`started the EVE client as ${username} (account ${accountID}), entering as character ${characterID}`);
   const waitSeconds = flags.wait === undefined ? 240 : Number(flags.wait);
-  if (!(waitSeconds > 0)) return;
+  if (!(waitSeconds > 0)) return { username, accountID, characterID, pid: null, build: null, seconds: 0 };
   let attached = false;
   let pidShown = false;
   while (Date.now() - startedAtMs < waitSeconds * 1000) {
@@ -682,10 +899,16 @@ async function clientLaunch(handshake, flags) {
     if (agent.pid && !pidShown) {
       pidShown = true;
       console.log(`  client pid ${agent.pid}, build ${agent.build || "?"}`);
+      const unchecked = buildWarning(agent);
+      if (unchecked) console.log(`  ${unchecked}`);
     }
     if (agent.characterID === characterID) {
-      console.log(`in game as character ${characterID} after ${Math.round((Date.now() - startedAtMs) / 1000)} s`);
-      return;
+      // In game a few seconds before the client is docked or holds its ballpark, which every act needs.
+      const where = await clientSettledIn(username, startedAtMs + waitSeconds * 1000);
+      const seconds = Math.round((Date.now() - startedAtMs) / 1000);
+      console.log(`in game as character ${characterID} after ${seconds} s` +
+        `${where ? `, ${where.docked ? `docked at ${where.docked}` : "in space"} in ${where.solarSystemID}` : ""}`);
+      return { username, accountID, characterID, pid: agent.pid || null, build: agent.build || null, seconds };
     }
   }
   throw new CliError(`${attached ? "the client attached but didn't enter the game" : "no client agent attached"} within ${waitSeconds} s. ` +
@@ -1285,7 +1508,251 @@ const STEP_RUNNERS = {
   slash: (step) => runSlash(step.command),
   teleport: (step) => cmdTeleport([String(step.systemID)], {}),
   loadout: (step) => runLoadout(step.loadout),
+  clientLaunch: (step) => runClientLaunch(step),
+  clientEval: (step) => runClientEval(step),
+  clientUi: (step) => runClientUi(step),
+  clientClick: (step) => runClientClick(step),
+  clientAct: (step) => runClientAct(step),
+  clientDiff: (step) => runClientDiff(step),
+  clientScreenshot: (step) => runClientScreenshot(step),
 };
+
+// ---------- scenario steps on a real EVE client (core/scenario.js) ----------
+
+// The run under way: its folder, the clients it launched (stopped when it
+// ends) and how many screenshots it has taken. Null outside `gridcheck run`.
+let activeRun = null;
+
+const clientFlags = (step, extra = {}) => ({ ...(step.user ? { user: step.user } : {}), ...extra });
+// A click waits settleMs (default 3 s) inside the client, an action until it
+// is done (default up to CLIENT_ACT_DEFAULT_SECONDS); the command allows for that.
+const settleTimeout = (step, fallbackMs = 3000) =>
+  Math.max(15, Math.ceil((step.settleMs === undefined ? fallbackMs : step.settleMs) / 1000) + 10);
+
+function settledText(value) {
+  return `${value.finished ? "finished" : "still running"}` +
+    `${value.modal ? `; a dialog is open: ${value.modal.name || value.modal.cls}${value.modal.text ? ` "${value.modal.text}"` : ""}` : ""}`;
+}
+
+// An existing client of that account carries on; a new one is stopped when the run ends.
+async function runClientLaunch(step) {
+  const handshake = requireHandshake();
+  const username = step.user || "e2eclient";
+  const listed = await callBridge(handshake, "GET", "/client/agents");
+  const online = (listed.agents || []).find((row) => row.online && row.username === username && row.characterID);
+  if (online) {
+    return { ok: true, text: `${username} was already in game as character ${online.characterID}, pid ${online.pid || "?"}; the run leaves it up` };
+  }
+  const launched = await clientLaunch(handshake, { user: username, name: step.name, wait: step.seconds });
+  if (activeRun && !launched.already) activeRun.launched.push(launched);
+  return { ok: true, text: `${username} in game as character ${launched.characterID} after ${launched.seconds} s, pid ${launched.pid || "?"}` };
+}
+
+// "as" binds the IDs the value names: a number, or a list of them.
+async function runClientEval(step) {
+  const reply = await clientCommand("eval", { code: step.code }, clientFlags(step));
+  const value = reply.value || {};
+  const ids = (Array.isArray(value.json) ? value.json : [value.json])
+    .filter((item) => (typeof item === "number" && Number.isInteger(item)) || (typeof item === "string" && /^\d+$/.test(item)));
+  return { ok: true, text: `= ${String(value.repr).slice(0, 300)}${value.truncated ? " (truncated)" : ""}`, ids };
+}
+
+// Asks for the node every second until one is shown or the step's time is up.
+async function runClientUi(step) {
+  const startedAtMs = Date.now();
+  let lastError = null;
+  for (;;) {
+    try {
+      const reply = await clientCommand("ui", { ...clientTools.nodeArgs(step.node), limit: 5 }, clientFlags(step));
+      const matches = (reply.value && reply.value.matches) || [];
+      if (matches.length) {
+        const first = matches[0];
+        return { ok: true, text: `${first.path}${first.text ? ` "${first.text}"` : ""} after ${Math.round((Date.now() - startedAtMs) / 1000)} s` +
+          `${matches.length > 1 ? `, ${matches.length}${reply.value.truncated ? "+" : ""} matches` : ""}` };
+      }
+      lastError = null;
+    } catch (error) {
+      lastError = error.message;
+    }
+    if (Date.now() - startedAtMs + 1000 > step.seconds * 1000) break;
+    await sleep(1000);
+  }
+  return { ok: false, text: `not shown within ${step.seconds} s${lastError ? `; the last ui call failed: ${lastError}` : ""}` };
+}
+
+async function runClientClick(step) {
+  const reply = await clientCommand("click", { ...clientTools.nodeArgs(step.node), double: step.double || undefined, wait: step.settleMs },
+    clientFlags(step, { timeout: settleTimeout(step) }));
+  return { ok: true, text: `clicked ${reply.value.clicked.path}: ${settledText(reply.value)}` };
+}
+
+// The client drops a refused lock with a notice to the player, so a lock checks where the locks stand.
+async function runClientAct(step) {
+  const reply = await clientCommand("act", { action: step.act, target: step.target, range: step.range, module: step.module,
+    wait: step.settleMs }, clientFlags(step, { timeout: settleTimeout(step, CLIENT_ACT_DEFAULT_SECONDS * 1000) }));
+  const value = reply.value;
+  const head = `${step.act}${value.target ? ` ${value.target}` : ""}`;
+  if (!value.done) {
+    const text = `${head}: ${settledText(value)}${value.targets ? `; locked: ${value.targets.join(", ") || "none"}` : ""}`;
+    if (step.act === "lock" && !value.targets.concat(value.locking).map(String).includes(String(value.target))) {
+      return { ok: false, text: `${text}; the client dropped the lock (the server refused it, or it was out of range)` };
+    }
+    return { ok: true, text };
+  }
+  return { ok: value.done.reached, text: `${head}: ${clientTools.actSummary(value).map((line) => line.trim()).join("; ")}` };
+}
+
+// Diffs every 2 s until the client and the server's grid agree, both in space,
+// or the step's time is up; the last diff is a CLIENT_BALLPARK line either way.
+async function runClientDiff(step) {
+  const handshake = requireHandshake();
+  const agent = await clientAgentRow(handshake, clientFlags(step));
+  if (!agent.characterID) throw new CliError(`the ${agent.username} client hasn't entered the game yet`);
+  const startedAtMs = Date.now();
+  let last = null;
+  let lastError = null;
+  for (;;) {
+    try {
+      const [park, served] = await Promise.all([
+        clientCommand("ballpark", {}, { user: agent.username }),
+        callBridge(handshake, "GET", `/grid?characterID=${agent.characterID}`),
+      ]);
+      const diff = clientTools.diffBallpark(park.value, served.grid, { toleranceMeters: step.tolerance === undefined ? 1000 : step.tolerance });
+      last = { diff, grid: served.grid, atMs: Date.now() };
+      if (diff.ok && diff.inSpace.client && diff.inSpace.server) break;
+    } catch (error) {
+      lastError = error.message;
+    }
+    if (Date.now() - startedAtMs + 2000 > step.seconds * 1000) break;
+    await sleep(2000);
+  }
+  if (!last) throw new CliError(`no ballpark from the ${agent.username} client in ${step.seconds} s: ${lastError}`);
+  const event = clientTools.ballparkEvent(last.diff, { username: agent.username, characterID: agent.characterID, grid: last.grid,
+    atMs: last.atMs, waitedMs: last.atMs - startedAtMs });
+  const where = !event.inSpace ? "the client isn't in space" : !event.serverInSpace ? "the server has the character docked"
+    : !event.sameSystem ? "the client is in another system than the server's grid"
+      : `${event.missing} missing, ${event.extra} extra, ${event.moved} moved, ${event.modes} in another mode`;
+  return { ok: true, events: [event], text: event.ok
+    ? `the client holds what the server's grid holds: ${event.shared} shared ball(s)`
+    : `they disagree after ${Math.round(event.waitedMs / 1000)} s: ${where}` };
+}
+
+// A failed picture doesn't fail the step: the SCREENSHOT line and the report say why.
+async function runClientScreenshot(step) {
+  const agent = await clientAgentRow(requireHandshake(), clientFlags(step));
+  const shot = await captureClient(agent, step.label || "clientScreenshot");
+  return { ok: true, text: shot.file ? `${shot.file} ${shot.width}x${shot.height}` : `no picture: ${shot.error}`, events: [shot] };
+}
+
+// One client's window as a SCREENSHOT line, saved in the run's client/ folder
+// (jpg, at most 1600 px wide) or, outside a run, _local/gridcheck/client/.
+async function captureClient(agent, reason) {
+  const atMs = Date.now();
+  const base = { kind: "SCREENSHOT", atMs, reason, username: agent.username, pid: agent.pid || null };
+  const slug = String(reason).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40) || "shot";
+  const user = String(agent.username).replace(/[^A-Za-z0-9_-]+/g, "_");
+  const name = activeRun ? `${String(++activeRun.shots).padStart(2, "0")}-${slug}-${user}.jpg` : `screenshot-${runStamp(atMs)}-${slug}-${user}.jpg`;
+  const out = path.join(activeRun ? activeRun.runDir : E2E_DIR, "client", name);
+  const shot = await shootClient(agent, { out, maxWidth: 1600, format: "jpg" });
+  if (shot.error) return { ...base, error: shot.error };
+  return { ...base, file: activeRun ? `client/${name}` : relativePath(shot.file), width: shot.width, height: shot.height,
+    title: shot.title, source: shot.source };
+}
+
+const SHOT_SOURCES = ["auto", "client", "window"];
+
+// A picture of one client. "client": its agent saves the back buffer, which
+// works while the window is covered or minimized; "window": PrintWindow from
+// outside, which works while the agent is busy or gone; "auto": the first,
+// else the second. -> { file, width, height, title, source } or { error }.
+async function shootClient(agent, { out, maxWidth = 0, format = "png", source = "auto" }) {
+  const failed = [];
+  if (source !== "window") {
+    const shot = await shootInClient(agent, { out, maxWidth, format });
+    if (!shot.error) return { ...shot, title: null, source: "client" };
+    if (source === "client") return shot;
+    failed.push(`the client couldn't draw it (${shot.error})`);
+  }
+  const shot = agent.pid ? await clientTools.captureScreenshot({ pid: agent.pid, out, maxWidth, format })
+    : { error: `the ${agent.username} client's agent didn't report its pid` };
+  if (shot.error) return { error: [...failed, shot.error].join("; ") };
+  return { ...shot, source: "window" };
+}
+
+// The agent saves a PNG where it is told; one that needs scaling or another
+// format goes through the screenshot script and is then removed.
+async function shootInClient(agent, { out, maxWidth, format }) {
+  const direct = format === "png" && !maxWidth;
+  const saved = direct ? out : `${out}.client.png`;
+  fs.mkdirSync(path.dirname(out), { recursive: true });
+  try {
+    const { value } = await clientCommand("screenshot", { path: saved }, { user: agent.username, timeout: 10 });
+    if (direct) return { file: out, width: value.width, height: value.height };
+    return await clientTools.captureScreenshot({ from: saved, out, maxWidth, format });
+  } catch (error) {
+    return { error: String(error.message).trim().split("\n").pop() };
+  } finally {
+    if (!direct) fs.rmSync(saved, { force: true });
+  }
+}
+
+// The run's ballpark sampler ("watch": { "ballpark": true }): every online
+// client's ballpark against the server's grid for its character, as CLIENT_BALL
+// lines (core/client.js createBallparkSampler).
+function startBallparkSampler(handshake, everySeconds, push) {
+  const samplers = new Map();
+  let stopped = false;
+  let wake = () => {};
+  const loop = (async () => {
+    while (!stopped) {
+      const startedAtMs = Date.now();
+      let agents = [];
+      try {
+        agents = ((await callBridge(handshake, "GET", "/client/agents")).agents || []).filter((row) => row.online && row.characterID);
+      } catch (_error) {
+        agents = [];
+      }
+      for (const agent of agents) {
+        try {
+          const [park, served] = await Promise.all([
+            clientCommand("ballpark", {}, { user: agent.username, timeout: 10 }),
+            callBridge(handshake, "GET", `/grid?characterID=${agent.characterID}`),
+          ]);
+          const key = `${agent.username}:${agent.characterID}`;
+          if (!samplers.has(key)) samplers.set(key, clientTools.createBallparkSampler());
+          const lines = samplers.get(key).step({ atMs: Date.now(), username: agent.username, characterID: agent.characterID,
+            park: park.value, grid: served.grid });
+          for (const line of lines) push(line);
+        } catch (_error) {
+          // A missed sample: the client is between sessions, or busy.
+        }
+      }
+      if (stopped) break;
+      await new Promise((resolve) => {
+        const timer = setTimeout(resolve, Math.max(0, everySeconds * 1000 - (Date.now() - startedAtMs)));
+        wake = () => { clearTimeout(timer); resolve(); };
+      });
+    }
+  })();
+  return { stop: async () => { stopped = true; wake(); await loop; } };
+}
+
+// Stops the clients the run launched, unless --keep-up leaves the server and them up.
+async function stopRunClients(keep) {
+  const launched = activeRun ? activeRun.launched : [];
+  if (!launched.length) return;
+  if (keep) {
+    console.log(`--keep-up: the client(s) the run launched stay up too: ${launched.map((row) => `${row.username} pid ${row.pid || "?"}`).join(", ")}`);
+    return;
+  }
+  for (const row of launched) {
+    try {
+      await stopClient(requireHandshake(), row);
+    } catch (error) {
+      console.log(`run: couldn't stop the ${row.username} client: ${error.message}`);
+    }
+  }
+}
 
 async function runScenarioStep(step, bindings = {}) {
   if (step.action) return performAction(step.action, bindings);
@@ -1321,7 +1788,11 @@ function printScenario(file, scenario) {
   for (const step of scenario.during) console.log(`  during ${scenarioTools.describeStep(step, REGISTRY)}`);
   console.log(`  watch  every ${scenario.watch.every}s, off grid every ${scenario.watch.offgridEvery}s, ` +
     `client ${scenario.watch.client}${scenario.watch.log ? "" : ", no log"}` +
-    `${scenario.watch.perf ? `, perf every ${scenario.watch.perf}s` : ""}`);
+    `${scenario.watch.perf ? `, perf every ${scenario.watch.perf}s` : ""}` +
+    `${scenario.watch.ballpark ? `, the clients' ballparks every ${scenario.watch.ballpark}s` : ""}`);
+  for (const entry of scenario.watch.screenshots) {
+    console.log(`  shot   ${entry.stop ? "when the run stops" : `at the first ${entry.text}`}`);
+  }
   for (const condition of scenario.until.any) console.log(`  until  ${condition.text}`);
   if (scenario.until.any.length) {
     console.log(`  until  matched ${scenario.until.from === "start" ? "from the watch's start, setup included" : "after setup ends"}`);
@@ -1605,22 +2076,36 @@ async function cmdRun(positionals, flags) {
         }
       },
     step: runScenarioStep,
-    startWatch: (onEvent) => openWatch(requireLogin(readState()), requireHandshake(), {
-      // The bridge's longest watch; the run stops it at its own stop condition.
-      forSeconds: 3600,
-      everySeconds: scenario.watch.every,
-      offGridEverySeconds: scenario.watch.offgridEvery,
-      client: scenario.watch.client,
-      divergeMeters: scenario.watch.divergeMeters || undefined,
-      positions: true,
-      perfEverySeconds: scenario.watch.perf || 0,
-      log: scenario.watch.log,
-      grep: scenario.watch.grep === null ? undefined : scenario.watch.grep,
-      runDir,
-      print: (line) => console.log(formatTimelineEvent(line, REGISTRY)),
-      onEvent,
-    }),
+    startWatch: async (onEvent) => {
+      const watch = await openWatch(requireLogin(readState()), requireHandshake(), {
+        // The bridge's longest watch; the run stops it at its own stop condition.
+        forSeconds: 3600,
+        everySeconds: scenario.watch.every,
+        offGridEverySeconds: scenario.watch.offgridEvery,
+        client: scenario.watch.client,
+        divergeMeters: scenario.watch.divergeMeters || undefined,
+        positions: true,
+        perfEverySeconds: scenario.watch.perf || 0,
+        log: scenario.watch.log,
+        grep: scenario.watch.grep === null ? undefined : scenario.watch.grep,
+        runDir,
+        print: (line) => console.log(formatTimelineEvent(line, REGISTRY)),
+        onEvent,
+      });
+      const sampler = scenario.watch.ballpark ? startBallparkSampler(requireHandshake(), scenario.watch.ballpark, watch.push) : null;
+      return { ...watch, stop: async () => {
+        if (sampler) await sampler.stop();
+        return watch.stop();
+      } };
+    },
+    screenshot: async ({ reason }) => {
+      const listed = await callBridge(requireHandshake(), "GET", "/client/agents");
+      const agents = (listed.agents || []).filter((row) => row.online);
+      if (!agents.length) return [{ kind: "SCREENSHOT", reason, error: "no client agent is online" }];
+      return Promise.all(agents.map((agent) => captureClient(agent, reason)));
+    },
     down: async () => {
+      await stopRunClients(Boolean(flags["keep-up"]));
       if (!boots && !reusing) return;
       if (reuse) console.log("--reuse: the server stays up for the next --reuse run; `gridcheck down` stops it");
       else if (flags["keep-up"]) console.log("--keep-up: the server stays up; `gridcheck down` stops it");
@@ -1628,12 +2113,14 @@ async function cmdRun(positionals, flags) {
     },
   };
   let result;
+  activeRun = { runDir, launched: [], shots: 0 };
   try {
     result = await scenarioTools.runScenario(scenario, ops, {
       signal: controller.signal,
       log: (line) => console.log(`run: ${line}`),
     });
   } finally {
+    activeRun = null;
     process.removeListener("SIGINT", onInterrupt);
   }
   if (reuse && (boots || reusing)) {
@@ -1664,6 +2151,7 @@ async function cmdRun(positionals, flags) {
   const record = scenarioTools.resultRecord(result, { runID, scenarioFile });
   record.commit = commit;
   record.frames = frames ? frames.frames.map(({ file: frameFile, reason, stop, t, seq }) => ({ file: frameFile, reason, stop, t, seq })) : [];
+  if (record.screenshots.length) console.log(`run: ${record.screenshots.length} client screenshot(s) in ${relativePath(path.join(runDir, "client"))}`);
   fs.writeFileSync(path.join(runDir, "result.json"), `${JSON.stringify(record, null, 2)}\n`);
   for (const row of result.expectations) {
     const status = row.absent ? (row.met ? "clean  " : "SEEN   ") : (row.met ? "met    " : "MISSING");
@@ -2761,8 +3249,11 @@ const CORE_COMMANDS = {
     usage: ["client launch [--user e2eclient] [--name \"...\"] [--exe <exefile.exe>] [--resfiles <folder>] [--resfileserver <url>] [--wait 240]",
       "client status [--json] | client stop [--user] | client ping [--user] | client eval \"<python>\" [--file <py>] [--user] [--timeout 15] [--json]",
       "client console [--lines 60] [--grep <regex>] [--pid N] | client ui [--class <text>] [--name <text>] [--text <text>] [--depth N] [--hidden] [--limit N] [--json]",
-      "client screenshot [--out <file.png|.jpg>] [--run <id>] [--max-width <px>] | client ballpark [--range <km>] [--json]",
-      "client diff [--tolerance 1000] [--json] | client events [--since <seq>] [--notify OnA,OnB] [--json]"],
+      "client screenshot [--out <file.png|.jpg>] [--run <id>] [--max-width <px>] [--source auto|client|window] | client ballpark [--range <km>] [--json]",
+      "client diff [--tolerance 1000] [--json] | client events [--all] [--since <seq>] [--limit 50] [--notify OnA,OnB] [--json]",
+      "client find|click [--path <path> | --class <text> --name <text> --text <text>] [--index N] [--double] [--wait 3] [--user] [--json]",
+      "client type \"<text>\" [--name <edit> ...] [--set] [--enter] | client key <enter|escape|tab|f1|a ...> [--name <edit> ...]",
+      "client cmd [<name> [args...]] [--filter <text>] | client act <action> [<target>] [--range <m>] [--module high1] [--wait <s>]"],
     run: cmdClient,
   },
   undock: { usage: ["undock"], run: () => cmdUndock() },
@@ -2804,7 +3295,7 @@ const CORE_COMMANDS = {
   log: { usage: ["log [--grep NpcController] [--lines 40] [--any-pid]"], run: (_positionals, flags) => cmdLog(flags) },
   perf: { usage: ["perf [--for 10] [--now] [--json]"], run: (_positionals, flags) => cmdPerf(flags) },
   primer: { usage: ["primer [start|scenarios|conditions|events|perf|client|plugins] [--mcp]"], run: (positionals, flags) => cmdPrimer(positionals, flags) },
-  help: { usage: ["help [--json]"], run: (_positionals, flags) => { console.log(flags.json ? JSON.stringify(commandCatalog(), null, 2) : helpText()); } },
+  help: { usage: ["help [<command> [<sub>]] [--json]"], run: (_positionals, flags) => { console.log(flags.json ? JSON.stringify(commandCatalog(), null, 2) : helpText()); } },
 };
 
 function pluginCommands() {
@@ -2835,8 +3326,35 @@ function commandCatalog() {
 // Commands that run even when gridcheck.config.json is broken: they fix or report it.
 const CONFIG_EXEMPT = new Set(["init", "doctor", "help", "vendor", "gui", "agents", "primer"]);
 
+// `<command> --help` and `help <command> [<sub>]`: that command's docs. --help
+// never runs the command (`down --help` must not stop the server).
+function commandHelpText(command, sub) {
+  const names = [...Object.keys(CORE_COMMANDS), ...Object.keys(pluginCommands()), ...Object.keys(REGISTRY.handlers)];
+  if (!names.includes(command)) {
+    throw new CliError(`unknown command: ${command}.${didYouMean(closest(command, names).map((name) => `gridcheck ${name}`))} ` +
+      "`gridcheck help` lists them all.");
+  }
+  let text;
+  try {
+    text = require("../core/commandDocs").commandHelp(commandCatalog(), command, sub);
+  } catch (error) {
+    throw new CliError(error.message);
+  }
+  if (text) return text;
+  const entry = CORE_COMMANDS[command] || pluginCommands()[command];
+  return (entry && entry.usage ? entry.usage : [command]).map((line) => `gridcheck ${line.trim()}`).join("\n");
+}
+
 async function main(argv) {
   const { command, positionals, flags } = parseArgs(argv);
+  if (flags.help && command !== "help") {
+    console.log(commandHelpText(command, positionals[0]));
+    return;
+  }
+  if (command === "help" && positionals.length) {
+    console.log(commandHelpText(positionals[0], positionals[1]));
+    return;
+  }
   if (CONFIG.problems.length && !CONFIG_EXEMPT.has(command)) {
     throw new CliError(`${relativePath(CONFIG.file)}: ${CONFIG.problems.join("; ")}. ` +
       "Fix it, or write a new one with `gridcheck init --force`.");
@@ -2860,6 +3378,7 @@ if (require.main === module) {
 module.exports = {
   CORE_COMMANDS,
   CliError,
+  clientEventScope,
   helpText,
   parseArgs,
   selectLogLines,

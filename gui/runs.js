@@ -741,15 +741,29 @@
       const detail = state.detail;
       if (!detail) return [];
       const meta = (detail.result && Array.isArray(detail.result.frames)) ? detail.result.frames : [];
-      return (detail.frames || []).map((file) => {
+      const frames = (detail.frames || []).map((file) => {
         const m = meta.find((row) => String(row.file || "").endsWith(`/${file}`) || row.file === file) || {};
-        return { file, reason: m.reason || file.replace(/^\d+-/, "").replace(/\.svg$/, ""), stop: Boolean(m.stop), at: timeOf(m) };
+        return { file, reason: m.reason || file.replace(/^\d+-/, "").replace(/\.svg$/, ""), stop: Boolean(m.stop), at: timeOf(m), shot: false };
       });
+      // The real client's screenshots (client/), in time order among the frames.
+      const shotMeta = (detail.result && Array.isArray(detail.result.screenshots)) ? detail.result.screenshots : [];
+      const shots = (detail.shots || []).map((name) => {
+        const file = `client/${name}`;
+        const m = shotMeta.find((row) => row.file === file) || {};
+        return { file, reason: m.reason || name.replace(/^\d+-/, "").replace(/\.(png|jpe?g)$/i, ""), username: m.username || null,
+          stop: m.reason === "stop", at: Number.isFinite(Number(m.atMs)) && m.atMs !== null ? Number(m.atMs) : timeOf(m), shot: true };
+      });
+      return [...frames, ...shots].map((row, index) => ({ row, index }))
+        .sort((a, b) => (a.row.at === null) - (b.row.at === null) || (a.row.at || 0) - (b.row.at || 0) || a.index - b.index)
+        .map(({ row }) => row);
     }
 
+    // file: a frame's name, or frames/<name> or client/<name> as report.md links them.
     function frameURL(file) {
       if (!state.frameURLs.has(file)) {
-        state.frameURLs.set(file, shell.blobURL(`/gui/api/frame?tree=${q(shell.treeID())}&run=${q(state.runID)}&file=${q(file)}`));
+        const shot = file.startsWith("client/");
+        const name = file.replace(/^(frames|client)\//, "");
+        state.frameURLs.set(file, shell.blobURL(`/gui/api/${shot ? "shot" : "frame"}?tree=${q(shell.treeID())}&run=${q(state.runID)}&file=${q(name)}`));
       }
       return state.frameURLs.get(file);
     }
@@ -757,10 +771,11 @@
     function frameFigure(frame, { caption = true } = {}) {
       const img = h("img", { className: "thumb", alt: frame.file, loading: "lazy" });
       frameURL(frame.file).then((url) => { img.src = url; }).catch(() => { img.alt = `${frame.file} (failed to load)`; });
-      const fig = h("figure", { title: `${frame.file}${frame.at !== null ? `  ${R.offset(rel(frame.at))}` : ""}`,
+      const fig = h("figure", { className: frame.shot ? "shot" : "", title: `${frame.file}${frame.at !== null ? `  ${R.offset(rel(frame.at))}` : ""}`,
         onclick: () => frameURL(frame.file).then((url) => shell.showFrame(url, frame.file, frame.at, (at) => seek(at))) }, img);
       if (caption) {
-        fig.append(h("figcaption", {}, frame.at !== null ? R.offset(rel(frame.at)) : "", h("span", { text: `${frame.reason}${frame.stop ? " · stop" : ""}` })));
+        const what = frame.shot ? `client${frame.username ? ` ${frame.username}` : ""} · ${frame.reason}` : `${frame.reason}${frame.stop ? " · stop" : ""}`;
+        fig.append(h("figcaption", {}, frame.at !== null ? R.offset(rel(frame.at)) : "", h("span", { text: what })));
       }
       return fig;
     }
@@ -860,7 +875,7 @@
       } else if (state.itab === "perf") {
         body.append(perfPanel());
       } else if (state.itab === "frames") {
-        if (!frames.length) body.append(h("p", { className: "muted", text: "No frames: the run has no position samples." }));
+        if (!frames.length) body.append(h("p", { className: "muted", text: "No frames: the run has no position samples and no client screenshots." }));
         body.append(h("div", { className: "fgrid one" }, frames.map((frame) => frameFigure(frame))));
       } else if (state.itab === "report") {
         const report = h("article", { className: "report" });
@@ -1289,7 +1304,9 @@
           fig.style.left = `${Math.max(0, leftPx)}px`;
           film.append(fig);
         }
-        box.append(trRow("film", h("b", { text: "Frames" }), `${frames.length} SVG`, film));
+        const shotCount = frames.filter((frame) => frame.shot).length;
+        box.append(trRow("film", h("b", { text: "Frames" }),
+          `${frames.length - shotCount} SVG${shotCount ? `, ${shotCount} client` : ""}`, film));
       }
 
       // Server tick time: the worst tick per column, red over the budget.

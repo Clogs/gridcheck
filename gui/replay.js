@@ -107,6 +107,11 @@
       case "CLIENT": return `${e.op || ""} ${e.label || ""}${e.mode ? ` ${e.mode}` : ""}${e.error ? ` ${e.error}` : ""}`;
       case "CLIENT_EXCEPTION": return `${e.username || "client"}: ${e.type || "?"}: ${e.message || ""}${e.where ? `  at ${e.where}` : ""}`;
       case "CLIENT_EVENT": return `${e.username || "client"}: ${e.event || "?"}${e.error ? ` ${e.error}` : e.args ? ` ${e.args}` : ""}`.slice(0, 200);
+      case "CLIENT_BALLPARK": return `${e.username || "client"}: ${e.ok ? "agrees with" : "disagrees with"} the server's grid` +
+        `  shared ${e.shared}${e.missing ? `, ${e.missing} missing` : ""}${e.extra ? `, ${e.extra} extra` : ""}${e.moved ? `, ${e.moved} moved` : ""}`;
+      case "CLIENT_BALL": return `${e.username || "client"}: ${e.label || e.itemID} ${e.status}` +
+        `${e.status === "held" ? ` after ${Math.round((e.lagMs || 0) / 1000)} s` : ` for ${Math.round((e.sinceMs || 0) / 1000)} s`}`;
+      case "SCREENSHOT": return `${e.username ? `${e.username}: ` : ""}${e.file || `failed: ${e.error || "?"}`}${e.reason ? `  ${e.reason}` : ""}`;
       case "STEP": return `${e.phase === "during" ? "during: " : ""}${e.ok ? "" : "FAILED "}${e.step}${e.text ? `: ${e.text}` : ""}`;
       case "STOP": return e.reason === "until" ? `stop condition met: ${e.condition}` : `stopped: ${e.reason}`;
       case "GRID": return `${e.systemName || e.systemID}${e.self && e.self.typeName ? `, self in a ${e.self.typeName}` : ""}`;
@@ -124,14 +129,14 @@
   // The colour family of a kind, as a CSS class.
   function kindClass(kind) {
     switch (kind) {
-      case "STEP": case "STOP": return "k-step";
+      case "STEP": case "STOP": case "SCREENSHOT": return "k-step";
       case "ARRIVE": case "PRESENT": case "GRID": case "SYSTEM": return "k-arrive";
       case "TARGET": return "k-target";
       case "MODE": case "DECISION": case "LEAVE": case "MOVED": case "DOCKED": return "k-mode";
       case "FX": return "k-fx";
       case "DAMAGE": case "CLIENT_EXCEPTION": return "k-damage";
       case "DESTROYED": case "KILLMAIL": return "k-destroyed";
-      case "DIVERGE": return "k-div";
+      case "DIVERGE": case "CLIENT_BALL": return "k-div";
       default: return "k-log";
     }
   }

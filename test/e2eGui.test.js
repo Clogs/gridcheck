@@ -65,6 +65,8 @@ function setup(t) {
   write(run, "result.json", JSON.stringify({ name: "demo", passed: true, exitCode: 0, missing: 0, expectations: [1, 2] }));
   write(run, "report.md", "# Scenario demo: PASSED\n\n![Stop frame](frames/01-stop.svg)\n");
   write(run, "frames/01-stop.svg", "<svg xmlns=\"http://www.w3.org/2000/svg\"/>");
+  write(run, "client/01-in-space-e2eclient.jpg", "jpeg bytes");
+  write(run, "client/notes.txt", "not a picture");
   write(run, "secret.txt", "not served\n");
   const other = path.join(dir, "other");
   write(other, "server/src/server.js", "// another tree\n");
@@ -191,6 +193,13 @@ test("runs: the list with verdicts, a run's report and frames, and nothing outsi
     { run: "20261001-120000-demo", file: "secret.txt" }, { run: "20261001-120000-demo", file: "..\\result.json" }]) {
     const refused = await app.handle("GET", "/gui/api/frame", { tree: id, ...query });
     assert.ok(refused.statusCode >= 400, JSON.stringify(query));
+  }
+  assert.deepStrictEqual(detail.shots, ["01-in-space-e2eclient.jpg"], "the client's screenshots, not other files in client/");
+  const shot = await app.handle("GET", "/gui/api/shot", { tree: id, run: "20261001-120000-demo", file: "01-in-space-e2eclient.jpg" });
+  assert.strictEqual(shot.raw.contentType, "image/jpeg");
+  for (const file of ["notes.txt", "../frames/01-stop.svg", "..\\report.md", "01-stop.svg"]) {
+    const refused = await app.handle("GET", "/gui/api/shot", { tree: id, run: "20261001-120000-demo", file });
+    assert.ok(refused.statusCode >= 400, file);
   }
   assert.strictEqual((await app.handle("GET", "/gui/api/run", { tree: id, run: "../tree" })).statusCode, 404);
   const timeline = body(await app.handle("GET", "/viewer/timeline", { tree: id, run: "20261001-120000-demo", from: 0 }));

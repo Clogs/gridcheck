@@ -172,7 +172,10 @@ npm run compat -- --stock <EveJS zip> --lu <LU tree>         # both live lanes, 
 ```
 
 `npm test` runs against `test/fixtures/tree`. That folder has no EveJS code, only the files the lu
-plugin checks for, so the plugins' tool halves load. Two recorded fixtures stand in for a tree:
+plugin checks for, so the plugins' tool halves load. The client agent's Python runs under Python 3
+with stub client modules, and is compiled under Python 2.7, the EVE client's own, when one is
+found: `GRIDCHECK_PYTHON27=<python.exe>` (a portable 2.7 will do), else `py -2.7`, `python2.7` or
+`python2`. Without one, that test skips. Two recorded fixtures stand in for a tree:
 
 - `destiny.json`: what the tree's destiny encoders returned for every call the destiny tests make.
   The tests build payloads through `test/fixtures/encoders.js`, which replays it.

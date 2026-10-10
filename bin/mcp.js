@@ -298,6 +298,8 @@ const CLI_ARGS = {
     const { args, flag } = argList("client");
     flag("user", p.user);
     flag("since", p.since);
+    flag("all", p.all);
+    flag("limit", p.limit);
     // An empty list is a value here: it stops recording notify events.
     if (Array.isArray(p.notify)) args.push(`--notify=${p.notify.join(",")}`);
     flag("json", p.json);
@@ -310,10 +312,75 @@ const CLI_ARGS = {
     flag("run", p.run);
     flag("max-width", p.maxWidth === undefined ? 1600 : p.maxWidth);
     flag("format", p.format || "jpg");
+    flag("source", p.source);
     args.push("--json", "--", "screenshot");
     return args;
   },
+  client_find: (p) => clientDriveArgs("find", p),
+  client_click: (p) => clientDriveArgs("click", p, (flag) => flag("double", p.double)),
+  // text is what to type here; intoText finds the edit by its text.
+  client_type: (p) => clientDriveArgs("type", { ...p, text: p.intoText }, (flag) => {
+    flag("set", p.set);
+    flag("enter", p.enter);
+  }, p.text === undefined ? [] : [String(p.text)]),
+  client_key: (p) => clientDriveArgs("key", p, null, [String(p.key)]),
+  client_cmd(p) {
+    const { args, flag } = argList("client");
+    flag("user", p.user);
+    flag("filter", p.filter);
+    flag("wait", p.wait);
+    flag("json", p.json);
+    args.push("--", "cmd", ...(p.name ? [String(p.name), ...(p.args || []).map(String)] : []));
+    return args;
+  },
+  client_act(p) {
+    const { args, flag } = argList("client");
+    flag("user", p.user);
+    flag("range", p.range);
+    flag("module", p.module);
+    flag("wait", p.wait);
+    flag("json", p.json);
+    args.push("--", "act", String(p.action), ...(p.target === undefined ? [] : [String(p.target)]));
+    return args;
+  },
 };
+
+// The node flags (as client_ui lists nodes) and the subcommand after --.
+// How the client_ drive tools name a node, as client_ui lists them.
+function clientNodeProps() {
+  return {
+    path: str("The node's path exactly as client_ui prints it."),
+    cls: str("Class name contains this, e.g. Button."),
+    name: str("Node name contains this."),
+    text: str("Label or caption contains this, e.g. Undock."),
+    index: { type: "integer", minimum: 0, description: "Which of several matches, from 0." },
+    hidden: bool("Also look in hidden nodes."),
+  };
+}
+
+function clientDriveProps() {
+  return {
+    wait: num("Seconds to wait for what it started (default 3, at most 60); then it reports still running.", { minimum: 0, maximum: 60 }),
+    user: { type: "string", description: "The client's account, when more than one is online." },
+    json: { type: "boolean", description: "The answer as JSON." },
+  };
+}
+
+function clientDriveArgs(sub, p, more = null, tail = []) {
+  const { args, flag } = argList("client");
+  flag("user", p.user);
+  flag("path", p.path);
+  flag("class", p.cls);
+  flag("name", p.name);
+  flag("text", p.text);
+  flag("index", p.index);
+  flag("hidden", p.hidden);
+  if (more) more(flag);
+  flag("wait", p.wait);
+  flag("json", p.json);
+  args.push("--", sub, ...tail);
+  return args;
+}
 
 function cliArgs(tool, params = {}) {
   const plugin = REGISTRY.mcpTools.find((entry) => entry.name === tool && !CLI_ARGS[tool]);
@@ -634,11 +701,13 @@ const TOOLS = [
   },
   {
     name: "client_screenshot",
-    description: "A picture of the EVE client's window, drawn with PrintWindow from outside, so it works when the window " +
-      "is covered but not when it is minimized. Saved under _local/gridcheck/client/ (or the run's client/ folder) and " +
-      "returned as an image.",
+    description: "A picture of the EVE client. By default the client saves what it last drew, which works while its window " +
+      "is covered or minimized; if it can't, the window is drawn with PrintWindow from outside. Saved under " +
+      "_local/gridcheck/client/ (or the run's client/ folder) and returned as an image.",
     inputSchema: schema({
       run: str("Save it in this run's folder."),
+      source: str("auto (default), client (only the client's own picture) or window (only PrintWindow, not while minimized).",
+        { enum: ["auto", "client", "window"] }),
       maxWidth: int("Scale down to this width in pixels (default 1600; 0 keeps full size).", { minimum: 0 }),
       format: str("jpg (default) or png.", { enum: ["jpg", "png"] }),
       user: str("The client's account, when more than one is online."),
@@ -688,15 +757,105 @@ const TOOLS = [
   {
     name: "client_events",
     description: "The EVE client's logged exceptions (unhandled tasklet errors included), the notify events it records " +
-      "(OnSessionChanged by default) and the agent's own errors, oldest first. A watch shows the same as CLIENT_EXCEPTION " +
-      "and CLIENT_EVENT lines beside the server's.",
+      "(OnSessionChanged by default), its actions and the agent's own errors, oldest first: the attached client's since it " +
+      "attached, the last 50. The answer ends with the since to pass for newer ones. A watch shows the same as " +
+      "CLIENT_EXCEPTION and CLIENT_EVENT lines beside the server's.",
     inputSchema: schema({
-      since: int("Only events after this sequence number.", { minimum: 0 }),
+      since: int("Only events after this sequence number, from any client.", { minimum: 0 }),
+      all: bool("Every client's events since the server started."),
+      limit: int("The most recent this many (default 50).", { minimum: 1, maximum: 1000 }),
       notify: { type: "array", items: { type: "string" }, description: "Record these notify events from now on instead, e.g. [\"OnSessionChanged\", \"OnDamageStateChange\"]; [] records none." },
       user: str("The client's account, when more than one is online."),
       json: bool("The answer as JSON."),
     }),
     run: simple("client_events"),
+  },
+  {
+    name: "client_find",
+    description: "One displayed node of the EVE client's UI, by path (as client_ui prints it) or by cls, name and text " +
+      "(contains, case-insensitive), and the node a click on it goes to (it or the nearest one above with a click " +
+      "handler). Of nested matches, such as a button and its own label, the outermost counts. Several matches is an " +
+      "error listing them; pass index or path.",
+    inputSchema: schema({ ...clientNodeProps(), user: str("The client's account, when more than one is online."),
+      json: bool("The answer as JSON.") }),
+    run: simple("client_find"),
+  },
+  {
+    name: "client_click",
+    description: "Click a node of the EVE client's UI (found as client_find finds it) from inside the client: its own " +
+      "click handler runs (a button's press, which checks it is enabled), so the client's window may stay in the " +
+      "background. Answers whether what it started finished within wait, and any dialog it opened (then " +
+      "client_click that dialog's button).",
+    inputSchema: schema({ ...clientNodeProps(), double: bool("Double-click (OnDblClick)."), ...clientDriveProps() }),
+    run: simple("client_click"),
+  },
+  {
+    name: "client_type",
+    description: "Type into an edit of the EVE client, character by character through the client's own key input " +
+      "(uilib._OnChar), or set its value at once. The client drops its focus while its window is in the background, " +
+      "so name the edit (path, cls, name or intoText).",
+    inputSchema: schema({
+      text: str("What to type."),
+      ...clientNodeProps(),
+      intoText: str("Find the edit by its text (contains)."),
+      set: bool("Set the edit's value with its SetValue instead of typing."),
+      enter: bool("Press enter after."),
+      user: str("The client's account, when more than one is online."),
+      json: bool("The answer as JSON."),
+    }),
+    run: simple("client_type"),
+  },
+  {
+    name: "client_key",
+    description: "Press one key in the EVE client (down, its character, up) through its own key input, so the focused " +
+      "edit and the key bindings see it. Ctrl, shift and alt can't be held: the client reads them from the real " +
+      "keyboard; client_cmd runs what a combination is bound to. Escape opens the settings menu, as for a player.",
+    inputSchema: schema({
+      key: str("enter, escape, tab, backspace, space, delete, home, end, pageup, pagedown, up, down, left, right, insert, a-z, 0-9 or f1-f12."),
+      ...clientNodeProps(),
+      user: str("The client's account, when more than one is online."),
+      json: bool("The answer as JSON."),
+    }, ["key"]),
+    run: simple("client_key"),
+  },
+  {
+    name: "client_cmd",
+    description: "The EVE client's commands (uicore.cmd: what its key bindings run, such as OpenInventory or " +
+      "CmdStopShip). Without a name, lists them with label, shortcut and whether they are enabled (filter narrows " +
+      "it). With one, runs it through the client's own checks. Some toggle (OpenInventory closes an open " +
+      "inventory). The navigation ones (CmdApproachItem, CmdWarpToItem ...) only arm a click on a target; use client_act.",
+    inputSchema: schema({
+      name: str("The command, e.g. OpenInventory."),
+      args: { type: "array", items: { type: ["string", "number"] }, description: "Arguments for the command, rarely needed." },
+      filter: str("Without name: list only commands whose name or label contains this."),
+      ...clientDriveProps(),
+    }),
+    run: simple("client_cmd"),
+  },
+  {
+    name: "client_act",
+    description: "A player's action in the EVE client, through the client's own services as CCP's code calls them, so " +
+      "the server sees what a real client sends. undock; dock (target, else the nearest station or structure); jump " +
+      "(gate, station or structure: target); warpTo, approach, orbit (range default 5000), keepAtRange (range default " +
+      "10000): target; stop; lock, unlock: target (answers where the locks stand: a refused lock is dropped); " +
+      "activate, deactivate: module (itemID or slot such as high1, med2), activate with target for a targeted module; " +
+      "modules: the HUD's modules and the locked targets; logoff: back to character selection; select: target, a " +
+      "characterID, from character selection (the client picks a character by itself only at its first login). " +
+      "Answers once the action is done (in space, docked, in the new system, out of warp, orbiting, locked ...), " +
+      "first waiting out the client's session-change timer for undock, dock and jump; then where the client is and the " +
+      "exceptions and notify events it logged meanwhile. Not done in time is an error. " +
+      "A refusal from the server comes back as the error.",
+    inputSchema: schema({
+      action: str("What to do.", { enum: ["undock", "dock", "jump", "warpTo", "approach", "orbit", "keepAtRange", "stop",
+        "lock", "unlock", "activate", "deactivate", "modules", "logoff", "select"] }),
+      target: { type: ["string", "number"], description: "An itemID (client_ballpark lists them), or a characterID for select." },
+      range: num("Metres: the warp's landing distance, the orbit or keep-at-range distance.", { minimum: 0 }),
+      module: str("activate, deactivate: the module's itemID or slot (high1 ... low8)."),
+      ...clientDriveProps(),
+      wait: num("Most seconds to wait for the action to be done (default 120 for warpTo, 60 for undock, dock, jump, " +
+        "logoff, select and deactivate, 30 for lock, 10 for the rest); 0 answers once it has started.", { minimum: 0, maximum: 280 }),
+    }, ["action"]),
+    run: simple("client_act"),
   },
   {
     name: "run_scenario",

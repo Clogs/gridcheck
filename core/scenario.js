@@ -36,7 +36,7 @@ const BUDGET_SECONDS = 3000;
 
 const TOP_KEYS = new Set(["name", "description", "world", "recipe", "up", "setup", "during", "watch", "until", "expect"]);
 const CORE_UP_KEYS = ["market", "timeout", "profile", "profileEvery"];
-const WATCH_KEYS = new Set(["every", "offgridEvery", "client", "divergeMeters", "log", "grep", "perf"]);
+const WATCH_KEYS = new Set(["every", "offgridEvery", "client", "divergeMeters", "log", "grep", "perf", "ballpark", "screenshots"]);
 // A tick profiler window every 50 ticks (5 s at 10 Hz), beside a PERF window every 5 s.
 const PROFILE_EVERY_TICKS = 50;
 const PERF_EVERY_SECONDS = 5;
@@ -70,13 +70,33 @@ const CORE_STEP_KEYS = {
   waitFor: ["waitFor", "timeout"],
   // { "repeat": [steps], "every": 5, "times": 12 }: the steps again every 5 s.
   repeat: ["repeat", "every", "times"],
+  // A real EVE client (gridcheck client): "user" picks one when several are online.
+  clientLaunch: ["clientLaunch", "timeout"],
+  clientEval: ["clientEval", "user", "as"],
+  clientUi: ["clientUi", "user", "timeout"],
+  // settle, not wait: wait is a step of its own, and an entry holds one step.
+  clientClick: ["clientClick", "user", "double", "settle"],
+  clientAct: ["clientAct", "user", "target", "range", "module", "settle"],
+  clientDiff: ["clientDiff", "user", "timeout", "tolerance"],
+  clientScreenshot: ["clientScreenshot", "user"],
   ...Object.fromEntries(actionTools.ACTION_TYPES.map((type) => [type, ACTION_STEP_KEYS(type)])),
 };
 // What a step keeps that is not a $value to bind at run time.
 const STEP_OWN_KEYS = new Set(["type", "note", "as", "retry", "implicit", "action", "condition", "seconds", "plugin",
-  "steps", "every", "times", "perf"]);
+  "steps", "every", "times", "perf", "code", "node"]);
 const PERF_LABEL = /^[A-Za-z0-9][\w .:-]{0,39}$/;
 const DEFAULT_WAIT_FOR_SECONDS = 300;
+// The client's own actions (agent.py op_act), and those that need a target.
+const CLIENT_ACTS = ["undock", "dock", "jump", "warpTo", "approach", "orbit", "keepAtRange", "stop", "lock", "unlock",
+  "activate", "deactivate", "logoff", "select"];
+const CLIENT_ACTS_TARGETED = new Set(["jump", "warpTo", "approach", "orbit", "keepAtRange", "lock", "unlock", "select"]);
+const NODE_KEYS = ["class", "name", "text", "path", "index", "hidden"];
+const DEFAULT_CLIENT_LAUNCH_SECONDS = 240;
+const DEFAULT_CLIENT_UI_SECONDS = 30;
+const DEFAULT_CLIENT_DIFF_SECONDS = 30;
+// The ballpark sampler's default period, and how many screenshots watch.screenshots may ask for.
+const BALLPARK_EVERY_SECONDS = 2;
+const MAX_SCREENSHOT_TRIGGERS = 20;
 
 class ScenarioError extends Error {
   constructor(source, problems) {
@@ -123,6 +143,16 @@ function suffixes(step) {
     `${step.retry ? ` (retry every ${step.retry.every}s for ${step.retry.for}s)` : ""}`;
 }
 
+function clientSuffix(step) {
+  return step.user ? ` [${step.user}]` : "";
+}
+
+function describeNode(node = {}) {
+  const parts = Object.entries(node).filter(([key]) => key !== "hidden")
+    .map(([key, value]) => `${key}${key === "index" ? "=" : key === "path" ? " " : "~"}${/\s/.test(String(value)) ? `"${value}"` : value}`);
+  return `${parts.join(" ")}${node.hidden ? " (hidden too)" : ""}`;
+}
+
 function describeStep(step, registry = defaultRegistry()) {
   switch (step.type) {
     case "login": return `login${step.user ? ` ${step.user}` : ""}${step.name ? ` "${step.name}"` : ""}`;
@@ -135,6 +165,17 @@ function describeStep(step, registry = defaultRegistry()) {
     case "waitFor": return `waitFor ${step.condition.text} (up to ${step.seconds}s)`;
     case "repeat": return `repeat every ${step.every}s${step.times ? ` ${step.times} times` : ""}: ` +
       `${step.steps.map((inner) => describeStep(inner, registry)).join(", ")}`;
+    case "clientLaunch": return `clientLaunch ${step.user || "e2eclient"}${step.name ? ` "${step.name}"` : ""}`;
+    case "clientEval": {
+      const code = String(step.code || "").split(/\r?\n/)[0];
+      return `clientEval ${code.length > 60 ? `${code.slice(0, 59)}~` : code}${clientSuffix(step)}${suffixes(step)}`;
+    }
+    case "clientUi": return `clientUi ${describeNode(step.node)} (up to ${step.seconds}s)${clientSuffix(step)}`;
+    case "clientClick": return `clientClick${step.double ? " double" : ""} ${describeNode(step.node)}${clientSuffix(step)}`;
+    case "clientAct": return `clientAct ${step.act}${step.target !== undefined ? ` ${step.target}` : ""}` +
+      `${step.module !== undefined ? ` module ${step.module}` : ""}${clientSuffix(step)}`;
+    case "clientDiff": return `clientDiff (up to ${step.seconds}s)${clientSuffix(step)}`;
+    case "clientScreenshot": return `clientScreenshot${step.label ? ` "${step.label}"` : ""}${clientSuffix(step)}`;
     default: {
       if (step.action) return `${actionTools.describeAction(step.action)}${suffixes(step)}`;
       const spec = registry.steps[step.type];
@@ -216,7 +257,9 @@ function validateScenario(raw, { source = "scenario", defaultName = null, worldE
   if (up.profileEvery !== null && !up.profile) problem("up.profileEvery", "the tick profiler's window; add \"profile\": true");
   // A server booted with the profiler is a performance run: its watch keeps tick figures too.
   const watch = { every: 2, offgridEvery: 5, client: "diverge", divergeMeters: null, log: true, grep: null,
-    perf: up.profile ? PERF_EVERY_SECONDS : 0 };
+    perf: up.profile ? PERF_EVERY_SECONDS : 0, ballpark: 0, screenshots: [] };
+  // Read after expect, once every step's binding is known.
+  let rawScreenshots;
   if (raw.watch !== undefined) {
     if (!isObject(raw.watch)) {
       problem("watch", "an object");
@@ -233,6 +276,13 @@ function validateScenario(raw, { source = "scenario", defaultName = null, worldE
           else if (typeof value === "number" && value >= 1 && value <= 60) watch.perf = value;
           else problem("watch.perf", "true (a PERF window every 5 s), false, or seconds from 1 through 60");
         }
+        else if (key === "ballpark") {
+          if (value === true) watch.ballpark = BALLPARK_EVERY_SECONDS;
+          else if (value === false) watch.ballpark = 0;
+          else if (typeof value === "number" && value >= 1 && value <= 60) watch.ballpark = value;
+          else problem("watch.ballpark", "true (each client's ballpark against the server's grid every 2 s), false, or seconds from 1 through 60");
+        }
+        else if (key === "screenshots") rawScreenshots = value;
         else if (key === "grep") {
           try {
             new RegExp(String(value), "i");
@@ -262,6 +312,8 @@ function validateScenario(raw, { source = "scenario", defaultName = null, worldE
         problem(where, 'PERF needs "watch": { "perf": true }, or "up": { "profile": true }');
       } else if (parsed.kind === "PROFILE" && !(up.profile && watch.perf)) {
         problem(where, up.profile ? 'PROFILE needs watch.perf on' : 'PROFILE needs the tick profiler: "up": { "profile": true }');
+      } else if (parsed.kind === "CLIENT_BALL" && !watch.ballpark) {
+        problem(where, 'CLIENT_BALL needs the ballpark sampler: "watch": { "ballpark": true }');
       }
       return parsed;
     } catch (error) {
@@ -329,6 +381,53 @@ function validateScenario(raw, { source = "scenario", defaultName = null, worldE
           step.as = rawStep.as;
           bindings.add(rawStep.as);
         }
+      };
+      const clientUser = (step) => {
+        if (rawStep.user === undefined) return;
+        if (typeof rawStep.user !== "string" || !rawStep.user.trim()) problem(`${where}.user`, "the account of the client to use (client status lists them)");
+        else step.user = rawStep.user.trim();
+      };
+      const clientSeconds = (step, fallback, most, what) => {
+        const seconds = rawStep.timeout === undefined ? fallback : rawStep.timeout;
+        if (!(positive(seconds) && seconds <= most)) {
+          problem(`${where}.timeout`, `${what}: above 0, at most ${most}`);
+        } else {
+          step.seconds = seconds;
+          if (!during) budget += seconds;
+        }
+      };
+      const clientSettle = (step, most = 60, what = "how long to wait for what the click started (default 3)") => {
+        if (rawStep.settle === undefined) return;
+        if (!(typeof rawStep.settle === "number" && rawStep.settle >= 0 && rawStep.settle <= most)) {
+          problem(`${where}.settle`, `seconds from 0 through ${most}: ${what}`);
+        } else {
+          step.settleMs = Math.round(rawStep.settle * 1000);
+        }
+      };
+      const clientNode = (node, clicks) => {
+        const allowed = clicks ? NODE_KEYS : NODE_KEYS.filter((key) => key !== "path" && key !== "index");
+        const named = typeof node === "string" ? { text: node } : node;
+        if (!isObject(named)) {
+          problem(where, `${type}: the node's text, or { ${allowed.map((key) => `"${key}"`).join(", ")} }`);
+          return {};
+        }
+        const out = {};
+        for (const [key, inner] of Object.entries(named)) {
+          const at = `${where}.${type}.${key}`;
+          if (!allowed.includes(key)) problem(at, `unknown key; a node is named by ${allowed.join(", ")}`);
+          else if (key === "hidden") {
+            if (typeof inner !== "boolean") problem(at, "true or false: also look in hidden windows and containers");
+            else out.hidden = inner;
+          } else if (key === "index") {
+            if (!(Number.isInteger(inner) && inner >= 0)) problem(at, "which of several matches, from 0");
+            else out.index = inner;
+          } else if (typeof inner !== "string" || !inner) problem(at, "text it contains (case-insensitive)");
+          else out[key] = inner;
+        }
+        if (!["class", "name", "text", "path"].some((key) => out[key] !== undefined)) {
+          problem(where, `${type} needs a node: its class, name${clicks ? ", text or path" : " or text"} (gridcheck client ui lists them)`);
+        }
+        return out;
       };
       const value = rawStep[type];
       const step = { type, note: typeof rawStep.note === "string" ? rawStep.note : null };
@@ -445,6 +544,87 @@ function validateScenario(raw, { source = "scenario", defaultName = null, worldE
           if (!during && positive(rawStep.every) && Number.isInteger(times)) budget += times * Math.max(rawStep.every, roundSeconds);
           break;
         }
+        case "clientLaunch":
+          if (inRepeat) problem(where, "clientLaunch can't be repeated");
+          if (value !== true && !isObject(value)) problem(where, 'clientLaunch: true, or { "user": ..., "name": ... }');
+          if (isObject(value)) {
+            for (const key of Object.keys(value)) if (!["user", "name"].includes(key)) problem(`${where}.clientLaunch.${key}`, "unknown key; user or name");
+            if (value.user !== undefined) step.user = String(value.user);
+            if (value.name !== undefined) step.name = String(value.name);
+          }
+          clientSeconds(step, DEFAULT_CLIENT_LAUNCH_SECONDS, 600, "seconds to wait for the client to enter the game");
+          break;
+        case "clientEval":
+          if (typeof value !== "string" || !value.trim()) problem(where, 'clientEval: Python, e.g. "session.solarsystemid2"');
+          else step.code = value;
+          clientUser(step);
+          bindAs(step);
+          break;
+        case "clientUi":
+          step.node = clientNode(value, false);
+          clientUser(step);
+          clientSeconds(step, DEFAULT_CLIENT_UI_SECONDS, 600, "seconds to wait for the node");
+          break;
+        case "clientClick":
+          step.node = clientNode(value, true);
+          if (rawStep.double !== undefined) {
+            if (typeof rawStep.double !== "boolean") problem(`${where}.double`, "true or false");
+            else step.double = rawStep.double;
+          }
+          clientUser(step);
+          clientSettle(step);
+          break;
+        case "clientAct": {
+          if (!CLIENT_ACTS.includes(value)) {
+            problem(where, `clientAct: one of ${CLIENT_ACTS.join(", ")}`);
+            break;
+          }
+          step.act = value;
+          if (rawStep.target !== undefined) {
+            if (typeof rawStep.target !== "string" && typeof rawStep.target !== "number") {
+              problem(`${where}.target`, "an itemID, or a $name an earlier step bound");
+            } else {
+              step.target = rawStep.target;
+              bound(rawStep.target, "target");
+            }
+          } else if (CLIENT_ACTS_TARGETED.has(value)) {
+            problem(where, `clientAct ${value} needs a target: an itemID, or a $name an earlier step bound`);
+          }
+          if (rawStep.range !== undefined) {
+            if (!(typeof rawStep.range === "number" && rawStep.range >= 0)) problem(`${where}.range`, "metres, 0 or more");
+            else step.range = rawStep.range;
+          }
+          if (rawStep.module !== undefined) {
+            if (typeof rawStep.module !== "string" && typeof rawStep.module !== "number") problem(`${where}.module`, "a slot such as high1, or the module's itemID");
+            else step.module = String(rawStep.module);
+          } else if (value === "activate" || value === "deactivate") {
+            problem(where, `clientAct ${value} needs a module: a slot such as high1, or the module's itemID`);
+          }
+          clientUser(step);
+          clientSettle(step, 280, "the most to wait for the action to be done (default up to 120 for a warp, 60 to dock, undock " +
+            "or jump, 10 for the quick ones); 0 goes on once it has started");
+          break;
+        }
+        case "clientDiff":
+          if (value !== true) problem(where, '"clientDiff" or { "clientDiff": true }');
+          if (rawStep.tolerance !== undefined) {
+            if (!(typeof rawStep.tolerance === "number" && rawStep.tolerance >= 0)) {
+              problem(`${where}.tolerance`, "metres, 0 or more: how far apart a shared ball may be, plus 2 s of its speed (default 1000)");
+            } else {
+              step.tolerance = rawStep.tolerance;
+            }
+          }
+          clientUser(step);
+          clientSeconds(step, DEFAULT_CLIENT_DIFF_SECONDS, 600, "seconds to wait for the client's ballpark to agree with the server's grid");
+          break;
+        case "clientScreenshot":
+          if (value !== true && !(typeof value === "string" && PERF_LABEL.test(value))) {
+            problem(where, 'clientScreenshot: true, or what the picture shows, e.g. "in space": up to 40 letters, digits, spaces, . _ : -');
+          } else if (typeof value === "string") {
+            step.label = value;
+          }
+          clientUser(step);
+          break;
         default: {
           // A player action: { "lock": "nearest npc", "as": "mark" },
           // { "activate": "weapons", "target": "$mark" }, "stop".
@@ -565,6 +745,22 @@ function validateScenario(raw, { source = "scenario", defaultName = null, worldE
       const parsed = condition(where, text);
       if (parsed) expect.push({ condition: parsed, absent, note, text: `${absent ? "no " : ""}${parsed.text}` });
     });
+  }
+
+  // A screenshot of every attached client at the first event that matches
+  // each condition, and with "stop" when the run stops.
+  if (rawScreenshots !== undefined) {
+    if (!Array.isArray(rawScreenshots) || rawScreenshots.length > MAX_SCREENSHOT_TRIGGERS) {
+      problem("watch.screenshots", `a list of up to ${MAX_SCREENSHOT_TRIGGERS} conditions, or "stop": e.g. ["DESTROYED self", "stop"]`);
+    } else {
+      rawScreenshots.forEach((text, index) => {
+        if (text === "stop") watch.screenshots.push({ text: "stop", stop: true, condition: null });
+        else {
+          const parsed = condition(`watch.screenshots[${index}]`, text);
+          if (parsed) watch.screenshots.push({ text: parsed.text, stop: false, condition: parsed });
+        }
+      });
+    }
   }
 
   if (budget > BUDGET_SECONDS) {
@@ -706,8 +902,10 @@ async function race(entries) {
 // ops:
 //   up(scenario)                  boot the scenario's world; throws on failure
 //   step(step, bindings)          one login, undock, dock, slash, teleport,
-//                                 action or plugin step -> { ok, text, ids? }
+//                                 action, client or plugin step
+//                                 -> { ok, text, ids?, events? }; events go on the timeline
 //   startWatch(onEvent)           -> { push(event), stop(): Promise, ended: Promise<{ reason, error }> }
+//   screenshot({ reason })        optional: the attached clients' windows -> [SCREENSHOT event]
 //   down()                        stop the server
 async function runScenario(scenario, ops, { now = Date.now, signal = null, log = () => {} } = {}) {
   const events = [];
@@ -721,9 +919,18 @@ async function runScenario(scenario, ops, { now = Date.now, signal = null, log =
   const startedAtMs = now();
   // While grace runs: the expectations that aren't a "no" and have no match yet.
   let graceWatch = null;
+  // watch.screenshots: each condition takes its pictures at its first match.
+  const shotTriggers = ((scenario.watch && scenario.watch.screenshots) || []).filter((entry) => entry.condition)
+    .map((entry) => ({ ...entry, fired: false }));
+  const pendingShots = new Set();
 
   const onEvent = (event) => {
     events.push(event);
+    for (const trigger of shotTriggers) {
+      if (trigger.fired || !trigger.condition.test(event, ctx)) continue;
+      trigger.fired = true;
+      shoot(trigger.text);
+    }
     for (const waiter of waiters) {
       if (!waiter.accept(event)) continue;
       const hit = waiter.conditions.find((condition) => condition.test(event, ctx));
@@ -753,6 +960,17 @@ async function runScenario(scenario, ops, { now = Date.now, signal = null, log =
   const runnerEvent = (event) => {
     if (watch) watch.push({ source: "runner", atMs: now(), ...event });
   };
+  // A picture of each attached client; a failure is a SCREENSHOT line with its error.
+  function shoot(reason) {
+    if (typeof ops.screenshot !== "function" || !watch) return Promise.resolve();
+    const promise = Promise.resolve()
+      .then(() => ops.screenshot({ reason }))
+      .then((shots) => { for (const shot of shots || []) runnerEvent(shot); },
+        (error) => runnerEvent({ kind: "SCREENSHOT", reason, error: error.message }))
+      .finally(() => pendingShots.delete(promise));
+    pendingShots.add(promise);
+    return promise;
+  }
   // `during` steps end when the run stops (stop condition, timeout, failure).
   let runStopped = false;
   let releaseStop = () => {};
@@ -804,6 +1022,7 @@ async function runScenario(scenario, ops, { now = Date.now, signal = null, log =
     if (outcome.type === "ended" || outcome.type === "interrupted" || outcome.type === "stopped") {
       return { ok: false, stopped: outcome.type === "stopped", text: otherwise(outcome.type) };
     }
+    for (const event of outcome.result.events || []) runnerEvent(event);
     const done = { ok: outcome.result.ok !== false, text: `${outcome.result.text || ""}${attempts > 1 ? ` (attempt ${attempts})` : ""}` };
     if (step.as && done.ok) {
       const ids = outcome.result.ids || [];
@@ -963,7 +1182,10 @@ async function runScenario(scenario, ops, { now = Date.now, signal = null, log =
     releaseStop();
     if (!stop) stop = { reason: failure ? `${failure.stage}-failed` : "unknown", condition: null, event: null };
     if (watch) {
+      // The clients as the run left them, a failed setup step included.
+      if (((scenario.watch && scenario.watch.screenshots) || []).some((entry) => entry.stop)) await shoot("stop");
       runnerEvent({ kind: "STOP", reason: stop.reason, condition: stop.condition, matchedSeq: stop.event ? stop.event.seq : null });
+      await Promise.all([...pendingShots]);
       try {
         await watch.stop();
       } catch (error) {
@@ -1123,6 +1345,8 @@ function renderReport(result, { runID, scenario, scenarioFile = null, timelineFi
   }
   lines.push("");
   if (framesSection) lines.push(framesSection);
+  const shotsSection = renderScreenshotsSection(result.events);
+  if (shotsSection) lines.push(shotsSection);
   const perfSection = perfTools.renderPerfSection(perfTools.perfRecord(result.events), {
     offset: formatOffset, watchStartedAtMs: result.watchStartedAtMs, profileAsked: Boolean(scenario && scenario.up && scenario.up.profile) });
   if (perfSection) lines.push(perfSection);
@@ -1154,6 +1378,32 @@ function renderReport(result, { runID, scenario, scenarioFile = null, timelineFi
   return lines.join("\n");
 }
 
+// The run's client screenshots, from its SCREENSHOT lines: what the GUI shows
+// beside the tactical frames.
+function screenshotsOf(events) {
+  return events.filter((event) => event.kind === "SCREENSHOT" && event.file)
+    .map(({ file, reason, username, t, atMs, width, height }) => ({ file, reason, username, t, atMs, width, height }));
+}
+
+// The report's "Client screenshots" section, or null when the run took none.
+function renderScreenshotsSection(events) {
+  const shots = events.filter((event) => event.kind === "SCREENSHOT");
+  if (!shots.length) return null;
+  const lines = ["## Client screenshots", "",
+    "The real client's window, from `clientScreenshot` steps and `watch.screenshots`, in `client/`.", "",
+    "| t | Why | Client | Picture |", "| --- | --- | --- | --- |"];
+  for (const shot of shots) {
+    const picture = shot.file ? `[${shot.file.slice(shot.file.lastIndexOf("/") + 1)}](${shot.file})${shot.width ? ` ${shot.width}x${shot.height}` : ""}`
+      : `failed: ${cell(shot.error)}`;
+    lines.push(`| ${formatOffset(shot.t)} | ${cell(shot.reason)} | ${cell(shot.username || "-")} | ${picture} |`);
+  }
+  lines.push("");
+  for (const shot of shots.filter((row) => row.file)) {
+    lines.push(`![${formatOffset(shot.t)} ${cell(shot.reason)}${shot.username ? `, ${cell(shot.username)}` : ""}](${shot.file})`, "");
+  }
+  return lines.join("\n");
+}
+
 // The machine-readable summary beside report.md, without the events, which
 // are in timeline.jsonl.
 function resultRecord(result, { runID, scenarioFile }) {
@@ -1166,6 +1416,7 @@ function resultRecord(result, { runID, scenarioFile }) {
     stop: { ...result.stop, event: result.stop && result.stop.event ? { seq: result.stop.event.seq, t: result.stop.event.t, kind: result.stop.event.kind } : null },
     exitCode: exitCodeFor(result),
     perf: perfTools.perfRecord(events),
+    screenshots: screenshotsOf(events),
   };
 }
 

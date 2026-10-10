@@ -72,6 +72,21 @@ const EVENT_FIELDS = Object.freeze({
     username: "str", characterID: "id", event: "str", args: "str", op: "str", error: "str", count: "num",
     clientSeq: "num", clientAtMs: "ms",
   },
+  // The client's ballpark against the server's grid for its character: a
+  // scenario's clientDiff step, the whole diff in one line.
+  CLIENT_BALLPARK: {
+    username: "str", characterID: "id", ok: "bool", inSpace: "bool", serverInSpace: "bool", sameSystem: "bool",
+    systemID: "id", server: "num", client: "num", shared: "num", missing: "num", extra: "num", moved: "num", modes: "num",
+    missingIDs: { list: "id" }, extraIDs: { list: "id" }, movedIDs: { list: "id" }, waitedMs: "ms",
+  },
+  // One ball, from the run's ballpark sampler ("watch": { "ballpark": true }):
+  // held (the client got a ball the server put on its grid, lagMs later),
+  // missing (the server has listed it for sinceMs and the client still lacks
+  // it) or extra (the client still holds a ball the server's grid doesn't).
+  CLIENT_BALL: {
+    username: "str", characterID: "id", status: "str", itemID: "id", label: "str", typeID: "id", typeName: "str",
+    lagMs: "ms", sinceMs: "ms", distanceMeters: "m",
+  },
   FX: {
     itemID: "id", label: "str", guid: "str", targetID: "id", targetLabel: "str", moduleID: "id", moduleTypeID: "id",
     offensive: "bool", durationMs: "ms", repeat: "num", knownBall: "bool", repeatsBefore: "num",

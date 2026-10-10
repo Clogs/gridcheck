@@ -155,6 +155,21 @@ function eventBody(event, registry) {
       return [`${event.username || "client"}: ${event.event || "?"}` +
         `${event.op ? ` (${event.op})` : ""}${event.count ? ` ${event.count}` : ""}`,
       String(event.error || event.args || "").slice(0, 200)];
+    case "CLIENT_BALLPARK":
+      return [`${event.username || "client"}: ${event.ok ? "holds what the server's grid holds" : "disagrees with the server's grid"}` +
+        ` (server ${event.server}, client ${event.client}, shared ${event.shared})`,
+      [!event.inSpace ? "client not in space" : "", event.serverInSpace === false ? "server: docked" : "",
+        event.sameSystem === false ? "another system" : "", event.missing ? `${event.missing} missing` : "",
+        event.extra ? `${event.extra} extra` : "", event.moved ? `${event.moved} moved` : "", event.modes ? `${event.modes} other mode` : ""]
+        .filter(Boolean).join(", ")];
+    case "CLIENT_BALL":
+      return [`${event.username || "client"}: ${event.label || `#${event.itemID}`} ${event.status}` +
+        `${event.status === "held" ? ` after ${formatSeconds(event.lagMs)}` : ` for ${formatSeconds(event.sinceMs)}`}`,
+      event.status === "missing" ? "on the server's grid, not in the client's ballpark"
+        : event.status === "extra" ? "in the client's ballpark, not on the server's grid" : ""];
+    case "SCREENSHOT":
+      return [`${event.username ? `${event.username}: ` : ""}${event.file || `failed: ${event.error || "?"}`}` +
+        `${event.width ? ` ${event.width}x${event.height}` : ""}`, event.reason ? String(event.reason) : ""];
     case "FX":
       return [`${event.label || `#${event.itemID}`} ${event.guid || "?"}` +
         `${event.targetID ? ` -> ${event.targetLabel || `#${event.targetID}`}` : ""}`,

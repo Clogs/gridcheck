@@ -57,10 +57,15 @@ function alive(session) {
 // patched: () -> whether the tree's handshake has the client-agent patch. Without
 // it the client's token login reaches stock as the account "EVE-SSO-CONNECTION",
 // so no token is minted.
-function createClientAgent({ log, patched = () => false, read = readAgentFile, now = Date.now,
-  mintToken = () => crypto.randomBytes(24).toString("hex") }) {
+// liveSessions() -> every live server session (stock sessionRegistry.getSessions):
+// a client's account must have no other, such as a headless pilot's.
+// testTree() -> whether the tree has a gridcheck.config.json. EVEJS_AGENT_BRIDGE=1
+// turns the bridge on without one, but a tree players use never gets a token.
+function createClientAgent({ log, patched = () => false, testTree = () => false, read = readAgentFile, now = Date.now,
+  mintToken = () => crypto.randomBytes(24).toString("hex"), liveSessions = () => [] }) {
   const tokens = new Map(); // token -> { username, accountID }
   const loginsByAccount = new Map(); // accountID -> token, from login until the signedFunc is built
+  const lastLogin = new Map(); // accountID -> the token that logged in last
   const agents = new Map(); // token -> { token, username, accountID, session, attachedAtMs, lastSeenMs, pid, build, ... }
   const waiting = new Map(); // command id -> { token, settle }
   const events = []; // the last EVENT_RING timeline events from every client, oldest first
@@ -69,9 +74,29 @@ function createClientAgent({ log, patched = () => false, read = readAgentFile, n
   let eventSeq = 0;
   let state = { on: false, reason: "not installed yet" };
 
-  function mint({ username }) {
+  function sessionsOf(accountID) {
+    try {
+      return (liveSessions() || []).filter((session) => session && Number(session.userid) === accountID);
+    } catch (error) {
+      log.warn(`[AgentBridge] client agent: the session list failed: ${error.message}`);
+      return [];
+    }
+  }
+
+  // A live session for the account that isn't this token's own client.
+  function otherSession(accountID, token) {
+    const own = token ? agents.get(token) : null;
+    return sessionsOf(accountID).find((session) => !own || session !== own.session) || null;
+  }
+
+  function mint({ username, accountID }) {
     const name = String(username || "").trim();
     if (!name) return { ok: false, error: "username is required" };
+    const account = Number(accountID) || 0;
+    if (account && otherSession(account, null)) {
+      return { ok: false, statusCode: 409, error: `account ${name} (${account}) already has a session on the server, a headless pilot's ` +
+        "or another client's. A client needs an account of its own: pass another --user." };
+    }
     const token = mintToken();
     tokens.set(token, { username: name, accountID: null });
     return { ok: true, token, username: name };
@@ -90,10 +115,17 @@ function createClientAgent({ log, patched = () => false, read = readAgentFile, n
         log.warn(`[AgentBridge] client login: token for ${entry.username}, but the store has no such account`);
         return false;
       }
+      const accountID = Number(account.id);
+      if (otherSession(accountID, token)) {
+        log.warn(`[AgentBridge] client login refused: ${entry.username} (account ${accountID}) already has a session, ` +
+          "a headless pilot's or another client's");
+        return false;
+      }
       setDictEntry(loginData, "user_name", entry.username, strVal);
       setDictEntry(loginData, "user_password_hash", typeof account.passwordhash === "string" ? account.passwordhash : "", strVal);
-      entry.accountID = Number(account.id);
+      entry.accountID = accountID;
       loginsByAccount.set(entry.accountID, token);
+      lastLogin.set(entry.accountID, token);
       log.info(`[AgentBridge] client login: ${entry.username} (account ${entry.accountID}) by token`);
       return true;
     } catch (error) {
@@ -152,7 +184,8 @@ function createClientAgent({ log, patched = () => false, read = readAgentFile, n
         traceback: Array.isArray(raw.traceback) ? raw.traceback.map(String) : [] };
     }
     if (raw.kind === "notify") return { kind: "CLIENT_EVENT", ...who, event: str(raw.event), args: str(raw.args) };
-    return { kind: "CLIENT_EVENT", ...who, event: str(raw.kind) || "unknown", op: str(raw.op), error: str(raw.error) };
+    return { kind: "CLIENT_EVENT", ...who, event: str(raw.kind) || "unknown", op: str(raw.op), error: str(raw.error),
+      args: str(raw.args) };
   }
 
   function publish(event) {
@@ -183,12 +216,13 @@ function createClientAgent({ log, patched = () => false, read = readAgentFile, n
           return null;
         }
         const at = now();
-        // A new client for the account replaces the closed ones it left behind.
+        // A new client for the account replaces the ones before it; the login
+        // guard leaves it the account's only client.
         for (const [other, agent] of agents) {
-          if (other !== token && agent.username === entry.username && !alive(agent.session)) agents.delete(other);
+          if (other !== token && agent.username === entry.username) agents.delete(other);
         }
         agents.set(token, { token, username: entry.username, accountID: entry.accountID, session, attachedAtMs: at,
-          lastSeenMs: at, pid: null, build: null, agentVersion: null, goneAtMs: null });
+          lastSeenMs: at, pid: null, build: null, checkedBuild: null, agentVersion: null, goneAtMs: null });
         log.info(`[AgentBridge] client agent attached: ${entry.username} (account ${entry.accountID})`);
         return read("agent.py");
       }
@@ -201,7 +235,12 @@ function createClientAgent({ log, patched = () => false, read = readAgentFile, n
         agent.pid = Number(hello.pid) || null;
         agent.build = hello.build === undefined || hello.build === null ? null : String(hello.build);
         agent.agentVersion = Number(hello.agent) || null;
+        agent.checkedBuild = hello.checkedBuild === undefined || hello.checkedBuild === null ? null : String(hello.checkedBuild);
         log.info(`[AgentBridge] client agent ${agent.username}: pid ${agent.pid}, build ${agent.build}`);
+        if (agent.checkedBuild && agent.build !== agent.checkedBuild) {
+          log.warn(`[AgentBridge] client agent ${agent.username}: build ${agent.build}, but the agent was checked against ` +
+            `build ${agent.checkedBuild}; its ops other than ping, eval and events refuse`);
+        }
         return true;
       }
 
@@ -231,11 +270,28 @@ function createClientAgent({ log, patched = () => false, read = readAgentFile, n
     return new GridcheckClientService();
   }
 
+  // A client that reconnected has a new session for its account; the agent in
+  // it is the same and keeps its token, so it carries on there. Sessions
+  // another agent holds aren't taken, nor the gateway's (headless) sessions,
+  // whose duck socket has no write.
+  function rebind(agent) {
+    // A new client for the account (another token) is not this one reconnecting.
+    if (lastLogin.get(agent.accountID) !== agent.token) return false;
+    const held = new Set([...agents.values()].map((other) => other.session));
+    const next = sessionsOf(agent.accountID)
+      .find((session) => !held.has(session) && session.socket && typeof session.socket.write === "function");
+    if (!next) return false;
+    agent.session = next;
+    agent.reboundAtMs = now();
+    log.info(`[AgentBridge] client agent ${agent.username}: carried on to its reconnected session`);
+    return true;
+  }
+
   // A client that closed stays listed as gone for GONE_KEEP_MS, then is dropped.
   function prune() {
     const at = now();
     for (const [token, agent] of agents) {
-      if (alive(agent.session)) {
+      if (alive(agent.session) || rebind(agent)) {
         agent.goneAtMs = null;
         continue;
       }
@@ -253,10 +309,12 @@ function createClientAgent({ log, patched = () => false, read = readAgentFile, n
       online: alive(session),
       pid: agent.pid,
       build: agent.build,
+      checkedBuild: agent.checkedBuild,
       agentVersion: agent.agentVersion,
       attachedAtMs: agent.attachedAtMs,
       lastSeenMs: agent.lastSeenMs,
       goneAtMs: agent.goneAtMs,
+      reconnectedAtMs: agent.reboundAtMs || null,
     };
   }
 
@@ -315,8 +373,12 @@ function createClientAgent({ log, patched = () => false, read = readAgentFile, n
       if (!patched()) {
         return { statusCode: 409, body: { ok: false, error: "the client-agent patch isn't applied: gridcheck patch apply client-agent, then restart the server" } };
       }
-      const reply = mint(body);
-      return { statusCode: reply.ok ? 200 : 400, body: reply };
+      if (!testTree()) {
+        return { statusCode: 409, body: { ok: false, error: "this tree has no gridcheck.config.json, so it isn't a gridcheck test tree " +
+          "and gets no client tokens. `gridcheck init` writes one; never in a tree players use." } };
+      }
+      const { statusCode, ...reply } = mint(body || {});
+      return { statusCode: reply.ok ? 200 : statusCode || 400, body: reply };
     },
     "GET /client/agents": () => {
       prune();

@@ -55,6 +55,8 @@ const MAX_FRAME_BYTES = 4 * 1024 * 1024;
 const MAX_TREES = 50;
 const MAX_BROWSE_ENTRIES = 1000;
 const FRAME_FILE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}\.svg$/;
+// A run's client screenshots, in its client/ folder.
+const SHOT_FILE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}\.(png|jpe?g)$/i;
 const PATCH_ID = /^[a-z0-9][a-z0-9-]{0,63}$/;
 const USAGE = "usage: gridcheck gui [--port N] [--tree <path>]... [--open]";
 
@@ -733,24 +735,35 @@ function createGui({ context = ownContext(), stateFile = null, extraTrees = [], 
     } catch (_error) {
       frames = [];
     }
-    return { ok: true, run: runID, dir: slashed(dir), report, frames, hasTimeline: exists(path.join(dir, "timeline.jsonl")),
+    let shots = [];
+    try {
+      shots = fs.readdirSync(path.join(dir, "client")).filter((name) => SHOT_FILE.test(name)).sort();
+    } catch (_error) {
+      shots = [];
+    }
+    return { ok: true, run: runID, dir: slashed(dir), report, frames, shots, hasTimeline: exists(path.join(dir, "timeline.jsonl")),
       result: readJSON(path.join(dir, "result.json")) };
   }
 
-  function frame(root, runID, file) {
+  // A frame (frames/*.svg) or a client screenshot (client/*.png, *.jpg) of a run.
+  function runImage(root, runID, file, { folder, pattern, what }) {
     const { runsDir } = viewerFor(root);
     const dir = resolveRunDir(runsDir, runID);
-    if (!dir || !FRAME_FILE.test(String(file || ""))) throw new GuiError("frame must name a run and an .svg in its frames folder");
-    const full = path.join(dir, "frames", String(file));
+    if (!dir || !pattern.test(String(file || ""))) throw new GuiError(`${what} must name a run and a file in its ${folder} folder`);
+    const full = path.join(dir, folder, String(file));
     let stat;
     try {
       stat = fs.statSync(full);
     } catch (_error) {
-      throw new GuiError(`no frame ${file}`, 404);
+      throw new GuiError(`no ${what} ${file}`, 404);
     }
-    if (!stat.isFile() || stat.size > MAX_FRAME_BYTES) throw new GuiError(`frame ${file} is not a file this page shows`, 404);
-    return { statusCode: 200, raw: { contentType: "image/svg+xml", body: fs.readFileSync(full) } };
+    if (!stat.isFile() || stat.size > MAX_FRAME_BYTES) throw new GuiError(`${what} ${file} is not a file this page shows`, 404);
+    const contentType = /\.svg$/i.test(file) ? "image/svg+xml" : /\.png$/i.test(file) ? "image/png" : "image/jpeg";
+    return { statusCode: 200, raw: { contentType, body: fs.readFileSync(full) } };
   }
+
+  const frame = (root, runID, file) => runImage(root, runID, file, { folder: "frames", pattern: FRAME_FILE, what: "frame" });
+  const shot = (root, runID, file) => runImage(root, runID, file, { folder: "client", pattern: SHOT_FILE, what: "screenshot" });
 
   // The Commands tab: the tree's copy's own `help --json`. A copy too old for it,
   // or no copy, gets this copy of gridcheck's list, read for that tree's plugins.
@@ -811,6 +824,7 @@ function createGui({ context = ownContext(), stateFile = null, extraTrees = [], 
     if (method === "GET" && pathname === "/gui/api/runs") return viewerFor(trees.find(query.tree)).viewer.handle("GET", "/viewer/runs", {});
     if (method === "GET" && pathname === "/gui/api/run") return json(runDetail(trees.find(query.tree), query.run));
     if (method === "GET" && pathname === "/gui/api/frame") return frame(trees.find(query.tree), query.run, query.file);
+    if (method === "GET" && pathname === "/gui/api/shot") return shot(trees.find(query.tree), query.run, query.file);
     if (method === "GET" && pathname.startsWith("/viewer/")) return viewerFor(trees.find(query.tree)).viewer.handle(method, pathname, query);
     return { statusCode: 404, body: { ok: false, error: `no such route: ${method} ${pathname}` } };
   }

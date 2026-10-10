@@ -72,7 +72,7 @@ by hand. When an entry already runs this tree's `mcp.js`, setup leaves it as it 
 | `perf` | `perf` | `seconds` (default 10) to sample, or `now`. See [Performance testing](#performance-testing). `up` takes `profile` and `profileEvery`, and `watch` takes `perf` and `perfEvery`. |
 | `run_scenario` | `run` | Writes a scenario it is handed, checks it, runs it. See below. |
 | `report` | none | Reads a run's `report.md` and `result.json`; waits for a background run. |
-| `client_launch`, `client_status`, `client_stop`, `client_eval`, `client_console`, `client_ui`, `client_ballpark`, `client_diff`, `client_events` | `client <subcommand>` | A real EVE client; see [A real EVE client](#a-real-eve-client). `client_events` takes `notify` as a list; `[]` records none. |
+| `client_launch`, `client_status`, `client_stop`, `client_eval`, `client_console`, `client_ui`, `client_ballpark`, `client_diff`, `client_events`, `client_find`, `client_click`, `client_type`, `client_key`, `client_cmd`, `client_act` | `client <subcommand>` | A real EVE client; see [A real EVE client](#a-real-eve-client). `client_events` takes `notify` as a list; `[]` records none. In `client_type`, `text` is what to type and `intoText` finds the edit by its text. |
 | `client_screenshot` | `client screenshot --json` | Returns the picture itself, as a JPEG 1,600 pixels wide unless `format` or `maxWidth` say otherwise. |
 
 A plugin's tools are named `<plugin>_<tool>`. The server's MCP instructions are a brief of under
@@ -429,12 +429,16 @@ that's missing.
 gridcheck client launch            # account e2eclient, character Client Observer; in game in about 15 s
 gridcheck client status            # attached clients: character, online or gone, pid, build
 gridcheck client ui --text undock  # the windows, and every UI node whose text contains "undock"
-gridcheck client screenshot        # the window as a PNG under _local/gridcheck/client/
+gridcheck client screenshot        # what it draws, as a PNG under _local/gridcheck/client/
 gridcheck client ballpark          # what michelle's ballpark holds, nearest first
 gridcheck client diff              # that ballpark against the server's grid for the same character
 gridcheck client events            # exceptions and notify events the client recorded
 gridcheck client console           # the end of the client's own "[CCP]" console window
 gridcheck client eval "cfg.evelocations.Get(session.solarsystemid2).name"
+gridcheck client act warpTo 40491241  # a player's action, through the client's own services
+gridcheck client click --text undock  # the Undock button's own click handler
+gridcheck client type "rifter" --name quickFilterInputBox
+gridcheck client cmd OpenInventory    # a client command, as its key binding runs it
 gridcheck client stop
 ```
 
@@ -443,8 +447,20 @@ for a token, and starts `exefile.exe /ssoToken=<token> /autoSelectCharacter:<id>
 environment: the `ResFiles` cache beside `tq`, and the gateway as HTTP proxy. The client logs in
 with no login screen and enters the game from character select. It connects to the tree's own game
 port, wherever `gridcheck up` moved it. `--exe`, `EVEJS_CLIENT_EXE`
-or `EVEJS_CLIENT_PATH` choose another client. Use an account of its own: the headless character's
-account must not be logged in by a client at the same time.
+or `EVEJS_CLIENT_PATH` choose another client.
+
+Each client has an account of its own. `launch` refuses a headless pilot's account (any account in
+`state.json`, named pilots included), and the bridge refuses a token, and a token login, for an
+account that already has a session on the server. `gridcheck login` likewise refuses an account a
+client is online on. Several clients can run at once:
+`launch --user e2eclient2 --name "Client Second"` starts a second one, and every other `client`
+command takes `--user` to pick one; with more than one online it must.
+
+`/autoSelectCharacter` works only at the client's first login (`isInitialLogin` in character
+selection). After `act logoff`, `act select <characterID>` enters again. A client started with
+`/ssoToken` doesn't log in again by itself: its own reboot quits instead (`appUtils.CanReboot`).
+A relogin is another `launch`, whose new agent replaces the old one. If a client did reconnect with
+the same token, the bridge would carry its agent over to the new session.
 
 `exefile.exe` hands off to a second process, so the pid `launch` and `status` print is the one the
 agent reports from inside the client, and `stop` ends that one. A client that closes is listed as
@@ -461,9 +477,13 @@ the client, as any client code would.
   contains the value, case-insensitively, with its path. Each node has its absolute rect in UI
   pixels and its state (`normal`, `disabled`, `hidden` or `pickChildren`). Hidden subtrees are skipped
   unless you pass `--hidden`.
-- `screenshot` draws the window from outside with `PrintWindow`, so it works when the window is
-  covered, but not when it's minimized. `--run <id>` saves it in the run's `client/` folder. Use
-  `--out x.jpg` or `--max-width` for a smaller file.
+- `screenshot` has the client save what it last drew (its back buffer, as its own Print Screen
+  does). The client keeps drawing while its window is covered or minimized, so this works then too.
+  It takes about 130 ms of the client's time. When the agent can't answer, it draws the window from
+  outside with `PrintWindow` instead, which works when the window is covered but not when it's
+  minimized. `--source client` or `--source window` uses only one. A picture taken just after an
+  action can still show the frame before it, while a window fades in or out. `--run <id>` saves it
+  in the run's `client/` folder. Use `--out x.jpg` or `--max-width` for a smaller file.
 - `ballpark` lists every ball with a slim item: position, velocity, mode, radius and distance from
   your ship. Docked, there's no ballpark.
 - `diff` reads the client's ballpark and the bridge's grid for the client's character at the same
@@ -476,15 +496,69 @@ the client, as any client code would.
   it's told to record (`--notify OnA,OnB`, default `OnSessionChanged`) and its own failed commands
   in a ring, and sends them to the bridge in batches.
 
+**Driving the client.** Everything below runs inside the client, through the code a player's
+input reaches, so the client's window can stay in the background. Its names were checked against
+the decompiled client (build 3396210); `agent.py` lists them.
+
+- `act <action> [<target>]` does what a player does, through the client's own services, as CCP's
+  own code calls them:
+  - `undock`, and `dock` (the nearest station or structure unless you give one);
+  - `jump` (a gate, or a station or structure: the client picks the action);
+  - `warpTo` (`--range` is the landing distance; the client's default otherwise);
+  - `approach`, `orbit` (`--range`, default 5,000 m) and `keepAtRange` (default 10,000 m);
+  - `stop`;
+  - `lock` and `unlock`;
+  - `activate` and `deactivate` a module (`--module high1`, or its itemID), with a target for a
+    targeted one;
+  - `modules`, which lists the HUD's modules and the locked targets;
+  - `logoff` to character selection, and `select <characterID>` from there.
+
+  The server sees what a real client sends, and its refusal comes back as the error: `warpTo` a
+  station too close to warp to answers "You cannot warp there right now". A refused lock is the
+  exception: the client only shows the player a notice. So `lock` prints where the locks stand,
+  and a dropped one says so.
+- `click` runs the click handler of the node `--path`, `--class`, `--name` and `--text` name, or of
+  the nearest node above it with one; a button's `press` checks it's enabled. `find` says which
+  node that is without clicking. When a button and its own label both match, the button counts.
+  More than one match is an error that lists them; pass `--index` or `--path`.
+- `type "<text>"` sends each character through the client's key input (`uilib._OnChar`), as the
+  window would; `--set` sets the edit's value at once, `--enter` presses enter after. `key <name>`
+  presses one key (enter, escape, tab, backspace, arrows, a-z, 0-9, f1-f12), so the edit and the
+  key bindings see it. Escape opens the settings menu, as it does for a player. Name the edit
+  (`--name quickFilterInputBox`): the client drops its focus while its window is in the
+  background. There's no ctrl, shift or alt, since the client reads those from the real
+  keyboard; `cmd` runs what a combination is bound to.
+- `cmd <name>` runs a client command (`uicore.cmd`) through `ExecuteCommand`, as its key binding
+  would, with the client's own enabled and blocked checks. `cmd` with no name lists them, with
+  label and shortcut; `--filter` narrows the list. Some toggle: `OpenInventory` closes an open
+  inventory. The navigation commands (`CmdWarpToItem` ...) only arm a click on a target; use `act`.
+
+What a click or command starts runs on its own tasklet. The command waits `--wait` seconds
+(default 3) for it. If it hasn't finished by then, it reports "still running": usually it opened a
+dialog and is waiting for an answer. The dialog is named in the reply, and `click` answers it.
+
+`act` waits until the action is done, so there's nothing to poll: in space after `undock`, docked
+after `dock`, in the new system after `jump` (from out of range it approaches the gate first),
+in and out of warp after `warpTo`, following or orbiting the target, the lock held, the module
+on or off, character selection after `logoff`, in game after `select`. Before `undock`, `dock`
+and `jump` it waits out the client's session-change timer, which would otherwise refuse a dock
+in the seconds after an undock. The answer says how long it took, where the client is now and
+the exceptions and notify events it logged meanwhile; `ping` says the same "where" at any time.
+An action that isn't done within `--wait` (default 120 s for `warpTo`, 60 s for the session
+changes, 10 s for the quick ones) exits 1 with the reason, such as "the ship never entered warp".
+`--wait 0` answers as soon as the action has started.
+
 While a client is attached, every watch and every run carries its events beside the server's:
 
 | Kind | When |
 | --- | --- |
 | `CLIENT_EXCEPTION` | The client logged an exception: `type`, `message`, `where` (the last frame), `traceback`, `extra` (the text it was logged with). |
-| `CLIENT_EVENT` | A recorded notify event (`event`, `args`), an agent command that failed (`event: "agent-error"`, `op`, `error`), or `dropped` with a `count` when the client produced events faster than they were sent. |
+| `CLIENT_EVENT` | A recorded notify event (`event`, `args`), an action the agent took (`event: "action"`, `op` such as `act warpTo 40491241`, `args`: finished, still running, done in N s, why it isn't done, or the error), an agent command other than `eval` that failed (`event: "agent-error"`, `op`, `error`), or `dropped` with a `count` when the client produced events faster than they were sent. |
 
 Each line is stamped when the bridge got it; `clientAtMs` is when the client recorded it. So
 `"no CLIENT_EXCEPTION"` is an expectation a scenario can hold while a client is attached.
+A scenario can also launch and drive the client itself; see
+[A real client in a scenario](#a-real-client-in-a-scenario).
 
 ## Player actions
 
@@ -575,7 +649,7 @@ node tools/gridcheck/bin/gridcheck.js run loadout-npc-fight --reuse     # again:
 | `up` | `market` (default `true`), `timeout` (boot, seconds), `profile` (boot with the tick profiler; turns `watch.perf` on), `profileEvery` (ticks per profiler window, default 50), and the plugins' `up` flags. |
 | `setup` | Steps, in order. A login runs first if the list doesn't start with one. |
 | `during` | Steps that run after setup, beside the stop conditions; see [During](#during). Optional. |
-| `watch` | `every` (2 s), `offgridEvery` (5 s), `client` (`diverge` by default; `FX` lines need `"fx"` or `"all"`, `CLIENT` lines `"all"`), `divergeMeters`, `log` (`true`), `grep`, `perf` (`true` for a `PERF` window every 5 s, or seconds). |
+| `watch` | `every` (2 s), `offgridEvery` (5 s), `client` (`diverge` by default; `FX` lines need `"fx"` or `"all"`, `CLIENT` lines `"all"`), `divergeMeters`, `log` (`true`), `grep`, `perf` (`true` for a `PERF` window every 5 s, or seconds), `ballpark` (`true`: each real client's ballpark against the server's grid every 2 s, or seconds; see [A real client in a scenario](#a-real-client-in-a-scenario)), `screenshots` (conditions, and `"stop"`, at which to take a picture of each real client). |
 | `until` | `any`: stop conditions; the first one met stops the run. `timeout`: seconds after setup, required. `grace`: at most this many seconds more after a stop condition, e.g. for the `KILLMAIL` after a `DESTROYED`. Grace ends early once every expectation that isn't a `no` is met, but not before `graceMin` (default 5 s, or all of a shorter grace), which gives a `no DIVERGE` time to open: the watch delivers lines 1.5 s late and a divergence settles over 3 s. Set `graceMin` to `grace` when a `no` expectation needs the whole window. The report says how long grace ran and why it ended. `from`: `"setup"` (default) matches only events after setup ends; `"start"` matches every event since the watch began, for a stop condition that setup itself causes, such as the `GRID` after an undock. |
 | `expect` | Expected observations, as conditions. `"no <condition>"` or `{ "match": ..., "absent": true }` expects none. `{ "match": ..., "note": ... }` adds a note to the report. |
 | `name`, `description` | Default name: the file name. |
@@ -592,6 +666,7 @@ Steps:
 | `{ "wait": 30 }` | Waits that many seconds. Prefer `waitFor` on the event you are waiting for: a `GRID` with the new `systemName` after a teleport, or the first `GRID` after an undock. |
 | `{ "waitFor": "<condition>", "timeout": 300 }` | Waits for an event, seen after the step starts, that matches the condition. Setup fails if none comes before the timeout (default 300 s). |
 | `{ "repeat": [<steps>], "every": 5, "times": 12 }` | Runs its steps a round every `every` seconds, start to start, for `times` rounds; the report shows one step, "12 round(s)". A step that fails in a round fails the repeat, naming the round. In `during`, leave `times` out and it repeats until the run stops. It can't hold another `repeat` or `login`, and in setup its rounds count toward the run's budget. |
+| `"clientLaunch"`, `"clientDiff"`, `{ "clientUi": ... }`, `{ "clientClick": ... }`, `{ "clientAct": "undock" }`, `{ "clientEval": ... }`, `{ "clientScreenshot": "..." }` | A real EVE client; see [A real client in a scenario](#a-real-client-in-a-scenario). |
 | `{ "lock": "nearest npc", "as": "mark" }`, `{ "activate": "weapons", "target": "$mark" }`, `"stop"`, ... | A [player action](#player-actions): `approach`, `orbit`, `keepAtRange`, `warpTo`, `stop`, `lock`, `unlock`, `activate`, `deactivate`, `loadAmmo`, `launchDrones`, `engageDrones`. The value is the target, or the modules or drones; the other arguments are keys (`range`, `target`, `once`, `charge`, `count`, `timeout`). `as` binds the target's item ID, or the drones launched. A refused action fails the step. |
 
 Player actions, and plugin steps that allow it, take `"retry": { "every": 15, "for": 480 }`, which
@@ -626,6 +701,84 @@ A `repeat` without `times` that the stop cuts short shows as `stopped`, with the
 The report gets a "During" table after "Setup", with each step's time, and the timeline marks
 those `STEP` lines `during:`.
 
+### A real client in a scenario
+
+A scenario can start a [real EVE client](#a-real-eve-client), drive it and check what it holds.
+The tree needs the `client-agent` patch and an EVE client, as for `gridcheck client`. The
+headless login still runs first: the watch follows the headless character, and the client is a
+second account beside it. `scenarios/client-undock.json` uses each piece:
+
+```json
+{
+  "world": "fresh",
+  "watch": { "ballpark": true, "screenshots": ["stop"] },
+  "setup": [
+    "clientLaunch",
+    { "clientUi": { "name": "undockButton" }, "timeout": 60 },
+    { "clientAct": "undock" },
+    { "clientDiff": true, "timeout": 60 },
+    { "clientScreenshot": "in space" },
+    { "wait": 15 },
+    { "clientAct": "dock" },
+    { "clientUi": { "name": "undockButton" }, "timeout": 60 }
+  ],
+  "until": { "any": ["CLIENT_BALLPARK"], "from": "start", "timeout": 30, "grace": 5 },
+  "expect": ["CLIENT_BALLPARK ok=true", "no CLIENT_BALL status=missing", "no CLIENT_BALL status=extra",
+    "no CLIENT_EXCEPTION type!=gaierror"]
+}
+```
+
+| Step | Does |
+| --- | --- |
+| `"clientLaunch"` or `{ "clientLaunch": { "user": ..., "name": ... } }` | `gridcheck client launch`, and waits until the client is in game (`timeout`, default 240 s). The account is `e2eclient` unless `user` names another. A client already in game on that account carries on, and the run leaves it up. One the step started is stopped when the run ends, unless `--keep-up`. |
+| `{ "clientUi": <node>, "timeout": 30 }` | Waits until a shown UI node matches: `{ "class", "name", "text", "hidden" }`, each a case-insensitive "contains", or a string for its text. Fails setup if none shows in time. |
+| `{ "clientClick": <node> }` | `gridcheck client click`. The node can also be a `path` from `client ui`, with `index` to pick among several matches. `double: true` double-clicks. |
+| `{ "clientAct": "undock" }` | `gridcheck client act`: `undock`, `dock` (the nearest station unless `target`), `jump`, `warpTo`, `approach`, `orbit`, `keepAtRange`, `stop`, `lock`, `unlock`, `activate`, `deactivate`, `logoff`, `select`. Keys: `target` (an itemID or a `$name`), `range`, `module` (`high1` or an itemID). The step ends when the action is done, as `client act` does; one that isn't done in time fails the step, and so does an error the action raises or a lock the client dropped. A refusal on a tasklet of the client's own is a `CLIENT_EXCEPTION`; `no CLIENT_EXCEPTION type!=gaierror` catches those. |
+| `{ "clientEval": "<python>", "as": "station" }` | `gridcheck client eval`. A Python error fails the step. `as` binds the value when it's an ID or a list of IDs: `{ "clientEval": "session.stationid2", "as": "station" }`, then `{ "clientAct": "dock", "target": "$station" }`. |
+| `{ "clientDiff": true, "timeout": 30 }` | `gridcheck client diff` every 2 s until the client is in space and holds what the server's grid holds, or the timeout. The last diff becomes one `CLIENT_BALLPARK` line. The step passes either way: say `CLIENT_BALLPARK ok=true` in `expect`. `tolerance` is metres, as `--tolerance`. |
+| `{ "clientScreenshot": "in space" }` | A picture of the client, labelled, taken as `client screenshot` takes it. A picture that fails doesn't fail the step; the report says why. |
+
+Each step but `clientLaunch` takes `"user"` to pick the client when several are online.
+`clientClick` takes `settle`, the seconds the client waits for what it started (default 3), and
+`clientAct` takes it as the most seconds to wait for the action to be done (`--wait`'s defaults;
+0 goes on once it has started). Not `wait`, which is a step of its own.
+
+**What the client held.** Two kinds of line compare the client's ballpark with the server's grid
+for the client's own character:
+
+| Kind | From | Fields |
+| --- | --- | --- |
+| `CLIENT_BALLPARK` | a `clientDiff` step | `ok` (both in space, in one system, and nothing missing, extra, moved or in another mode), `inSpace` (the client), `serverInSpace`, `sameSystem`, `server`, `client` and `shared` counts, `missing`, `extra`, `moved`, `modes` counts, `missingIDs`, `extraIDs`, `movedIDs`, `waitedMs` |
+| `CLIENT_BALL` | the ballpark sampler, `"watch": { "ballpark": true }` | `status`, `itemID`, `label`, `typeID`, `typeName`, `distanceMeters`, `lagMs` or `sinceMs` |
+
+The sampler reads every online client's ballpark and the server's grid every 2 s (or the seconds
+`ballpark` gives). Its first sample in space is a baseline. After that, a ball the server lists is
+`held` once the client has it, with `lagMs` the time since the server first listed it, to within
+a sample. Any ball the server has listed for 10 s that the client still lacks is `missing`, once.
+A ball only the client holds for 10 s is `extra`, once; celestials and stations don't count, since
+the client holds the whole system's. Docked, it waits; after a jump, or a warp that brings in a
+mostly new grid, it starts a new baseline. So:
+
+- `CLIENT_BALL itemID=$npc status=held lagMs<=5s`: the client got the NPC within 5 s of the server
+  putting it on its grid.
+- `no CLIENT_BALL status=missing`: no ball stayed on the server's grid 10 s without reaching the
+  client.
+
+`CLIENT_EXCEPTION` and `CLIENT_EVENT` lines come with every watch while a client is attached. The
+retail client logs `gaierror` exceptions at login and at every undock and dock (it can't reach a
+content host), so `no CLIENT_EXCEPTION type!=gaierror` allows those.
+
+A real client run on a server that's already up starts wherever the client's character was left.
+`client-undock` expects it docked, as a fresh world has it; when a run fails at its first
+`clientUi`, `gridcheck client act dock` puts it back.
+
+**Screenshots.** `"watch": { "screenshots": [...] }` takes up to 20 conditions, and `"stop"`.
+Each condition takes a picture of every online client at its first match; `"stop"` takes one when
+the run stops, a failed setup included. Pictures are JPEGs at most 1,600 px wide, in the run's
+`client/` folder, and each is a `SCREENSHOT` line on the timeline. The report lists them under
+"Client screenshots", with each picture embedded. The GUI's Runs tab shows them among the tactical
+frames, in time order; a click seeks the replay there.
+
 ### Conditions
 
 A condition names an event kind, then field tests, with the names `gridcheck watch --json` writes:
@@ -659,7 +812,8 @@ SYSTEM toSystemName=Jita t<=5min
 Each condition is checked when the scenario loads, before anything boots. The check refuses an
 unknown kind or field and lists the fields the kind has. It also refuses an operator the field's
 type can't take, a `$name` no earlier step binds, a `CLIENT` condition without
-`"client": "all"`, an `FX` one without `"fx"` or `"all"`, and waits that don't fit in one bridge
+`"client": "all"`, an `FX` one without `"fx"` or `"all"`, a `CLIENT_BALL` one without
+`"ballpark"`, and waits that don't fit in one bridge
 watch (3,000 s). It also checks each action's target, modules and arguments. `--check` prints the
 checked scenario.
 
@@ -713,7 +867,9 @@ didn't shorten it.
 - `timeline.jsonl`: every event, as `gridcheck watch` writes it, plus the runner's `STEP` and `STOP`,
   and the `POS` samples the frames are drawn from.
 - `frames/*.svg`: the tactical frames, below.
-- `result.json`: the same verdict for scripts, with the frames and the commit the run ran on.
+- `client/*.jpg`: a real client's screenshots, when the scenario took any.
+- `result.json`: the same verdict for scripts, with the frames, the screenshots and the commit the
+  run ran on.
 - `scenario.json`: the file as it ran.
 
 | Exit | Means |
@@ -761,6 +917,7 @@ They start from `fresh` or the `starter` recipe, so they run in any tree.
 | `concord-highsec` | CONCORD in high sec | `teleport Rens`, `/naughty` | `DESTROYED self` |
 | `loadout-npc-fight` | A fitted ship's drones and guns | `/npc 2` Blood Raider frigates; launch and engage drones, lock, orbit, fire | the locked rat destroyed, then 10 s |
 | `perf-npc-load` | How the tick copes with a fight, with the profiler on | `undock`, 15 s of baseline, `/npctest2 20` | 60 s of the fight |
+| `client-undock` | A real EVE client: what its ballpark holds after an undock, and its exceptions. Needs the `client-agent` patch and a client | launch the client, undock, diff, a screenshot, dock | the diff's `CLIENT_BALLPARK` |
 
 On the unpacked stock zip with the three patches applied, `starter` built in 18 s and
 `loadout-npc-fight` passed 8 of 8 in 55 s, boot and shutdown included.

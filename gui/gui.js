@@ -150,7 +150,8 @@
 
   // ---------- a small Markdown reader for report.md ----------
 
-  const FRAME_LINK = /^frames\/([A-Za-z0-9][A-Za-z0-9._-]*\.svg)$/;
+  // A run's tactical frame or client screenshot, as report.md links them.
+  const FRAME_LINK = /^(frames\/[A-Za-z0-9][A-Za-z0-9._-]*\.svg|client\/[A-Za-z0-9][A-Za-z0-9._-]*\.(?:png|jpe?g))$/i;
 
   function inline(text, frames) {
     const out = [];
