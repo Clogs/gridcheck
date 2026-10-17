@@ -799,7 +799,7 @@ test("client steps are checked when the scenario loads", () => {
   } catch (error) {
     text = error.problems.join("\n");
   }
-  assert.match(text, /setup\[0\]\.clientLaunch\.nme: unknown key; user or name/);
+  assert.match(text, /setup\[0\]\.clientLaunch\.nme: unknown key; user, name, exe/);
   assert.match(text, /setup\[1\]\.clientUi\.path: unknown key; a node is named by class, name, text, hidden/);
   assert.match(text, /setup\[1\]: clientUi needs a node/);
   assert.match(text, /setup\[2\]: clientClick needs a node: its class, name, text or path/);

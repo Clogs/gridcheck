@@ -238,6 +238,11 @@ const CLI_ARGS = {
     flag("user", p.user);
     flag("name", p.name);
     flag("exe", p.exe);
+    flag("resfiles", p.resfiles);
+    flag("resfileserver", p.resfileserver);
+    flag("settings-profile", p.settingsProfile);
+    flag("graphics", p.graphics);
+    flag("no-console", p.noConsole);
     flag("wait", p.wait);
     args.push("--", "launch");
     return args;
@@ -666,7 +671,12 @@ const TOOLS = [
       user: str("Account name (default e2eclient). Not the headless character's account."),
       name: str("Character name, for a new character (default Client Observer)."),
       exe: str("exefile.exe to start (default the one the tree's launcher config names)."),
-      wait: int("Seconds to wait for the client to reach the game (default 240; 0 returns at once).", { minimum: 0 }),
+      resfiles: str("The client's resource cache folder (default ResFiles beside its tq folder)."),
+      resfileserver: str("Where the client fetches resources (default the tree's gateway /resfiles/)."),
+      settingsProfile: str("A client settings profile of its own, apart from a player's: 1 to 64 letters, digits, _ or -."),
+      graphics: str("The renderer.", { enum: ["dx11", "dx12"] }),
+      noConsole: bool("No console window: the client's output goes to a file under _local/gridcheck/client/, and a known startup failure is reported at once."),
+      wait: int("Seconds to wait for the client to reach the game (default 240; 0 returns at once).", { minimum: 0, maximum: 600 }),
     }),
     run: simple("client_launch"),
   },

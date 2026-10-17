@@ -18,7 +18,7 @@ const { formatOffset, formatTimelineEvent } = require("./timeline");
 const actionTools = require("./actions");
 const loadoutTools = require("./loadout");
 const perfTools = require("./perf");
-const { parseKey } = require("./client");
+const { launchSwitches, parseKey } = require("./client");
 const { validateCheck } = require("./clientUi");
 
 const SCENARIO_DIR = path.join(__dirname, "..", "scenarios");
@@ -89,7 +89,7 @@ const CORE_STEP_KEYS = {
 };
 // What a step keeps that is not a $value to bind at run time.
 const STEP_OWN_KEYS = new Set(["type", "note", "as", "retry", "implicit", "action", "condition", "seconds", "plugin",
-  "steps", "every", "times", "perf", "code", "node", "check", "text"]);
+  "steps", "every", "times", "perf", "code", "node", "check", "text", "launch"]);
 const PERF_LABEL = /^[A-Za-z0-9][\w .:-]{0,39}$/;
 const DEFAULT_WAIT_FOR_SECONDS = 300;
 // The client's own actions (agent.py op_act), and those that need a target.
@@ -97,6 +97,7 @@ const CLIENT_ACTS = ["undock", "dock", "jump", "warpTo", "approach", "orbit", "k
   "activate", "deactivate", "logoff", "select"];
 const CLIENT_ACTS_TARGETED = new Set(["jump", "warpTo", "approach", "orbit", "keepAtRange", "lock", "unlock", "select"]);
 const NODE_KEYS = ["class", "name", "text", "path", "index", "hidden"];
+const CLIENT_LAUNCH_KEYS = ["user", "name", "exe", "resfiles", "resfileserver", "settingsProfile", "graphics", "noConsole"];
 const DEFAULT_CLIENT_LAUNCH_SECONDS = 240;
 const DEFAULT_CLIENT_UI_SECONDS = 30;
 const DEFAULT_CLIENT_CHECK_UI_SECONDS = 15;
@@ -566,9 +567,26 @@ function validateScenario(raw, { source = "scenario", defaultName = null, worldE
           if (inRepeat) problem(where, "clientLaunch can't be repeated");
           if (value !== true && !isObject(value)) problem(where, 'clientLaunch: true, or { "user": ..., "name": ... }');
           if (isObject(value)) {
-            for (const key of Object.keys(value)) if (!["user", "name"].includes(key)) problem(`${where}.clientLaunch.${key}`, "unknown key; user or name");
+            for (const key of Object.keys(value)) {
+              if (!CLIENT_LAUNCH_KEYS.includes(key)) problem(`${where}.clientLaunch.${key}`, `unknown key; ${CLIENT_LAUNCH_KEYS.join(", ")}`);
+            }
             if (value.user !== undefined) step.user = String(value.user);
             if (value.name !== undefined) step.name = String(value.name);
+            // The rest are client launch's flags, as the CLI spells them.
+            const launch = {};
+            for (const [key, flag] of [["exe", "exe"], ["resfiles", "resfiles"], ["resfileserver", "resfileserver"],
+              ["settingsProfile", "settings-profile"], ["graphics", "graphics"]]) {
+              if (value[key] === undefined) continue;
+              if (typeof value[key] !== "string" || !value[key]) problem(`${where}.clientLaunch.${key}`, "text");
+              else launch[flag] = value[key];
+            }
+            if (value.noConsole !== undefined) {
+              if (typeof value.noConsole !== "boolean") problem(`${where}.clientLaunch.noConsole`, "true or false");
+              else launch["no-console"] = value.noConsole;
+            }
+            const switches = launchSwitches({ settingsProfile: value.settingsProfile, graphics: value.graphics });
+            if (switches.error) problem(`${where}.clientLaunch`, switches.error);
+            if (Object.keys(launch).length) step.launch = launch;
           }
           clientSeconds(step, DEFAULT_CLIENT_LAUNCH_SECONDS, 600, "seconds to wait for the client to enter the game");
           break;

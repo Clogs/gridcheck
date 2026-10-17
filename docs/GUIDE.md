@@ -450,6 +450,15 @@ with no login screen and enters the game from character select. It connects to t
 port, wherever `gridcheck up` moved it. `--exe`, `EVEJS_CLIENT_EXE`
 or `EVEJS_CLIENT_PATH` choose another client.
 
+`--settings-profile <name>` gives the client a settings profile of its own, so a test's window
+layout and preferences stay apart from a player's. `--graphics dx11` or `dx12` picks the renderer.
+`--no-console` starts it without its console window: its output goes to
+`_local/gridcheck/client/launch-<user>.log`, and a known startup failure (no graphics adapter, a
+missing DirectX helper, a renderer that won't load) ends the wait at once instead of after
+`--wait`. That file can hold the client's command line, token included, so don't share it as is.
+In either mode, a launcher that exits with an error ends the wait at once, and a client that never
+attached is stopped.
+
 Each client has an account of its own. `launch` refuses a headless pilot's account (any account in
 `state.json`, named pilots included), and the bridge refuses a token, and a token login, for an
 account that already has a session on the server. `gridcheck login` likewise refuses an account a
@@ -766,7 +775,7 @@ second account beside it. `scenarios/client-undock.json` uses each piece:
 
 | Step | Does |
 | --- | --- |
-| `"clientLaunch"` or `{ "clientLaunch": { "user": ..., "name": ... } }` | `gridcheck client launch`, and waits until the client is in game (`timeout`, default 240 s). The account is `e2eclient` unless `user` names another. A client already in game on that account carries on, and the run leaves it up. One the step started is stopped when the run ends, unless `--keep-up`. |
+| `"clientLaunch"` or `{ "clientLaunch": { "user": ..., "name": ... } }` | `gridcheck client launch`, and waits until the client is in game (`timeout`, default 240 s). The account is `e2eclient` unless `user` names another. It also takes `exe`, `resfiles`, `resfileserver`, `settingsProfile`, `graphics` and `noConsole`, as launch's flags. A client already in game on that account carries on, and the run leaves it up. One the step started is stopped when the run ends, unless `--keep-up`. |
 | `{ "clientUi": <node>, "timeout": 30 }` | Waits until a shown UI node matches: `{ "class", "name", "text", "hidden" }`, each a case-insensitive "contains", or a string for its text. Fails setup if none shows in time. |
 | `{ "clientClick": <node> }` | `gridcheck client click`. The node can also be a `path` from `client ui`, with `index` to pick among several matches. `double: true` double-clicks. |
 | `{ "clientAct": "undock" }` | `gridcheck client act`: `undock`, `dock` (the nearest station unless `target`), `jump`, `warpTo`, `approach`, `orbit`, `keepAtRange`, `stop`, `lock`, `unlock`, `activate`, `deactivate`, `logoff`, `select`. Keys: `target` (an itemID or a `$name`), `range`, `module` (`high1` or an itemID). The step ends when the action is done, as `client act` does; one that isn't done in time fails the step, and so does an error the action raises or a lock the client dropped. A refusal on a tasklet of the client's own is a `CLIENT_EXCEPTION`; `no CLIENT_EXCEPTION` catches those. |

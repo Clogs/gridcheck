@@ -94,7 +94,7 @@ const AUTO = MODE === "auto";
 
 const BOOLEAN_FLAGS = new Set(["all", "json", "any-pid", "force", "fresh", "no-market", "no-log", "help",
   "check", "keep-up", "reuse", "positions", "once", "serve", "offline", "dry-run", "profile", "perf", "now", "detach", "mcp", "save", "hidden",
-  "double", "set", "enter", "list", "any-build", "assert",
+  "double", "set", "enter", "list", "any-build", "assert", "no-console",
   ...REGISTRY.booleanFlags]);
 
 class CliError extends Error {}
@@ -931,6 +931,13 @@ async function clientLaunch(handshake, flags) {
   }
   const game = handshake.ports && handshake.ports.game;
   if (!game) throw new CliError("the bridge handshake names no game port; `gridcheck status` says whether the server is up");
+  const noConsole = flags["no-console"] === true;
+  const switches = clientTools.launchSwitches({ noConsole,
+    settingsProfile: flags["settings-profile"] === undefined ? undefined : String(flags["settings-profile"]),
+    graphics: flags.graphics === undefined ? undefined : String(flags.graphics) });
+  if (switches.error) throw new CliError(switches.error);
+  const waitSeconds = flags.wait === undefined ? 240 : Number(flags.wait);
+  if (!(waitSeconds >= 0 && waitSeconds <= 600)) throw new CliError("--wait takes seconds from 0 through 600");
   const exe = clientExe(flags);
   const resfiles = flags.resfiles ? path.resolve(String(flags.resfiles)) : clientTools.defaultResFiles(exe);
   if (!fs.existsSync(resfiles)) throw new CliError(`no resource cache at ${resfiles}; pass --resfiles <ResFiles folder>`);
@@ -941,19 +948,31 @@ async function clientLaunch(handshake, flags) {
   const gateway = handshake.ports && handshake.ports.gateway;
   const resfileserver = String(flags.resfileserver || (gateway ? `http://127.0.0.1:${gateway}/resfiles/` : "http://127.0.0.1:26002/resfiles/"));
   const args = ["/noCrashReportUpload", `/resfileserver=${resfileserver}`, `/port:${game}`,
-    `/ssoToken=${minted.token}`, `/autoSelectCharacter:${characterID}`];
+    `/ssoToken=${minted.token}`, `/autoSelectCharacter:${characterID}`, ...switches.args];
+  // The client's own output, with /noconsole; it can hold its command line, token included.
+  const logfile = noConsole ? path.join(E2E_DIR, "client", `launch-${username.replace(/[^A-Za-z0-9_-]+/g, "_")}.log`) : null;
   const startedAtMs = Date.now();
-  clientTools.startClient({ exe, args, env: clientTools.clientEnvironment({ resfiles, gatewayPort: gateway }) });
-  console.log(`started the EVE client as ${username} (account ${accountID}), entering as character ${characterID}`);
-  const waitSeconds = flags.wait === undefined ? 240 : Number(flags.wait);
+  const child = clientTools.startClient({ exe, args, logfile, env: clientTools.clientEnvironment({ resfiles, gatewayPort: gateway }) });
+  console.log(`started the EVE client as ${username} (account ${accountID}), entering as character ${characterID}` +
+    `${logfile ? `; its output goes to ${relativePath(logfile)}` : ""}`);
   if (!(waitSeconds > 0)) return { username, accountID, characterID, pid: null, build: null, seconds: 0 };
+  const stopLauncher = () => {
+    if (child.gridcheckLaunch && !child.gridcheckLaunch.exited && child.pid) child.kill();
+  };
   let attached = false;
   let pidShown = false;
   while (Date.now() - startedAtMs < waitSeconds * 1000) {
     await sleep(2000);
     const listed = await callBridge(handshake, "GET", "/client/agents");
     const agent = (listed.agents || []).find((row) => row.username === username && row.online && row.attachedAtMs >= startedAtMs);
-    if (!agent) continue;
+    if (!agent) {
+      const failed = attached ? null : clientTools.launchFailure(child.gridcheckLaunch, logfile);
+      if (failed) {
+        stopLauncher();
+        throw new CliError(`${clientTools.redactSwitches(failed, args)}${logfile ? `. Its output: ${relativePath(logfile)}` : ""}`);
+      }
+      continue;
+    }
     if (!attached) {
       attached = true;
       console.log(`client agent attached after ${Math.round((Date.now() - startedAtMs) / 1000)} s`);
@@ -974,9 +993,11 @@ async function clientLaunch(handshake, flags) {
       return { username, accountID, characterID, pid: agent.pid || null, build: agent.build || null, seconds };
     }
   }
+  if (!attached) stopLauncher();
   throw new CliError(`${attached ? "the client attached but didn't enter the game" : "no client agent attached"} within ${waitSeconds} s. ` +
-    "`gridcheck log --grep \"client\"` shows whether the server saw the token login. The client writes to its own console " +
-    "window (\"[CCP] ... pid=N\"); `gridcheck client console --pid N` reads it.");
+    "`gridcheck log --grep \"client\"` shows whether the server saw the token login. " +
+    (logfile ? `The client's output is in ${relativePath(logfile)}.`
+      : "The client writes to its own console window (\"[CCP] ... pid=N\"); `gridcheck client console --pid N` reads it."));
 }
 
 function printClientUi(value) {
@@ -1611,7 +1632,7 @@ async function runClientLaunch(step) {
   if (online) {
     return { ok: true, text: `${username} was already in game as character ${online.characterID}, pid ${online.pid || "?"}; the run leaves it up` };
   }
-  const launched = await clientLaunch(handshake, { user: username, name: step.name, wait: step.seconds });
+  const launched = await clientLaunch(handshake, { ...step.launch, user: username, name: step.name, wait: step.seconds });
   if (activeRun && !launched.already) activeRun.launched.push(launched);
   return { ok: true, text: `${username} in game as character ${launched.characterID} after ${launched.seconds} s, pid ${launched.pid || "?"}` };
 }
@@ -3379,7 +3400,8 @@ const CORE_COMMANDS = {
   login: { usage: ["login [--user e2eagent] [--name \"Agent Observer\"]"], run: (_positionals, flags) => cmdLogin(flags) },
   logout: { usage: ["logout"], run: () => cmdLogout() },
   client: {
-    usage: ["client launch [--user e2eclient] [--name \"...\"] [--exe <exefile.exe>] [--resfiles <folder>] [--resfileserver <url>] [--wait 240]",
+    usage: ["client launch [--user e2eclient] [--name \"...\"] [--exe <exefile.exe>] [--resfiles <folder>] [--resfileserver <url>] [--wait 240]" +
+      " [--settings-profile <name>] [--graphics dx11|dx12] [--no-console]",
       "client status [--json] | client stop [--user] | client ping [--user] | client eval \"<python>\" | --file <py> [--assert] [--out <json>] [--user] [--timeout 15] [--json]",
       "client ui-state [--limit 10000] [--out <json>] | client check-ui --spec <json> | --file <json> [--wait 0] [--stable <ms>] [--out <json>] [--user]",
       "client console [--lines 60] [--grep <regex>] [--pid N] | client ui [--class <text>] [--name <text>] [--text <text>] [--depth N] [--hidden] [--limit N] [--json]",

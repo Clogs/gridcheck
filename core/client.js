@@ -69,12 +69,101 @@ function clientEnvironment({ env = process.env, resfiles, gatewayPort }) {
 
 // The client opens its own console ("[CCP] ... pid=N") and writes there with
 // WriteConsole, so redirecting its stdio catches nothing (Play.bat's stdio logs
-// stay empty too); readConsole reads that console instead. The pid is the
+// stay empty too); readConsole reads that console instead. Started with
+// /noconsole it writes to stdout, which logfile then holds. The pid is the
 // launcher's: exefile.exe hands off to a second process, whose pid the agent reports.
-function startClient({ exe, args, env, spawnImpl = spawn }) {
-  const child = spawnImpl(exe, args, { cwd: path.dirname(exe), env, detached: true, stdio: "ignore" });
+function startClient({ exe, args, env, logfile = null, spawnImpl = spawn }) {
+  // With /noconsole the client writes to stdout. It gets the file itself, not a
+  // pipe, so its writes don't fail once the CLI that started it has exited.
+  let fd = null;
+  if (logfile) {
+    fs.mkdirSync(path.dirname(logfile), { recursive: true });
+    fd = fs.openSync(logfile, "w");
+  }
+  let child;
+  try {
+    child = spawnImpl(exe, args, { cwd: path.dirname(exe), env, detached: true, stdio: fd === null ? "ignore" : ["ignore", fd, fd] });
+  } finally {
+    if (fd !== null) fs.closeSync(fd);
+  }
+  const launch = { exited: false, exitCode: null, error: null };
+  child.gridcheckLaunch = launch;
+  if (typeof child.once === "function") {
+    child.once("error", (error) => { launch.error = error.message; });
+    child.once("exit", (code) => {
+      launch.exited = true;
+      launch.exitCode = code;
+    });
+  }
   child.unref();
   return child;
+}
+
+const SETTINGS_PROFILE = /^[A-Za-z0-9_-]{1,64}$/;
+const GRAPHICS = ["dx11", "dx12"];
+
+// launch's own client switches, each only when asked for: a settings profile
+// of its own (the client's preferences, apart from a player's), the renderer,
+// and /noconsole. -> { args } or { error }.
+function launchSwitches({ settingsProfile, graphics, noConsole = false } = {}) {
+  if (settingsProfile !== undefined && !(typeof settingsProfile === "string" && SETTINGS_PROFILE.test(settingsProfile))) {
+    return { error: "--settings-profile takes 1 to 64 letters, digits, _ or -" };
+  }
+  if (graphics !== undefined && !GRAPHICS.includes(graphics)) return { error: `--graphics takes ${GRAPHICS.join(" or ")}` };
+  return { args: [
+    ...(settingsProfile === undefined ? [] : [`/settingsprofile=${settingsProfile}`]),
+    ...(graphics === undefined ? [] : [`/triPlatform=${graphics}`]),
+    ...(noConsole ? ["/noconsole"] : []),
+  ] };
+}
+
+// What the client printed before it reached login, when it is one of the ways
+// it fails to start: why, or null.
+function diagnoseStartup(text) {
+  if (/NoAdaptersFoundError/i.test(text)) return "the client found no graphics adapter it can use, so it never reached login";
+  if (/DirectXRedist.*(?:not recognized|not found)|not recognized[^\n]*DirectXRedist/i.test(text)) {
+    return "the client's graphics check ran DirectXRedist, which is missing, so it never reached login";
+  }
+  if (/Failed to import _trinity|ImportError.*(?:trinity|DLL)/i.test(text)) return "the client couldn't load its renderer before login";
+  return null;
+}
+
+// Each token or login switch's value as [redacted].
+function redactSwitches(text, args = []) {
+  let out = String(text);
+  for (const arg of args) {
+    const match = /^\/(?:ssoToken|refreshToken|login)[=:](.+)$/i.exec(arg);
+    if (match) out = out.split(match[1]).join("[redacted]");
+  }
+  return out.replace(/(\/(?:ssoToken|refreshToken|login)[=:])[^\s"']+/gi, "$1[redacted]");
+}
+
+// The end of a file, at most bytes of it; "" when there's none.
+function readTail(file, bytes = 64 * 1024) {
+  let fd;
+  try {
+    fd = fs.openSync(file, "r");
+    const size = fs.fstatSync(fd).size;
+    const buffer = Buffer.alloc(Math.min(size, bytes));
+    fs.readSync(fd, buffer, 0, buffer.length, size - buffer.length);
+    return buffer.toString("utf8");
+  } catch (_error) {
+    return "";
+  } finally {
+    if (fd !== undefined) fs.closeSync(fd);
+  }
+}
+
+// Why a launch that no agent has attached from yet won't: the spawn failed,
+// the client printed a known startup failure, or the launcher exited non-zero
+// (zero is its hand-off to the real client). Null while it may still come up.
+function launchFailure(launch, logfile = null) {
+  if (!launch) return null;
+  if (launch.error) return `the client didn't start: ${launch.error}`;
+  const diagnosed = logfile ? diagnoseStartup(readTail(logfile)) : null;
+  if (diagnosed) return diagnosed;
+  if (launch.exited && launch.exitCode !== 0 && launch.exitCode !== null) return `the client's launcher exited with code ${launch.exitCode}`;
+  return null;
 }
 
 // Attaches to the pid's console and reads its screen buffer up to the cursor.
@@ -544,11 +633,16 @@ module.exports = {
   clientErrorText,
   createBallparkSampler,
   defaultResFiles,
+  diagnoseStartup,
   diffBallpark,
   findClientExe,
+  launchFailure,
+  launchSwitches,
   nodeArgs,
   parseKey,
   readConsole,
+  readTail,
+  redactSwitches,
   repairNodePath,
   startClient,
 };
