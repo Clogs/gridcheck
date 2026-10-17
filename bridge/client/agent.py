@@ -29,7 +29,10 @@
 #   uicore.registry GetWindows(), GetModalWindow(), GetFocus(), SetFocus(item)
 #                                        carbonui/services/registry.py
 #   nodes: name, display, state, children, text, caption, GetAbsolute(), IsEnabled(),
-#          HasEventHandler(name), OnClick, OnDblClick     carbonui/primitives/base.py
+#          HasEventHandler(name), OnClick, OnDblClick, destroyed     carbonui/primitives/base.py
+#   opacity                              carbonui/primitives/container.py, sprite.py
+#   panel IsFullscreen()                 eve/client/script/ui/shared/mapView/dockPanel.py
+#   scene, camera                        eve/client/script/ui/control/scenecontainer.py
 #   Button.press() (checks enabled)      carbonui/control/button.py
 #   window windowID, IsMinimized()       carbonui/control/window.py
 #   edits SetValue(text), GetText()      carbonui/control/singlelineedits/baseSingleLineEdit.py, edit.py
@@ -62,6 +65,7 @@ import ast
 import collections
 import json
 import os
+import sys
 import time
 import traceback
 
@@ -73,7 +77,7 @@ try:
 except ImportError:
     import builtins
 
-VERSION = 7
+VERSION = 8
 # The build the client names above were checked against. Ops that use them
 # refuse on another build unless the command passes anyBuild; these don't.
 CHECKED_BUILD = 3396210
@@ -531,6 +535,23 @@ def type_name(typeID):
         return None
 
 
+class EnforceAssertions(ast.NodeTransformer):
+    """The client runs Python optimized, which compiles assert away. Eval code
+    gets each assert rewritten as `if not test: raise AssertionError(msg)`."""
+
+    def visit_Assert(self, node):
+        call = ast.Call(func=ast.Name(id='AssertionError', ctx=ast.Load()),
+                        args=[node.msg] if node.msg is not None else [], keywords=[])
+        if sys.version_info[0] < 3:
+            call.starargs = None
+            call.kwargs = None
+            raised = ast.Raise(type=call, inst=None, tback=None)
+        else:
+            raised = ast.Raise(exc=call, cause=None)
+        check = ast.If(test=ast.UnaryOp(op=ast.Not(), operand=node.test), body=[raised], orelse=[])
+        return ast.copy_location(check, node)
+
+
 class Agent(object):
     __notifyevents__ = ['OnGridcheckClient']
 
@@ -630,7 +651,11 @@ class Agent(object):
     # whatever they leave in `result`. Names persist between calls; sm, session,
     # uicore, agent, blue and uthread are always current.
     def op_eval(self, args):
-        code = str(args.get('code') or '')
+        code = args.get('code') or ''
+        if not isinstance(code, TEXT):
+            raise ValueError('eval code must be text')
+        if isinstance(code, UNICODE) and sys.version_info[0] < 3:
+            code = code.encode('utf8')
         namespace = self.namespace
         namespace['sm'] = self.sm
         namespace['session'] = getattr(builtins, 'session', None)
@@ -647,7 +672,9 @@ class Agent(object):
         else:
             namespace.pop('result', None)
             tree = ast.parse(code, '<gridcheck-eval>', 'exec')
-            last = tree.body[-1] if tree.body and isinstance(tree.body[-1], ast.Expr) else None
+            if sys.flags.optimize:
+                tree = ast.fix_missing_locations(EnforceAssertions().visit(tree))
+            last =tree.body[-1] if tree.body and isinstance(tree.body[-1], ast.Expr) else None
             if last is not None:
                 tree.body = tree.body[:-1]
             eval(compile(tree, '<gridcheck-eval>', 'exec'), namespace)
@@ -661,6 +688,63 @@ class Agent(object):
             'repr': text[:REPR_LIMIT],
             'truncated': len(text) > REPR_LIMIT,
             'json': safe if jsonable(safe) else None,
+        }
+
+    # args: {"limit"}. Every node under the desktop, hidden ones too, flat, with
+    # what check-ui asserts: shown and enabled counting its ancestors, opacity,
+    # full screen, a scene. A scene is structure: it doesn't prove a frame was drawn.
+    def op_ui_state(self, args):
+        started = time.time()
+        uicore, desktop = self.desktop()
+        limit = bounded(args.get('limit'), 10000, 1, 20000)
+        registry = getattr(uicore, 'registry', None)
+        focus = attempt(lambda: registry.GetFocus())
+        modal = attempt(lambda: registry.GetModalWindow())
+        nodes = []
+        by_id = {}
+        truncated = False
+        for node, here, chain in walk_nodes(desktop, True):
+            if len(nodes) >= limit:
+                truncated = True
+                break
+            info = node_info(node)
+            info['uid'] = str(id(node))
+            info['path'] = here
+            info['parentUID'] = str(id(chain[-1])) if chain else None
+            line = chain + (node,)
+            info['effectiveDisplay'] = all(
+                attempt(lambda n=n: bool(n.display), False) and attempt(lambda n=n: n.state) != 2
+                and not attempt(lambda n=n: n.destroyed, False) for n in line)
+            # A pickChildren ancestor needn't take input itself; only a disabled one blocks its children.
+            info['effectiveEnabled'] = (info['effectiveDisplay'] and info['enabled'] is not False
+                                        and all(attempt(lambda n=n: n.state) != 1 for n in line))
+            info['opacity'] = attempt(lambda: float(node.opacity))
+            info['fullscreen'] = attempt(lambda: bool(node.IsFullscreen()))
+            scene = attempt(lambda: node.scene)
+            info['scenePresent'] = attempt(lambda: node.scene is not None)
+            info['sceneUID'] = str(id(scene)) if scene is not None else None
+            info['cameraPresent'] = attempt(lambda: node.camera is not None)
+            nodes.append(info)
+            by_id[id(node)] = info
+
+        def outside(node):
+            if node is None:
+                return None
+            info = dict(by_id.get(id(node)) or node_info(node))
+            info['uid'] = str(id(node))
+            return info
+        return {
+            'schema': 1,
+            'nodes': nodes,
+            'truncated': truncated,
+            'desktop': node_info(desktop),
+            'focus': outside(focus),
+            'modal': outside(modal),
+            'windows': [window_info(window) for window in attempt(lambda: registry.GetWindows(), []) or []],
+            'session': session_snapshot(getattr(builtins, 'session', None)),
+            'agentVersion': VERSION,
+            'checkedBuild': CHECKED_BUILD,
+            'sampleMs': max(0, int((time.time() - started) * 1000)),
         }
 
     # args: {"depth", "cls", "name", "text", "hidden", "limit"}. Without a filter,

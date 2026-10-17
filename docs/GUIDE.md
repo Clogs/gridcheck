@@ -435,6 +435,7 @@ gridcheck client diff              # that ballpark against the server's grid for
 gridcheck client events            # exceptions and notify events the client recorded
 gridcheck client console           # the end of the client's own "[CCP]" console window
 gridcheck client eval "cfg.evelocations.Get(session.solarsystemid2).name"
+gridcheck client check-ui --spec '{"selector":{"name":"undockButton"}}' --wait 30   # exits 1 unless it holds
 gridcheck client act warpTo 40491241  # a player's action, through the client's own services
 gridcheck client click --text undock  # the Undock button's own click handler
 gridcheck client type "rifter" --name quickFilterInputBox
@@ -495,6 +496,42 @@ the client, as any client code would.
   passes through, unhandled tasklet errors included. It keeps those exceptions, the notify events
   it's told to record (`--notify OnA,OnB`, default `OnSessionChanged`) and its own failed commands
   in a ring, and sends them to the bridge in batches.
+- `eval` runs Python and prints the value: an expression's, else the last statement's if it's an
+  expression, else what the code leaves in `result`. `--file probe.py` reads the code from a file
+  (at most 256 KiB), `--out x.json` saves the answer, and `--assert` exits 1 unless the value is
+  exactly `True` (`1`, `None` and `False` fail). The client runs Python optimized, which compiles
+  `assert` away, so the agent rewrites each `assert` in eval code into an `if ...: raise
+  AssertionError`. That covers eval code only; a module the code imports keeps the client's
+  optimization. Run `client eval "assert False"` once on a new client: it must fail.
+
+**Checking the UI.** `ui` is for finding a node; `ui-state` and `check-ui` are for asserting on
+one. `ui-state` lists every node under the desktop, hidden ones too, flat: its path, rect, whether
+it's shown and enabled counting its ancestors, opacity, whether it's a full-screen panel
+(`IsFullscreen`), whether it holds a 3D scene, and which node has focus and which is the modal
+window. `--out x.json` saves it; `--limit` (default 10,000, at most 20,000) caps the nodes.
+
+`check-ui` takes a check as `--spec '<json>'` or `--file check.json` and exits 1 unless it holds:
+
+```json
+{ "selector": { "name": "myModPanel", "exact": true }, "count": 1, "fullscreen": true,
+  "withinDesktop": true, "minWidth": 800, "opacityMin": 1 }
+```
+
+| Key | Holds when |
+| --- | --- |
+| `selector` | Names the nodes: `path` (exact), `cls`, `name`, `text` (each contains, case-insensitive; `"exact": true` makes them exact). Every key given must match. |
+| `count` | Exactly this many nodes match (default 1). Two matches fail a one-node check. |
+| `visible` | Default `true`: only shown nodes count, a node and every ancestor displayed. `false` counts hidden ones, `"any"` both. |
+| `enabled` | Shown, not disabled, and no ancestor disabled. |
+| `focused`, `modal` | The node is (or isn't) the one with focus, or the modal window. |
+| `fullscreen`, `scene` | The node's `IsFullscreen()`; whether it holds a 3D scene. A scene doesn't prove it was drawn: take a screenshot for that. |
+| `minWidth`, `minHeight`, `withinDesktop` | Its rect, in UI pixels. Unknown geometry fails. |
+| `opacityMin`, `opacityMax` | The node's own opacity, 0 to 1, not its ancestors'. |
+
+`--wait <s>` (up to 300) reads again every 250 ms until the check holds; `--stable <ms>` also needs
+it to keep holding that long, on the same character and the same nodes. A state cut short at
+`--limit` fails the check, since it can't show a count or an absence. To check a UI is gone, not
+just hidden, use `"count": 0, "visible": "any"`.
 
 **Driving the client.** Everything below runs inside the client, through the code a player's
 input reaches, so the client's window can stay in the background. Its names were checked against
@@ -666,7 +703,7 @@ Steps:
 | `{ "wait": 30 }` | Waits that many seconds. Prefer `waitFor` on the event you are waiting for: a `GRID` with the new `systemName` after a teleport, or the first `GRID` after an undock. |
 | `{ "waitFor": "<condition>", "timeout": 300 }` | Waits for an event, seen after the step starts, that matches the condition. Setup fails if none comes before the timeout (default 300 s). |
 | `{ "repeat": [<steps>], "every": 5, "times": 12 }` | Runs its steps a round every `every` seconds, start to start, for `times` rounds; the report shows one step, "12 round(s)". A step that fails in a round fails the repeat, naming the round. In `during`, leave `times` out and it repeats until the run stops. It can't hold another `repeat` or `login`, and in setup its rounds count toward the run's budget. |
-| `"clientLaunch"`, `"clientDiff"`, `{ "clientUi": ... }`, `{ "clientClick": ... }`, `{ "clientAct": "undock" }`, `{ "clientEval": ... }`, `{ "clientScreenshot": "..." }` | A real EVE client; see [A real client in a scenario](#a-real-client-in-a-scenario). |
+| `"clientLaunch"`, `"clientDiff"`, `{ "clientUi": ... }`, `{ "clientCheckUi": ... }`, `{ "clientClick": ... }`, `{ "clientKey": "tab" }`, `{ "clientType": "..." }`, `{ "clientCmd": "..." }`, `{ "clientAct": "undock" }`, `{ "clientEval": ... }`, `{ "clientScreenshot": "..." }` | A real EVE client; see [A real client in a scenario](#a-real-client-in-a-scenario). |
 | `{ "lock": "nearest npc", "as": "mark" }`, `{ "activate": "weapons", "target": "$mark" }`, `"stop"`, ... | A [player action](#player-actions): `approach`, `orbit`, `keepAtRange`, `warpTo`, `stop`, `lock`, `unlock`, `activate`, `deactivate`, `loadAmmo`, `launchDrones`, `engageDrones`. The value is the target, or the modules or drones; the other arguments are keys (`range`, `target`, `once`, `charge`, `count`, `timeout`). `as` binds the target's item ID, or the drones launched. A refused action fails the step. |
 
 Player actions, and plugin steps that allow it, take `"retry": { "every": 15, "for": 480 }`, which
@@ -733,7 +770,9 @@ second account beside it. `scenarios/client-undock.json` uses each piece:
 | `{ "clientUi": <node>, "timeout": 30 }` | Waits until a shown UI node matches: `{ "class", "name", "text", "hidden" }`, each a case-insensitive "contains", or a string for its text. Fails setup if none shows in time. |
 | `{ "clientClick": <node> }` | `gridcheck client click`. The node can also be a `path` from `client ui`, with `index` to pick among several matches. `double: true` double-clicks. |
 | `{ "clientAct": "undock" }` | `gridcheck client act`: `undock`, `dock` (the nearest station unless `target`), `jump`, `warpTo`, `approach`, `orbit`, `keepAtRange`, `stop`, `lock`, `unlock`, `activate`, `deactivate`, `logoff`, `select`. Keys: `target` (an itemID or a `$name`), `range`, `module` (`high1` or an itemID). The step ends when the action is done, as `client act` does; one that isn't done in time fails the step, and so does an error the action raises or a lock the client dropped. A refusal on a tasklet of the client's own is a `CLIENT_EXCEPTION`; `no CLIENT_EXCEPTION` catches those. |
-| `{ "clientEval": "<python>", "as": "station" }` | `gridcheck client eval`. A Python error fails the step. `as` binds the value when it's an ID or a list of IDs: `{ "clientEval": "session.stationid2", "as": "station" }`, then `{ "clientAct": "dock", "target": "$station" }`. |
+| `{ "clientCheckUi": <check>, "timeout": 15, "stable": 500 }` | `gridcheck client check-ui`: waits up to `timeout` seconds for the check to hold, and `stable` milliseconds more if given. Fails setup if it doesn't. The last UI state and the verdict are saved as `client/ui-check-N.json`, linked from the report. |
+| `{ "clientKey": "tab" }`, `{ "clientType": "rifter", "node": { "name": "quickFilterInputBox" } }`, `{ "clientCmd": "OpenInventory" }` | `gridcheck client key`, `type` and `cmd`. `node` names the edit to type into or press the key in; `clientType` takes `set` and `enter` as `--set` and `--enter`. `clientCmd` takes `settle` (default 3 s) and fails when the command is still running after it. |
+| `{ "clientEval": "<python>", "as": "station" }` | `gridcheck client eval`. A Python error fails the step. `as` binds the value when it's an ID or a list of IDs: `{ "clientEval": "session.stationid2", "as": "station" }`, then `{ "clientAct": "dock", "target": "$station" }`. `{ "clientEval": { "file": "probe.py" } }` reads the code from a file beside the scenario, at `run --check`. `"assert": true` fails the step unless the value is exactly `True`, and `timeout` (default 15, at most 300) is how long to wait for the answer: it stops waiting, not the code. In a run, each answer is saved as `client/eval-N.json`. |
 | `{ "clientDiff": true, "timeout": 30 }` | `gridcheck client diff` every 2 s until the client is in space and holds what the server's grid holds, or the timeout. The last diff becomes one `CLIENT_BALLPARK` line. The step passes either way: say `CLIENT_BALLPARK ok=true` in `expect`. `tolerance` is metres, as `--tolerance`. |
 | `{ "clientScreenshot": "in space" }` | A picture of the client, labelled, taken as `client screenshot` takes it. A picture that fails doesn't fail the step; the report says why. |
 

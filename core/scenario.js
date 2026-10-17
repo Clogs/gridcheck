@@ -18,6 +18,8 @@ const { formatOffset, formatTimelineEvent } = require("./timeline");
 const actionTools = require("./actions");
 const loadoutTools = require("./loadout");
 const perfTools = require("./perf");
+const { parseKey } = require("./client");
+const { validateCheck } = require("./clientUi");
 
 const SCENARIO_DIR = path.join(__dirname, "..", "scenarios");
 // The tree's own scenarios, committed with its features (gridcheck.config.json
@@ -72,10 +74,14 @@ const CORE_STEP_KEYS = {
   repeat: ["repeat", "every", "times"],
   // A real EVE client (gridcheck client): "user" picks one when several are online.
   clientLaunch: ["clientLaunch", "timeout"],
-  clientEval: ["clientEval", "user", "as"],
+  clientEval: ["clientEval", "user", "as", "timeout", "assert"],
+  clientCheckUi: ["clientCheckUi", "user", "timeout", "stable"],
   clientUi: ["clientUi", "user", "timeout"],
   // settle, not wait: wait is a step of its own, and an entry holds one step.
   clientClick: ["clientClick", "user", "double", "settle"],
+  clientKey: ["clientKey", "user", "node"],
+  clientType: ["clientType", "user", "node", "set", "enter"],
+  clientCmd: ["clientCmd", "user", "settle"],
   clientAct: ["clientAct", "user", "target", "range", "module", "settle"],
   clientDiff: ["clientDiff", "user", "timeout", "tolerance"],
   clientScreenshot: ["clientScreenshot", "user"],
@@ -83,7 +89,7 @@ const CORE_STEP_KEYS = {
 };
 // What a step keeps that is not a $value to bind at run time.
 const STEP_OWN_KEYS = new Set(["type", "note", "as", "retry", "implicit", "action", "condition", "seconds", "plugin",
-  "steps", "every", "times", "perf", "code", "node"]);
+  "steps", "every", "times", "perf", "code", "node", "check", "text"]);
 const PERF_LABEL = /^[A-Za-z0-9][\w .:-]{0,39}$/;
 const DEFAULT_WAIT_FOR_SECONDS = 300;
 // The client's own actions (agent.py op_act), and those that need a target.
@@ -93,6 +99,9 @@ const CLIENT_ACTS_TARGETED = new Set(["jump", "warpTo", "approach", "orbit", "ke
 const NODE_KEYS = ["class", "name", "text", "path", "index", "hidden"];
 const DEFAULT_CLIENT_LAUNCH_SECONDS = 240;
 const DEFAULT_CLIENT_UI_SECONDS = 30;
+const DEFAULT_CLIENT_CHECK_UI_SECONDS = 15;
+// As the CLI's client eval: the bridge carries the Python in one notification.
+const MAX_CLIENT_EVAL_BYTES = 256 * 1024;
 const DEFAULT_CLIENT_DIFF_SECONDS = 30;
 // The ballpark sampler's default period, and how many screenshots watch.screenshots may ask for.
 const BALLPARK_EVERY_SECONDS = 2;
@@ -153,6 +162,10 @@ function describeNode(node = {}) {
   return `${parts.join(" ")}${node.hidden ? " (hidden too)" : ""}`;
 }
 
+function withoutExact({ exact: _exact, ...named }) {
+  return named;
+}
+
 function describeStep(step, registry = defaultRegistry()) {
   switch (step.type) {
     case "login": return `login${step.user ? ` ${step.user}` : ""}${step.name ? ` "${step.name}"` : ""}`;
@@ -170,8 +183,13 @@ function describeStep(step, registry = defaultRegistry()) {
       const code = String(step.code || "").split(/\r?\n/)[0];
       return `clientEval ${code.length > 60 ? `${code.slice(0, 59)}~` : code}${clientSuffix(step)}${suffixes(step)}`;
     }
+    case "clientCheckUi": return `clientCheckUi ${describeNode(withoutExact(step.check.selector))}` +
+      `${step.check.count !== undefined ? ` count ${step.check.count}` : ""} (up to ${step.seconds}s)${clientSuffix(step)}`;
     case "clientUi": return `clientUi ${describeNode(step.node)} (up to ${step.seconds}s)${clientSuffix(step)}`;
     case "clientClick": return `clientClick${step.double ? " double" : ""} ${describeNode(step.node)}${clientSuffix(step)}`;
+    case "clientKey": return `clientKey ${step.keyName}${step.node ? ` into ${describeNode(step.node)}` : ""}${clientSuffix(step)}`;
+    case "clientType": return `clientType ${step.text.length} character(s)${step.node ? ` into ${describeNode(step.node)}` : ""}${clientSuffix(step)}`;
+    case "clientCmd": return `clientCmd ${step.command}${clientSuffix(step)}`;
     case "clientAct": return `clientAct ${step.act}${step.target !== undefined ? ` ${step.target}` : ""}` +
       `${step.module !== undefined ? ` module ${step.module}` : ""}${clientSuffix(step)}`;
     case "clientDiff": return `clientDiff (up to ${step.seconds}s)${clientSuffix(step)}`;
@@ -555,10 +573,79 @@ function validateScenario(raw, { source = "scenario", defaultName = null, worldE
           clientSeconds(step, DEFAULT_CLIENT_LAUNCH_SECONDS, 600, "seconds to wait for the client to enter the game");
           break;
         case "clientEval":
-          if (typeof value !== "string" || !value.trim()) problem(where, 'clientEval: Python, e.g. "session.solarsystemid2"');
-          else step.code = value;
+          if (isObject(value)) {
+            if (Object.keys(value).length !== 1 || typeof value.file !== "string" || !value.file) {
+              problem(where, 'clientEval: Python, or { "file": "probe.py" } beside the scenario');
+            } else if (!source.endsWith(".json")) {
+              problem(where, "clientEval file: only a scenario file has a folder to find it in");
+            } else {
+              const file = path.resolve(path.dirname(source), value.file);
+              try {
+                if (fs.statSync(file).size > MAX_CLIENT_EVAL_BYTES) problem(where, `clientEval file ${value.file} is over ${MAX_CLIENT_EVAL_BYTES / 1024} KiB`);
+                else step.code = fs.readFileSync(file, "utf8");
+              } catch (error) {
+                problem(where, `clientEval file ${value.file}: ${error.code === "ENOENT" ? "no such file beside the scenario" : error.message}`);
+              }
+            }
+          } else if (typeof value !== "string" || !value.trim()) {
+            problem(where, 'clientEval: Python, e.g. "session.solarsystemid2", or { "file": "probe.py" }');
+          } else if (Buffer.byteLength(value) > MAX_CLIENT_EVAL_BYTES) {
+            problem(where, `clientEval: at most ${MAX_CLIENT_EVAL_BYTES / 1024} KiB of Python`);
+          } else {
+            step.code = value;
+          }
+          if (rawStep.assert !== undefined) {
+            if (typeof rawStep.assert !== "boolean") problem(`${where}.assert`, "true or false: the value must be exactly True");
+            else step.assert = rawStep.assert;
+          }
+          // Without a timeout, the command's own 15 s, and nothing on the run's budget.
+          if (rawStep.timeout !== undefined) clientSeconds(step, 15, 300, "seconds to wait for the answer");
           clientUser(step);
           bindAs(step);
+          break;
+        case "clientCheckUi":
+          try {
+            step.check = validateCheck(value);
+          } catch (error) {
+            problem(where, `clientCheckUi: ${error.message}`);
+          }
+          clientUser(step);
+          clientSeconds(step, DEFAULT_CLIENT_CHECK_UI_SECONDS, 300, "seconds to wait for the check to hold");
+          if (rawStep.stable !== undefined) {
+            if (!(typeof rawStep.stable === "number" && rawStep.stable >= 0 && rawStep.stable <= (step.seconds || 0) * 1000)) {
+              problem(`${where}.stable`, "milliseconds the check must hold for, within the timeout");
+            } else {
+              step.stable = rawStep.stable;
+            }
+          }
+          break;
+        case "clientKey": {
+          const parsed = typeof value === "string" ? parseKey(value) : { error: "a key is a name such as enter, escape, tab, f3 or a" };
+          if (parsed.error) problem(where, `clientKey: ${parsed.error}`);
+          else {
+            step.key = parsed.key;
+            step.keyName = value.toLowerCase().trim();
+          }
+          if (rawStep.node !== undefined) step.node = clientNode(rawStep.node, true);
+          clientUser(step);
+          break;
+        }
+        case "clientType":
+          if (typeof value !== "string" || value.length > 10000) problem(where, "clientType: the text, at most 10000 characters");
+          else step.text = value;
+          if (rawStep.node !== undefined) step.node = clientNode(rawStep.node, true);
+          for (const key of ["set", "enter"]) {
+            if (rawStep[key] === undefined) continue;
+            if (typeof rawStep[key] !== "boolean") problem(`${where}.${key}`, "true or false");
+            else step[key] = rawStep[key];
+          }
+          clientUser(step);
+          break;
+        case "clientCmd":
+          if (typeof value !== "string" || !value.trim()) problem(where, "clientCmd: a command's name (gridcheck client cmd --list lists them)");
+          else step.command = value.trim();
+          clientUser(step);
+          clientSettle(step, 60, "how long to wait for the command to finish (default 3)");
           break;
         case "clientUi":
           step.node = clientNode(value, false);

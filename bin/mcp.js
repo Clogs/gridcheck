@@ -250,11 +250,36 @@ const CLI_ARGS = {
     return args;
   },
   client_eval(p) {
+    if ((p.code === undefined) === (p.file === undefined)) throw new Error("client_eval takes code or file, one of them");
     const { args, flag } = argList("client");
     flag("user", p.user);
     flag("timeout", p.timeout);
     flag("json", p.json);
-    args.push("--", "eval", String(p.code));
+    flag("file", p.file);
+    flag("assert", p.assert);
+    flag("out", p.out);
+    args.push("--", "eval", ...(p.code === undefined ? [] : [String(p.code)]));
+    return args;
+  },
+  client_ui_state(p) {
+    const { args, flag } = argList("client");
+    flag("user", p.user);
+    flag("timeout", p.timeout);
+    flag("limit", p.limit);
+    flag("out", p.out);
+    args.push("--", "ui-state");
+    return args;
+  },
+  client_check_ui(p) {
+    const { args, flag } = argList("client");
+    flag("user", p.user);
+    flag("timeout", p.timeout);
+    flag("spec", JSON.stringify(p.spec));
+    flag("wait", p.wait);
+    flag("stable", p.stable);
+    flag("limit", p.limit);
+    flag("out", p.out);
+    args.push("--", "check-ui");
     return args;
   },
   client_console(p) {
@@ -662,14 +687,51 @@ const TOOLS = [
     name: "client_eval",
     description: "Run Python 2.7 inside the EVE client, on its own tasklet. An expression answers its repr; statements " +
       "answer what they leave in `result`. sm, session, uicore and agent are defined, and names persist between calls. " +
-      "Code that loops without yielding stalls the client.",
+      "Code that loops without yielding stalls the client. assert works, though the client runs Python optimized.",
     inputSchema: schema({
-      code: str("Python, e.g. cfg.evelocations.Get(session.solarsystemid2).name"),
+      code: str("Python, e.g. cfg.evelocations.Get(session.solarsystemid2).name. Give code or file."),
+      file: str("A Python file to run instead of code, at most 256 KiB."),
+      assert: bool("Fail unless the value is exactly True (1, None and False fail)."),
+      out: str("Also save the answer to this JSON file."),
       user: str("The client's account, when more than one is online."),
       timeout: int("Seconds to wait for the answer (default 15).", { minimum: 1, maximum: 300 }),
       json: bool("The value as JSON too, when it is plain data."),
-    }, ["code"]),
+    }),
     run: simple("client_eval"),
+  },
+  {
+    name: "client_ui_state",
+    description: "Every node of the EVE client's UI, hidden ones too, flat, as JSON: path, rect, whether it is shown and " +
+      "enabled counting its ancestors, opacity, full screen, whether it holds a 3D scene, and which node has focus and " +
+      "which is the modal window. For assertions, client_check_ui.",
+    inputSchema: schema({
+      limit: int("Most nodes (default 10000). A state cut short can't show that a node is gone.", { minimum: 1, maximum: 20000 }),
+      out: str("Also save the state to this JSON file."),
+      user: str("The client's account, when more than one is online."),
+      timeout: int("Seconds to wait for the answer (default 15).", { minimum: 1, maximum: 300 }),
+    }),
+    run: simple("client_ui_state"),
+  },
+  {
+    name: "client_check_ui",
+    description: "Assert on the EVE client's UI and fail unless it holds: how many nodes match a selector, and whether " +
+      "they are enabled, focused, modal, full screen, hold a scene, their size, whether they fit the desktop, their " +
+      "opacity. Optionally waits until it holds, and for it to keep holding. A UI state cut short fails.",
+    inputSchema: schema({
+      spec: {
+        type: "object",
+        description: "{ selector: { path | cls | name | text, exact? }, count (default 1), visible (default true; false, " +
+          "or \"any\"), enabled, focused, modal, fullscreen, scene, withinDesktop, minWidth, minHeight, opacityMin, opacityMax }. " +
+          "To check a UI is gone, not just hidden: count 0, visible \"any\".",
+      },
+      wait: int("Seconds to keep reading until it holds (default 0: once).", { minimum: 0, maximum: 300 }),
+      stable: int("Milliseconds it must keep holding, within wait.", { minimum: 0, maximum: 300000 }),
+      limit: int("Most nodes to read (default 10000).", { minimum: 1, maximum: 20000 }),
+      out: str("Also save the check and its result to this JSON file."),
+      user: str("The client's account, when more than one is online."),
+      timeout: int("Seconds each read waits for the client (default 15).", { minimum: 1, maximum: 300 }),
+    }, ["spec"]),
+    run: simple("client_check_ui"),
   },
   {
     name: "client_console",

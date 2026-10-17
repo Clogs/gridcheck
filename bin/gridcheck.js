@@ -64,6 +64,7 @@ const vendor = require("../core/vendor");
 const patchEngine = require("../core/patches");
 const agentTools = require("../core/agents");
 const clientTools = require("../core/client");
+const clientUiTools = require("../core/clientUi");
 
 const REPO_ROOT = DEFAULT_TREE_ROOT;
 const REGISTRY = defaultRegistry();
@@ -93,7 +94,7 @@ const AUTO = MODE === "auto";
 
 const BOOLEAN_FLAGS = new Set(["all", "json", "any-pid", "force", "fresh", "no-market", "no-log", "help",
   "check", "keep-up", "reuse", "positions", "once", "serve", "offline", "dry-run", "profile", "perf", "now", "detach", "mcp", "save", "hidden",
-  "double", "set", "enter", "list", "any-build",
+  "double", "set", "enter", "list", "any-build", "assert",
   ...REGISTRY.booleanFlags]);
 
 class CliError extends Error {}
@@ -540,6 +541,27 @@ async function clientCommand(op, args, flags) {
   return json;
 }
 
+// The most Python one eval sends: the bridge carries it in a single notification.
+const MAX_EVAL_BYTES = 256 * 1024;
+
+function readEvalFile(file) {
+  if (fs.statSync(file).size > MAX_EVAL_BYTES) throw new CliError(`${relativePath(file)} is over ${MAX_EVAL_BYTES / 1024} KiB`);
+  return fs.readFileSync(file, "utf8");
+}
+
+function writeJsonFile(file, value) {
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`);
+}
+
+function parseJsonFlag(text, flag) {
+  try {
+    return JSON.parse(text);
+  } catch (error) {
+    throw new CliError(`${flag} isn't JSON: ${error.message}`);
+  }
+}
+
 async function cmdClient(positionals, flags) {
   const [sub, ...rest] = positionals;
   const handshake = requireHandshake();
@@ -572,12 +594,45 @@ async function cmdClient(positionals, flags) {
     return;
   }
   if (sub === "eval") {
-    const code = flags.file ? fs.readFileSync(path.resolve(String(flags.file)), "utf8") : rest.join(" ");
+    if (flags.file && rest.length) throw new CliError("client eval takes the Python or --file, not both");
+    const code = flags.file ? readEvalFile(path.resolve(String(flags.file))) : rest.join(" ");
     if (!code.trim()) throw new CliError("client eval needs Python, e.g. gridcheck client eval \"session.charid\"");
+    if (Buffer.byteLength(code) > MAX_EVAL_BYTES) throw new CliError(`client eval takes at most ${MAX_EVAL_BYTES / 1024} KiB of Python`);
     const reply = await clientCommand("eval", { code }, flags);
     const value = reply.value || {};
+    if (flags.out) writeJsonFile(path.resolve(String(flags.out)), value);
     if (flags.json) json(value);
     else console.log(value.repr + (value.truncated ? "\n(truncated)" : ""));
+    if (flags.assert && value.json !== true) throw new CliError(`--assert: the value is ${String(value.repr).slice(0, 200)}, not True`);
+    return;
+  }
+  if (sub === "ui-state") {
+    const reply = await clientCommand("ui_state", { limit: flags.limit }, flags);
+    if (flags.out) {
+      writeJsonFile(path.resolve(String(flags.out)), reply.value);
+      console.log(`saved ${relativePath(path.resolve(String(flags.out)))}: ${reply.value.nodes.length} node(s)` +
+        `${reply.value.truncated ? ", cut at --limit" : ""}`);
+      return;
+    }
+    return json(reply.value);
+  }
+  if (sub === "check-ui") {
+    if (Boolean(flags.file) === Boolean(flags.spec)) throw new CliError("check-ui takes the check as --spec <json> or --file <json file>");
+    const spec = parseJsonFlag(flags.file ? fs.readFileSync(path.resolve(String(flags.file)), "utf8") : String(flags.spec),
+      flags.file ? "--file" : "--spec");
+    let result;
+    try {
+      result = await clientUiTools.waitForUi({
+        read: async () => (await clientCommand("ui_state", { limit: flags.limit }, flags)).value,
+        spec, seconds: flags.wait === undefined ? 0 : Number(flags.wait), stableMs: flags.stable === undefined ? 0 : Number(flags.stable),
+      });
+    } catch (error) {
+      if (error instanceof CliError) throw error;
+      throw new CliError(`check-ui: ${error.message}`);
+    }
+    if (flags.out) writeJsonFile(path.resolve(String(flags.out)), { spec, result });
+    json(result);
+    if (!result.ok) process.exitCode = 1;
     return;
   }
   if (sub === "ui") {
@@ -675,7 +730,7 @@ async function cmdClient(positionals, flags) {
     return;
   }
   if (["find", "click", "type", "key", "cmd", "act"].includes(sub)) return clientDrive(handshake, sub, rest, flags);
-  throw new CliError("client needs status, launch, stop, ping, eval, console, ui, screenshot, ballpark, diff, events, " +
+  throw new CliError("client needs status, launch, stop, ping, eval, console, ui, ui-state, check-ui, screenshot, ballpark, diff, events, " +
     `find, click, type, key, cmd or act; got ${sub === undefined ? "nothing" : JSON.stringify(sub)}`);
 }
 
@@ -1518,8 +1573,12 @@ const STEP_RUNNERS = {
   loadout: (step) => runLoadout(step.loadout),
   clientLaunch: (step) => runClientLaunch(step),
   clientEval: (step) => runClientEval(step),
+  clientCheckUi: (step) => runClientCheckUi(step),
   clientUi: (step) => runClientUi(step),
   clientClick: (step) => runClientClick(step),
+  clientKey: (step) => runClientKey(step),
+  clientType: (step) => runClientType(step),
+  clientCmd: (step) => runClientCmd(step),
   clientAct: (step) => runClientAct(step),
   clientDiff: (step) => runClientDiff(step),
   clientScreenshot: (step) => runClientScreenshot(step),
@@ -1528,7 +1587,8 @@ const STEP_RUNNERS = {
 // ---------- scenario steps on a real EVE client (core/scenario.js) ----------
 
 // The run under way: its folder, the clients it launched (stopped when it
-// ends) and how many screenshots it has taken. Null outside `gridcheck run`.
+// ends), how many screenshots it has taken and how many evidence files of each
+// kind it has written. Null outside `gridcheck run`.
 let activeRun = null;
 
 const clientFlags = (step, extra = {}) => ({ ...(step.user ? { user: step.user } : {}), ...extra });
@@ -1558,11 +1618,24 @@ async function runClientLaunch(step) {
 
 // "as" binds the IDs the value names: a number, or a list of them.
 async function runClientEval(step) {
-  const reply = await clientCommand("eval", { code: step.code }, clientFlags(step));
+  const reply = await clientCommand("eval", { code: step.code }, clientFlags(step, step.seconds ? { timeout: step.seconds } : {}));
   const value = reply.value || {};
   const ids = (Array.isArray(value.json) ? value.json : [value.json])
     .filter((item) => (typeof item === "number" && Number.isInteger(item)) || (typeof item === "string" && /^\d+$/.test(item)));
-  return { ok: true, text: `= ${String(value.repr).slice(0, 300)}${value.truncated ? " (truncated)" : ""}`, ids };
+  const failed = step.assert && value.json !== true;
+  const text = `${failed ? "not True: " : ""}= ${String(value.repr).slice(0, 300)}${value.truncated ? " (truncated)" : ""}` +
+    runEvidence("eval", value);
+  return { ok: !failed, text, ids };
+}
+
+// A step's full answer as client/<kind>-N.json in the run's folder, linked from
+// the step's line in the report. Nothing outside a run.
+function runEvidence(kind, value) {
+  if (!activeRun) return "";
+  activeRun.evidence[kind] = (activeRun.evidence[kind] || 0) + 1;
+  const name = `client/${kind}-${activeRun.evidence[kind]}.json`;
+  writeJsonFile(path.join(activeRun.runDir, name), value);
+  return `; [${kind}](${name})`;
 }
 
 // Asks for the node every second until one is shown or the step's time is up.
@@ -1592,6 +1665,42 @@ async function runClientClick(step) {
   const reply = await clientCommand("click", { ...clientTools.nodeArgs(step.node), double: step.double || undefined, wait: step.settleMs },
     clientFlags(step, { timeout: settleTimeout(step) }));
   return { ok: true, text: `clicked ${reply.value.clicked.path}: ${settledText(reply.value)}` };
+}
+
+// Reads the UI state until the check holds (and stays held for step.stable ms)
+// or step.seconds are up; the last state and the verdict are the evidence.
+async function runClientCheckUi(step) {
+  let last = null;
+  const result = await clientUiTools.waitForUi({
+    read: async () => {
+      last = (await clientCommand("ui_state", {}, clientFlags(step))).value;
+      return last;
+    },
+    spec: step.check, seconds: step.seconds, stableMs: step.stable || 0,
+  });
+  const evidence = runEvidence("ui-check", { spec: step.check, result, snapshot: last });
+  return { ok: result.ok, text: `${result.ok ? `${result.matched} node(s) after ${result.elapsedMs} ms` : result.failures.join("; ")}${evidence}` };
+}
+
+async function runClientKey(step) {
+  const reply = await clientCommand("key", { vk: step.key, ...(step.node ? { into: clientTools.nodeArgs(step.node) } : {}) }, clientFlags(step));
+  return { ok: true, text: `pressed ${step.keyName}${focusSuffix(reply.value.focus)}` };
+}
+
+async function runClientType(step) {
+  const reply = await clientCommand("type", { text: step.text, set: step.set || undefined, enter: step.enter || undefined,
+    ...(step.node ? { into: clientTools.nodeArgs(step.node) } : {}) }, clientFlags(step));
+  return { ok: true, text: `typed ${step.text.length} character(s)${focusSuffix(reply.value.focus)}` };
+}
+
+// A command whose handler is still running when the settle is up fails the step.
+async function runClientCmd(step) {
+  const reply = await clientCommand("cmd", { name: step.command, wait: step.settleMs }, clientFlags(step, { timeout: settleTimeout(step) }));
+  return { ok: reply.value.finished !== false, text: `ran ${step.command}: ${settledText(reply.value)}` };
+}
+
+function focusSuffix(focus) {
+  return focus ? `; focus on ${focus.cls}${focus.name ? ` ${focus.name}` : ""}` : "";
 }
 
 // The client drops a refused lock with a notice to the player, so a lock checks where the locks stand.
@@ -2137,7 +2246,7 @@ async function cmdRun(positionals, flags) {
     },
   };
   let result;
-  activeRun = { runDir, launched: [], shots: 0 };
+  activeRun = { runDir, launched: [], shots: 0, evidence: {} };
   try {
     result = await scenarioTools.runScenario(scenario, ops, {
       signal: controller.signal,
@@ -3271,7 +3380,8 @@ const CORE_COMMANDS = {
   logout: { usage: ["logout"], run: () => cmdLogout() },
   client: {
     usage: ["client launch [--user e2eclient] [--name \"...\"] [--exe <exefile.exe>] [--resfiles <folder>] [--resfileserver <url>] [--wait 240]",
-      "client status [--json] | client stop [--user] | client ping [--user] | client eval \"<python>\" [--file <py>] [--user] [--timeout 15] [--json]",
+      "client status [--json] | client stop [--user] | client ping [--user] | client eval \"<python>\" | --file <py> [--assert] [--out <json>] [--user] [--timeout 15] [--json]",
+      "client ui-state [--limit 10000] [--out <json>] | client check-ui --spec <json> | --file <json> [--wait 0] [--stable <ms>] [--out <json>] [--user]",
       "client console [--lines 60] [--grep <regex>] [--pid N] | client ui [--class <text>] [--name <text>] [--text <text>] [--depth N] [--hidden] [--limit N] [--json]",
       "client screenshot [--out <file.png|.jpg>] [--run <id>] [--max-width <px>] [--source auto|client|window] | client ballpark [--range <km>] [--json]",
       "client diff [--tolerance 1000] [--json] | client events [--all] [--since <seq>] [--limit 50] [--notify OnA,OnB] [--json]",
