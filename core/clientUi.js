@@ -141,8 +141,9 @@ async function waitForUi({ read, spec, seconds = 0, stableMs = 0, pollMs = 250, 
     if (now() >= deadline) break;
     await sleep(Math.min(pollMs, deadline - now()));
   } while (now() <= deadline);
-  return { ...result, ok: false, elapsedMs: now() - startedAt,
-    failures: [...result.failures, result.ok ? `it didn't hold for ${stableMs} ms` : `not within ${seconds} s`] };
+  // With no wait, the check's own failures say it all.
+  const waited = result.ok ? [`it didn't hold for ${stableMs} ms`] : seconds ? [`not within ${seconds} s`] : [];
+  return { ...result, ok: false, elapsedMs: now() - startedAt, failures: [...result.failures, ...waited] };
 }
 
 module.exports = { validateCheck, checkUi, waitForUi };

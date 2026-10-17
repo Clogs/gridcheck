@@ -695,6 +695,13 @@ async function cmdClient(positionals, flags) {
       throw new CliError(`capture-frames: ${error.message}`);
     }
     console.log(`${manifest.frames.length} frames in ${relativePath(path.resolve(String(flags.out)))}, frames.json beside them`);
+    const frames = manifest.frames;
+    const spacing = (frames[frames.length - 1].atMs - frames[0].atMs) / (frames.length - 1);
+    if (spacing > manifest.intervalMs * 1.25) {
+      const capture = frames.reduce((sum, frame) => sum + frame.captureMs, 0) / frames.length;
+      console.log(`  they came ${Math.round(spacing)} ms apart, not ${manifest.intervalMs}: each picture took ${Math.round(capture)} ms ` +
+        "to take; ask for a longer --interval, or a smaller window");
+    }
     return;
   }
   if (sub === "check-ui") {

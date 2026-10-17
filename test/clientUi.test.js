@@ -80,6 +80,8 @@ test("a wait holds out for stable on the same character and nodes, and a late re
   assert.strictEqual(missing.ok, false);
   assert.match(missing.failures.join(" "), /not within 1 s/);
   assert.strictEqual(clock, 1000);
+  const once = await waitForUi({ spec: { selector: { name: "missing" } }, read: async () => state() });
+  assert.deepStrictEqual(once.failures, ["expected 1 node(s), found 0"], "with no wait, no line about the wait");
 
   clock = 0;
   const late = await waitForUi({ spec: { selector: { name: "Compendium" } }, seconds: 1, now: () => clock, sleep,
