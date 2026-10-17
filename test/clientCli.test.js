@@ -12,6 +12,8 @@ const path = require("node:path");
 const { once } = require("node:events");
 const { spawn } = require("node:child_process");
 
+const { encodePng } = require("../core/clientVisual");
+
 const CLI = path.join(__dirname, "..", "bin", "gridcheck.js");
 const TOKEN = "fixture-token";
 
@@ -23,6 +25,11 @@ async function fixture(answer) {
     let body = "";
     for await (const chunk of req) body += chunk;
     const ok = req.headers.authorization === `Bearer ${TOKEN}`;
+    if (ok && req.method === "GET" && req.url.startsWith("/client/agents")) {
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify({ agents: [{ username: "e2eclient", online: true, pid: 4242, characterID: 123, attachedAtMs: 0 }] }));
+      return;
+    }
     const command = ok ? JSON.parse(body) : null;
     if (command) calls.push(command);
     res.setHeader("content-type", "application/json");
@@ -110,6 +117,37 @@ test("eval --assert exits 1 unless the value is exactly True; --file sends the f
     const both = await client.run(["eval", "True", "--file", file]);
     assert.notStrictEqual(both.code, 0);
     assert.match(both.stderr, /not both/);
+  } finally {
+    await client.close();
+  }
+});
+
+test("pointer sends its path as numbers; capture-frames saves PNGs and frames.json, and won't reuse a folder", async () => {
+  const client = await fixture((op, args) => {
+    if (op === "ping") return { pid: 4242, build: 3396210, session: { charid: 123 } };
+    if (op === "screenshot") {
+      fs.writeFileSync(args.path, encodePng({ width: 1, height: 1, pixels: Buffer.from([1, 2, 3, 255]) }));
+      return { width: 1, height: 1 };
+    }
+    return { action: args.action, points: args.points.length, target: { cls: "Button", name: "undockButton" } };
+  });
+  try {
+    const pointed = await client.run(["pointer", "drag", "10,20", "30.5,40", "--duration", "200"]);
+    assert.strictEqual(pointed.code, 0, pointed.stderr);
+    assert.match(pointed.stdout, /ended over Button undockButton/);
+    assert.deepStrictEqual(client.calls.at(-1).args, { action: "drag", points: [[10, 20], [30.5, 40]], button: 0, durationMs: 200 });
+    const refused = await client.run(["pointer", "drag", "10,20"]);
+    assert.notStrictEqual(refused.code, 0);
+    assert.match(refused.stderr, /two points/);
+
+    const frames = path.join(client.tree, "frames");
+    const captured = await client.run(["capture-frames", "--out", frames, "--count", "2", "--interval", "50"]);
+    assert.strictEqual(captured.code, 0, captured.stderr);
+    const manifest = JSON.parse(fs.readFileSync(path.join(frames, "frames.json"), "utf8"));
+    assert.deepStrictEqual([manifest.frames.length, manifest.identity], [2, { pid: 4242, charid: 123, build: 3396210 }]);
+    assert.ok(fs.existsSync(path.join(frames, "frame-001.png")));
+    const again = await client.run(["capture-frames", "--out", frames]);
+    assert.notStrictEqual(again.code, 0, "an existing capture isn't overwritten");
   } finally {
     await client.close();
   }

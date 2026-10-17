@@ -65,6 +65,7 @@ const patchEngine = require("../core/patches");
 const agentTools = require("../core/agents");
 const clientTools = require("../core/client");
 const clientUiTools = require("../core/clientUi");
+const clientVisualTools = require("../core/clientVisual");
 
 const REPO_ROOT = DEFAULT_TREE_ROOT;
 const REGISTRY = defaultRegistry();
@@ -562,10 +563,57 @@ function parseJsonFlag(text, flag) {
   }
 }
 
+// "200,300" -> [200, 300]; anything else is left for validatePointer to refuse.
+function parsePoint(text) {
+  const parts = String(text).split(",");
+  return parts.length === 2 && parts.every((part) => part.trim() !== "") ? parts.map(Number) : text;
+}
+
+// compare-images/compare-frames flags -> clientVisual's options.
+function comparisonFlags(flags) {
+  const options = {};
+  if (flags.threshold !== undefined) options.threshold = Number(flags.threshold);
+  if (flags["max-changed"] !== undefined) options.maxChangedFraction = Number(flags["max-changed"]);
+  if (flags["max-drift"] !== undefined) options.maxTimingDriftMs = Number(flags["max-drift"]);
+  if (flags.ignore !== undefined) {
+    options.ignore = String(flags.ignore).split(/[\s;]+/).filter(Boolean).map((rect) => rect.split(",").map(Number));
+  }
+  return options;
+}
+
+// Frames of one client into a new folder, with frames.json: core/clientVisual.js captureSequence.
+async function captureFrames(agent, directory, spec) {
+  const flags = { user: agent.username };
+  return clientVisualTools.captureSequence({ directory, spec,
+    identity: async () => {
+      const { value } = await clientCommand("ping", {}, flags);
+      return { pid: value.pid, charid: value.session && value.session.charid, build: value.build };
+    },
+    capture: (file) => shootInClient(agent, { out: file, maxWidth: 0, format: "png" }) });
+}
+
 async function cmdClient(positionals, flags) {
   const [sub, ...rest] = positionals;
-  const handshake = requireHandshake();
   const json = (value) => console.log(JSON.stringify(value, null, 2));
+  // Offline: two pictures or two frame sequences on disk, no server needed.
+  if (sub === "compare-images" || sub === "compare-frames") {
+    if (rest.length !== 2) throw new CliError(`client ${sub} takes the reference and the actual ${sub === "compare-images" ? "PNG" : "frames.json"}`);
+    const [reference, actual] = rest.map((file) => path.resolve(file));
+    const diff = flags.diff ? path.resolve(String(flags.diff)) : null;
+    let result;
+    try {
+      const options = comparisonFlags(flags);
+      result = sub === "compare-images" ? clientVisualTools.compareFiles(reference, actual, options, diff)
+        : clientVisualTools.compareSequences(reference, actual, options, diff);
+    } catch (error) {
+      throw new CliError(`${sub}: ${error.message}`);
+    }
+    if (flags.out) writeJsonFile(path.resolve(String(flags.out)), result);
+    json(result);
+    if (!result.ok) process.exitCode = 1;
+    return;
+  }
+  const handshake = requireHandshake();
   if (sub === "status") {
     const { status, json: listed } = await requestJSON(`http://${handshake.host}:${handshake.port}/client/agents`, {
       headers: { authorization: `Bearer ${handshake.token}` },
@@ -615,6 +663,39 @@ async function cmdClient(positionals, flags) {
       return;
     }
     return json(reply.value);
+  }
+  if (sub === "pointer") {
+    const [action, ...points] = rest;
+    let spec;
+    try {
+      spec = clientVisualTools.validatePointer({ action, points: points.map(parsePoint),
+        ...(flags.button === undefined ? {} : { button: Number(flags.button) }),
+        ...(flags.duration === undefined ? {} : { durationMs: Number(flags.duration) }),
+        ...(flags.delta === undefined ? {} : { delta: Number(flags.delta) }) });
+    } catch (error) {
+      throw new CliError(`client pointer: ${error.message}. E.g. client pointer drag 200,300 300,350 --duration 500`);
+    }
+    const reply = await clientCommand("pointer", spec, flags);
+    if (flags.json) return json(reply.value);
+    const target = reply.value.target;
+    console.log(`${spec.action} over ${spec.points.length} point(s); the pointer ended over ` +
+      `${target ? `${target.cls}${target.name ? ` ${target.name}` : ""}` : "nothing"}`);
+    return;
+  }
+  if (sub === "capture-frames") {
+    if (!flags.out) throw new CliError("capture-frames needs --out <new folder>");
+    const agent = await clientAgentRow(handshake, flags);
+    let manifest;
+    try {
+      manifest = await captureFrames(agent, path.resolve(String(flags.out)), {
+        ...(flags.count === undefined ? {} : { count: Number(flags.count) }),
+        ...(flags.interval === undefined ? {} : { intervalMs: Number(flags.interval) }) });
+    } catch (error) {
+      if (error instanceof CliError) throw error;
+      throw new CliError(`capture-frames: ${error.message}`);
+    }
+    console.log(`${manifest.frames.length} frames in ${relativePath(path.resolve(String(flags.out)))}, frames.json beside them`);
+    return;
   }
   if (sub === "check-ui") {
     if (Boolean(flags.file) === Boolean(flags.spec)) throw new CliError("check-ui takes the check as --spec <json> or --file <json file>");
@@ -730,8 +811,8 @@ async function cmdClient(positionals, flags) {
     return;
   }
   if (["find", "click", "type", "key", "cmd", "act"].includes(sub)) return clientDrive(handshake, sub, rest, flags);
-  throw new CliError("client needs status, launch, stop, ping, eval, console, ui, ui-state, check-ui, screenshot, ballpark, diff, events, " +
-    `find, click, type, key, cmd or act; got ${sub === undefined ? "nothing" : JSON.stringify(sub)}`);
+  throw new CliError("client needs status, launch, stop, ping, eval, console, ui, ui-state, check-ui, screenshot, capture-frames, " +
+    `compare-images, compare-frames, ballpark, diff, events, find, click, type, key, cmd, pointer or act; got ${sub === undefined ? "nothing" : JSON.stringify(sub)}`);
 }
 
 // The agent names the build its client calls were checked against (bridge/client/agent.py CHECKED_BUILD).
@@ -1600,6 +1681,8 @@ const STEP_RUNNERS = {
   clientKey: (step) => runClientKey(step),
   clientType: (step) => runClientType(step),
   clientCmd: (step) => runClientCmd(step),
+  clientPointer: (step) => runClientPointer(step),
+  clientCaptureFrames: (step) => runClientCaptureFrames(step),
   clientAct: (step) => runClientAct(step),
   clientDiff: (step) => runClientDiff(step),
   clientScreenshot: (step) => runClientScreenshot(step),
@@ -1718,6 +1801,24 @@ async function runClientType(step) {
 async function runClientCmd(step) {
   const reply = await clientCommand("cmd", { name: step.command, wait: step.settleMs }, clientFlags(step, { timeout: settleTimeout(step) }));
   return { ok: reply.value.finished !== false, text: `ran ${step.command}: ${settledText(reply.value)}` };
+}
+
+async function runClientPointer(step) {
+  const reply = await clientCommand("pointer", step.pointer, clientFlags(step,
+    { timeout: Math.max(15, Math.ceil(step.pointer.durationMs / 1000) + 10) }));
+  const target = reply.value.target;
+  return { ok: true, text: `${step.pointer.action}; ended over ${target ? `${target.cls}${target.name ? ` ${target.name}` : ""}` : "nothing"}` };
+}
+
+// The frames go in the run's client/frames-N/, linked from the report.
+async function runClientCaptureFrames(step) {
+  const agent = await clientAgentRow(requireHandshake(), clientFlags(step));
+  const kind = "frames";
+  const index = activeRun ? (activeRun.evidence[kind] = (activeRun.evidence[kind] || 0) + 1) : runStamp(Date.now());
+  const relative = `client/frames-${index}`;
+  const directory = path.join(activeRun ? activeRun.runDir : E2E_DIR, relative);
+  const manifest = await captureFrames(agent, directory, step.capture);
+  return { ok: true, text: `${manifest.frames.length} frames; ${activeRun ? `[frames](${relative}/frames.json)` : relativePath(directory)}` };
 }
 
 function focusSuffix(focus) {
@@ -3409,7 +3510,11 @@ const CORE_COMMANDS = {
       "client diff [--tolerance 1000] [--json] | client events [--all] [--since <seq>] [--limit 50] [--notify OnA,OnB] [--json]",
       "client find|click [--path <path> | --class <text> --name <text> --text <text>] [--index N] [--double] [--wait 3] [--user] [--json]",
       "client type \"<text>\" [--name <edit> ...] [--set] [--enter] | client key <enter|escape|tab|f1|a ...> [--name <edit> ...]",
-      "client cmd [<name> [args...]] [--filter <text>] | client act <action> [<target>] [--range <m>] [--module high1] [--wait <s>]"],
+      "client cmd [<name> [args...]] [--filter <text>] | client act <action> [<target>] [--range <m>] [--module high1] [--wait <s>]",
+      "client pointer <move|click|drag|wheel> <x,y> [<x,y> ...] [--button 0|1|2] [--duration <ms>] [--delta <n>] [--user]",
+      "client capture-frames --out <new folder> [--count 10] [--interval 100] [--user]",
+      "client compare-images <reference.png> <actual.png> | compare-frames <reference.json> <actual.json> [--diff <file|folder>]" +
+        " [--threshold 0] [--max-changed 0] [--ignore \"x,y,w,h;...\"] [--max-drift 100] [--out <json>]"],
     run: cmdClient,
   },
   undock: { usage: ["undock"], run: () => cmdUndock() },

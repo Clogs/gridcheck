@@ -38,6 +38,10 @@
 #   edits SetValue(text), GetText()      carbonui/control/singlelineedits/baseSingleLineEdit.py, edit.py
 #   uicore.uilib _OnChar(key, flags, isDead), _OnKeyDown(key, flags), _OnKeyUp(key, flags)
 #                                        carbonui/uilib.py: where the window's key events land
+#   uicore.uilib cursorPos, x, y, leftbtn, rightbtn, midbtn, UpdateMouseOver() (picks at x, y),
+#          GetMouseOver(), GetMouseCapture(), _OnMouseMove(left, top), _OnMouseDown(button, left, top),
+#          _OnMouseUp(button, left, top), _OnMouseWheel(delta)   carbonui/uilib.py; buttons uiconst MOUSELEFT 0, RIGHT 1, MIDDLE 2
+#   uicore.ScaleDpi(value)               carbonui/uicore.py
 #   uicore.cmd (EveCommandService): IsCommandEnabled(cm), ExecuteCommand(cm, *args), CmdStopShip
 #                                        eve/client/script/ui/eveCommands.py
 #   commandMap GetAllCommands(), GetCommandByName(name); a mapping's name, category,
@@ -64,6 +68,7 @@
 import ast
 import collections
 import json
+import math
 import os
 import sys
 import time
@@ -77,7 +82,7 @@ try:
 except ImportError:
     import builtins
 
-VERSION = 8
+VERSION = 9
 # The build the client names above were checked against. Ops that use them
 # refuse on another build unless the command passes anyBuild; these don't.
 CHECKED_BUILD = 3396210
@@ -86,6 +91,8 @@ REPR_LIMIT = 20000
 # How long a drive op waits for what it started before answering; past it the
 # action carries on (a dialog it opened may be waiting for an answer).
 SETTLE_MS = 3000
+POINTER_ACTIONS = ('move', 'click', 'drag', 'wheel')
+MAX_POINTER_POINTS = 120
 # How long act waits by default for the action to be done (in space, docked,
 # out of warp ...); wait overrides it, and wait 0 answers once it has started.
 DONE_MS = {'warpTo': 120000, 'undock': 60000, 'dock': 60000, 'jump': 60000, 'logoff': 60000, 'select': 60000,
@@ -422,6 +429,11 @@ def lower(value):
     return as_text(value).lower() if isinstance(value, (bytes, UNICODE)) and value else None
 
 
+def finite(value):
+    return (isinstance(value, INTS + (float,)) and not isinstance(value, bool)
+            and not math.isnan(value) and not math.isinf(value))
+
+
 def bounded(value, default, low, high):
     try:
         number = int(value)
@@ -554,6 +566,8 @@ class EnforceAssertions(ast.NodeTransformer):
 
 class Agent(object):
     __notifyevents__ = ['OnGridcheckClient']
+    # One pointer command at a time: each moves uilib's cursor and puts it back.
+    pointer_busy = False
 
     def __init__(self, sm, token):
         self.sm = sm
@@ -981,6 +995,78 @@ class Agent(object):
         info = node_info(node)
         info['path'] = here
         return info
+
+    # args: {"action": move|click|drag|wheel, "points": [[x, y], ...], "button",
+    # "durationMs", "delta"}. A pointer path in UI units through uilib's own
+    # mouse handlers: each point is picked as a frame picks the real cursor,
+    # then moved to; click and drag press at the first point and release at
+    # the last. The OS cursor doesn't move, and the next frame's own pick can
+    # replace this one, so hover that has to last needs the real mouse.
+    def op_pointer(self, args):
+        uicore = self.current_uicore()
+        uilib = uicore.uilib
+        action = args.get('action', 'move')
+        if action not in POINTER_ACTIONS:
+            raise ValueError('pointer action: move, click, drag or wheel')
+        points = args.get('points')
+        if not isinstance(points, list) or not 1 <= len(points) <= MAX_POINTER_POINTS:
+            raise ValueError('pointer points: 1 to %d [x, y] pairs' % MAX_POINTER_POINTS)
+        path = []
+        for point in points:
+            if not isinstance(point, (list, tuple)) or len(point) != 2 or not all(finite(value) for value in point):
+                raise ValueError('a pointer point is [x, y], two numbers')
+            x, y = point
+            if not (0 <= x < uicore.desktop.width and 0 <= y < uicore.desktop.height):
+                raise ValueError('pointer point [%s, %s] is outside the desktop (%s x %s)' % (x, y, uicore.desktop.width, uicore.desktop.height))
+            path.append((x, y))
+        button = args.get('button', 0)
+        if isinstance(button, bool) or button not in (0, 1, 2):
+            raise ValueError('pointer button: 0 left, 1 right, 2 middle')
+        duration = args.get('durationMs', 0)
+        if not finite(duration) or not 0 <= duration <= 3000:
+            raise ValueError('pointer durationMs: 0 to 3000')
+        delta = args.get('delta', 0)
+        if action == 'wheel' and (not finite(delta) or delta == 0 or abs(delta) > 12000):
+            raise ValueError('wheel delta: not 0, -12000 to 12000')
+        if action == 'drag' and len(path) < 2:
+            raise ValueError('a drag needs two points or more')
+        if uilib.leftbtn or uilib.rightbtn or uilib.midbtn or uilib.GetMouseCapture() is not None:
+            raise ValueError('a mouse button is down or something holds the mouse; pointer waits for it to be let go')
+        if self.pointer_busy:
+            raise ValueError('another pointer command is under way')
+        before = (uilib.cursorPos, uilib.x, uilib.y)
+        self.pointer_busy = True
+        pressed = False
+        picked = None
+        try:
+            for index, (x, y) in enumerate(path):
+                raw = (int(uicore.ScaleDpi(x)), int(uicore.ScaleDpi(y)))
+                uilib.cursorPos = raw
+                # UpdateMouseOver picks at uilib.x, y; _OnMouseMove then moves there from the last point.
+                uilib.x, uilib.y = x, y
+                uilib.UpdateMouseOver()
+                uilib.x, uilib.y = before[1:] if index == 0 else path[index - 1]
+                uilib._OnMouseMove(*raw)
+                if index == 0 and action in ('click', 'drag'):
+                    pressed = True
+                    uilib._OnMouseDown(button, *raw)
+                picked = uilib.GetMouseOver()
+                if duration and index + 1 < len(path):
+                    blue.pyos.synchro.SleepWallclock(int(duration / (len(path) - 1)))
+            if action == 'wheel':
+                uilib._OnMouseWheel(int(delta))
+            target = node_info(picked) if picked is not None else None
+            attempt(lambda: self.events.record('action', {'op': 'pointer %s' % action,
+                                                          'args': clip((target or {}).get('name') or (target or {}).get('cls'))}))
+            return {'action': action, 'points': len(path), 'target': target}
+        finally:
+            try:
+                if pressed:
+                    uilib._OnMouseUp(button, *uilib.cursorPos)
+            finally:
+                uilib.cursorPos, uilib.x, uilib.y = before
+                attempt(uilib.UpdateMouseOver)
+                self.pointer_busy = False
 
     # The node, and the nearest node from it up that takes a click.
     def op_find(self, args):

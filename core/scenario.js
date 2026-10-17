@@ -20,6 +20,7 @@ const loadoutTools = require("./loadout");
 const perfTools = require("./perf");
 const { launchSwitches, parseKey } = require("./client");
 const { validateCheck } = require("./clientUi");
+const { captureOptions, validatePointer } = require("./clientVisual");
 
 const SCENARIO_DIR = path.join(__dirname, "..", "scenarios");
 // The tree's own scenarios, committed with its features (gridcheck.config.json
@@ -82,6 +83,8 @@ const CORE_STEP_KEYS = {
   clientKey: ["clientKey", "user", "node"],
   clientType: ["clientType", "user", "node", "set", "enter"],
   clientCmd: ["clientCmd", "user", "settle"],
+  clientPointer: ["clientPointer", "user"],
+  clientCaptureFrames: ["clientCaptureFrames", "user"],
   clientAct: ["clientAct", "user", "target", "range", "module", "settle"],
   clientDiff: ["clientDiff", "user", "timeout", "tolerance"],
   clientScreenshot: ["clientScreenshot", "user"],
@@ -89,7 +92,7 @@ const CORE_STEP_KEYS = {
 };
 // What a step keeps that is not a $value to bind at run time.
 const STEP_OWN_KEYS = new Set(["type", "note", "as", "retry", "implicit", "action", "condition", "seconds", "plugin",
-  "steps", "every", "times", "perf", "code", "node", "check", "text", "launch"]);
+  "steps", "every", "times", "perf", "code", "node", "check", "text", "launch", "pointer", "capture"]);
 const PERF_LABEL = /^[A-Za-z0-9][\w .:-]{0,39}$/;
 const DEFAULT_WAIT_FOR_SECONDS = 300;
 // The client's own actions (agent.py op_act), and those that need a target.
@@ -191,6 +194,8 @@ function describeStep(step, registry = defaultRegistry()) {
     case "clientKey": return `clientKey ${step.keyName}${step.node ? ` into ${describeNode(step.node)}` : ""}${clientSuffix(step)}`;
     case "clientType": return `clientType ${step.text.length} character(s)${step.node ? ` into ${describeNode(step.node)}` : ""}${clientSuffix(step)}`;
     case "clientCmd": return `clientCmd ${step.command}${clientSuffix(step)}`;
+    case "clientPointer": return `clientPointer ${step.pointer.action} ${step.pointer.points.map((p) => p.join(",")).join(" ")}${clientSuffix(step)}`;
+    case "clientCaptureFrames": return `clientCaptureFrames ${step.capture.count} every ${step.capture.intervalMs} ms${clientSuffix(step)}`;
     case "clientAct": return `clientAct ${step.act}${step.target !== undefined ? ` ${step.target}` : ""}` +
       `${step.module !== undefined ? ` module ${step.module}` : ""}${clientSuffix(step)}`;
     case "clientDiff": return `clientDiff (up to ${step.seconds}s)${clientSuffix(step)}`;
@@ -664,6 +669,23 @@ function validateScenario(raw, { source = "scenario", defaultName = null, worldE
           else step.command = value.trim();
           clientUser(step);
           clientSettle(step, 60, "how long to wait for the command to finish (default 3)");
+          break;
+        case "clientPointer":
+          try {
+            step.pointer = validatePointer(value);
+          } catch (error) {
+            problem(where, `clientPointer: ${error.message}`);
+          }
+          clientUser(step);
+          break;
+        case "clientCaptureFrames":
+          try {
+            step.capture = captureOptions(value === true ? {} : value);
+          } catch (error) {
+            problem(where, `clientCaptureFrames: ${error.message}`);
+          }
+          if (step.capture && !during) budget += ((step.capture.count - 1) * step.capture.intervalMs) / 1000;
+          clientUser(step);
           break;
         case "clientUi":
           step.node = clientNode(value, false);

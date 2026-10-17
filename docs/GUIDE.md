@@ -542,6 +542,20 @@ it to keep holding that long, on the same character and the same nodes. A state 
 `--limit` fails the check, since it can't show a count or an absence. To check a UI is gone, not
 just hidden, use `"count": 0, "visible": "any"`.
 
+**Comparing pictures.** `capture-frames --out <new folder>` takes `--count` pictures (default 10)
+`--interval` ms apart (default 100, a minute in all at most) and writes `frames.json`: each frame's
+time from the first, the middle of the call that took it. That's an estimate, not when the GPU
+showed it, and nothing between frames is seen. A change of process, character or window size
+fails the capture. `compare-images <reference.png> <actual.png>` and
+`compare-frames <reference/frames.json> <actual/frames.json>` run offline, no server needed. A
+pixel changed when any channel differs by more than `--threshold` (0-255, default 0); the check
+fails, exit 1, when more than `--max-changed` of them did (a share, default 0). `--ignore
+"x,y,w,h;..."` leaves out rectangles such as a clock. `compare-frames` also fails a frame whose
+time from the first drifts more than `--max-drift` ms (100) from the reference's. `--diff` writes
+a new PNG (or a folder of them) with changed pixels red and ignored ones blue. Only 8-bit RGB and
+RGBA PNGs are read, which is what `screenshot` saves; use the same resolution, UI scale and camera
+for both sides.
+
 **Driving the client.** Everything below runs inside the client, through the code a player's
 input reaches, so the client's window can stay in the background. Its names were checked against
 the decompiled client (build 3396210); `agent.py` lists them.
@@ -578,6 +592,14 @@ the decompiled client (build 3396210); `agent.py` lists them.
   would, with the client's own enabled and blocked checks. `cmd` with no name lists them, with
   label and shortcut; `--filter` narrows the list. Some toggle: `OpenInventory` closes an open
   inventory. The navigation commands (`CmdWarpToItem` ...) only arm a click on a target; use `act`.
+
+- `pointer <move|click|drag|wheel> <x,y> ...` moves the client's mouse along points in UI pixels
+  (`ui-state` gives rects), through `uilib`'s own handlers: each point is picked as a frame picks
+  the real cursor, then moved to. `click` and `drag` press at the first point and release at the
+  last; `--button` 1 is right, 2 middle; `--duration <ms>` spreads the points over that long;
+  `wheel` scrolls `--delta` (120 a notch, negative down) at the last point. The OS cursor doesn't
+  move, and the client's next frame picks the real cursor again, so a hover that has to last needs
+  the real mouse. It refuses while a real button is down. Check the UI after it with `check-ui`.
 
 What a click or command starts runs on its own tasklet. The command waits `--wait` seconds
 (default 3) for it. If it hasn't finished by then, it reports "still running": usually it opened a
@@ -712,7 +734,7 @@ Steps:
 | `{ "wait": 30 }` | Waits that many seconds. Prefer `waitFor` on the event you are waiting for: a `GRID` with the new `systemName` after a teleport, or the first `GRID` after an undock. |
 | `{ "waitFor": "<condition>", "timeout": 300 }` | Waits for an event, seen after the step starts, that matches the condition. Setup fails if none comes before the timeout (default 300 s). |
 | `{ "repeat": [<steps>], "every": 5, "times": 12 }` | Runs its steps a round every `every` seconds, start to start, for `times` rounds; the report shows one step, "12 round(s)". A step that fails in a round fails the repeat, naming the round. In `during`, leave `times` out and it repeats until the run stops. It can't hold another `repeat` or `login`, and in setup its rounds count toward the run's budget. |
-| `"clientLaunch"`, `"clientDiff"`, `{ "clientUi": ... }`, `{ "clientCheckUi": ... }`, `{ "clientClick": ... }`, `{ "clientKey": "tab" }`, `{ "clientType": "..." }`, `{ "clientCmd": "..." }`, `{ "clientAct": "undock" }`, `{ "clientEval": ... }`, `{ "clientScreenshot": "..." }` | A real EVE client; see [A real client in a scenario](#a-real-client-in-a-scenario). |
+| `"clientLaunch"`, `"clientDiff"`, `{ "clientUi": ... }`, `{ "clientCheckUi": ... }`, `{ "clientClick": ... }`, `{ "clientKey": "tab" }`, `{ "clientType": "..." }`, `{ "clientCmd": "..." }`, `{ "clientPointer": ... }`, `{ "clientCaptureFrames": ... }`, `{ "clientAct": "undock" }`, `{ "clientEval": ... }`, `{ "clientScreenshot": "..." }` | A real EVE client; see [A real client in a scenario](#a-real-client-in-a-scenario). |
 | `{ "lock": "nearest npc", "as": "mark" }`, `{ "activate": "weapons", "target": "$mark" }`, `"stop"`, ... | A [player action](#player-actions): `approach`, `orbit`, `keepAtRange`, `warpTo`, `stop`, `lock`, `unlock`, `activate`, `deactivate`, `loadAmmo`, `launchDrones`, `engageDrones`. The value is the target, or the modules or drones; the other arguments are keys (`range`, `target`, `once`, `charge`, `count`, `timeout`). `as` binds the target's item ID, or the drones launched. A refused action fails the step. |
 
 Player actions, and plugin steps that allow it, take `"retry": { "every": 15, "for": 480 }`, which
@@ -781,6 +803,8 @@ second account beside it. `scenarios/client-undock.json` uses each piece:
 | `{ "clientAct": "undock" }` | `gridcheck client act`: `undock`, `dock` (the nearest station unless `target`), `jump`, `warpTo`, `approach`, `orbit`, `keepAtRange`, `stop`, `lock`, `unlock`, `activate`, `deactivate`, `logoff`, `select`. Keys: `target` (an itemID or a `$name`), `range`, `module` (`high1` or an itemID). The step ends when the action is done, as `client act` does; one that isn't done in time fails the step, and so does an error the action raises or a lock the client dropped. A refusal on a tasklet of the client's own is a `CLIENT_EXCEPTION`; `no CLIENT_EXCEPTION` catches those. |
 | `{ "clientCheckUi": <check>, "timeout": 15, "stable": 500 }` | `gridcheck client check-ui`: waits up to `timeout` seconds for the check to hold, and `stable` milliseconds more if given. Fails setup if it doesn't. The last UI state and the verdict are saved as `client/ui-check-N.json`, linked from the report. |
 | `{ "clientKey": "tab" }`, `{ "clientType": "rifter", "node": { "name": "quickFilterInputBox" } }`, `{ "clientCmd": "OpenInventory" }` | `gridcheck client key`, `type` and `cmd`. `node` names the edit to type into or press the key in; `clientType` takes `set` and `enter` as `--set` and `--enter`. `clientCmd` takes `settle` (default 3 s) and fails when the command is still running after it. |
+| `{ "clientPointer": { "action": "drag", "points": [[200, 300], [300, 350]], "durationMs": 500 } }` | `gridcheck client pointer`; also `button` and, for `wheel`, `delta`. |
+| `{ "clientCaptureFrames": { "count": 12, "intervalMs": 100 } }` | `gridcheck client capture-frames` into the run's `client/frames-N/`, linked from the report; its time counts toward the run's budget. |
 | `{ "clientEval": "<python>", "as": "station" }` | `gridcheck client eval`. A Python error fails the step. `as` binds the value when it's an ID or a list of IDs: `{ "clientEval": "session.stationid2", "as": "station" }`, then `{ "clientAct": "dock", "target": "$station" }`. `{ "clientEval": { "file": "probe.py" } }` reads the code from a file beside the scenario, at `run --check`. `"assert": true` fails the step unless the value is exactly `True`, and `timeout` (default 15, at most 300) is how long to wait for the answer: it stops waiting, not the code. In a run, each answer is saved as `client/eval-N.json`. |
 | `{ "clientDiff": true, "timeout": 30 }` | `gridcheck client diff` every 2 s until the client is in space and holds what the server's grid holds, or the timeout. The last diff becomes one `CLIENT_BALLPARK` line. The step passes either way: say `CLIENT_BALLPARK ok=true` in `expect`. `tolerance` is metres, as `--tolerance`. |
 | `{ "clientScreenshot": "in space" }` | A picture of the client, labelled, taken as `client screenshot` takes it. A picture that fails doesn't fail the step; the report says why. |

@@ -140,6 +140,19 @@ function argList(command) {
   return { args, flag };
 }
 
+// client compare-images and compare-frames: the two files after --, the options as flags.
+function compareArgs(sub, p) {
+  const { args, flag } = argList("client");
+  flag("diff", p.diff);
+  flag("threshold", p.threshold);
+  flag("max-changed", p.maxChangedFraction);
+  flag("max-drift", p.maxTimingDriftMs);
+  flag("ignore", Array.isArray(p.ignore) && p.ignore.length ? p.ignore.map((rect) => rect.join(",")).join(";") : undefined);
+  flag("out", p.out);
+  args.push("--", sub, String(p.reference), String(p.actual));
+  return args;
+}
+
 // tool name -> (params) -> CLI arguments. Plugin tools bring their own args().
 const CLI_ARGS = {
   up(p) {
@@ -275,6 +288,27 @@ const CLI_ARGS = {
     args.push("--", "ui-state");
     return args;
   },
+  client_pointer(p) {
+    const { args, flag } = argList("client");
+    flag("user", p.user);
+    flag("button", p.button);
+    flag("duration", p.durationMs);
+    flag("delta", p.delta);
+    flag("json", true);
+    args.push("--", "pointer", String(p.action), ...(p.points || []).map((point) => (Array.isArray(point) ? point.join(",") : String(point))));
+    return args;
+  },
+  client_capture_frames(p) {
+    const { args, flag } = argList("client");
+    flag("user", p.user);
+    flag("out", p.out);
+    flag("count", p.count);
+    flag("interval", p.intervalMs);
+    args.push("--", "capture-frames");
+    return args;
+  },
+  client_compare_images: (p) => compareArgs("compare-images", p),
+  client_compare_frames: (p) => compareArgs("compare-frames", p),
   client_check_ui(p) {
     const { args, flag } = argList("client");
     flag("user", p.user);
@@ -461,6 +495,15 @@ const bool = (description) => ({ type: "boolean", description });
 const schema = (properties = {}, required = []) => ({ type: "object", properties, required, additionalProperties: false });
 
 const simple = (name) => async (params, context) => cliResult(await runCli(cliArgs(name, params), context));
+
+// client_compare_images and client_compare_frames take these alike.
+const COMPARE_PARAMS = {
+  threshold: int("How much a channel may differ before the pixel counts as changed (default 0).", { minimum: 0, maximum: 255 }),
+  maxChangedFraction: num("The share of pixels that may change (default 0).", { minimum: 0, maximum: 1 }),
+  ignore: { type: "array", description: "Rectangles to leave out, [x, y, width, height] in pixels, up to 100.",
+    items: { type: "array", items: { type: "integer", minimum: 0 }, minItems: 4, maxItems: 4 }, maxItems: 100 },
+  out: str("Also save the result to this JSON file."),
+};
 
 const TOOLS = [
   {
@@ -721,6 +764,53 @@ const TOOLS = [
       timeout: int("Seconds to wait for the answer (default 15).", { minimum: 1, maximum: 300 }),
     }),
     run: simple("client_ui_state"),
+  },
+  {
+    name: "client_pointer",
+    description: "Move, click, drag or scroll the EVE client's mouse along points in UI pixels, through its own mouse " +
+      "handlers and picking. The OS cursor doesn't move, and the client's next frame can replace the hover, so check " +
+      "the UI after (client_check_ui).",
+    inputSchema: schema({
+      action: str("What to do.", { enum: ["move", "click", "drag", "wheel"] }),
+      points: { type: "array", description: "[[x, y], ...] in UI pixels inside the desktop, 1 to 120; a drag needs two or more.",
+        items: { type: "array", items: { type: "number" }, minItems: 2, maxItems: 2 }, minItems: 1, maxItems: 120 },
+      button: int("0 left (default), 1 right, 2 middle.", { minimum: 0, maximum: 2 }),
+      durationMs: int("Milliseconds to travel the points (default 0).", { minimum: 0, maximum: 3000 }),
+      delta: int("wheel: how far, 120 a notch; negative scrolls down.", { minimum: -12000, maximum: 12000 }),
+      user: str("The client's account, when more than one is online."),
+    }, ["action", "points"]),
+    run: simple("client_pointer"),
+  },
+  {
+    name: "client_capture_frames",
+    description: "Pictures of the EVE client at an interval into a new folder, with a frames.json of when each was taken " +
+      "(estimates, not when the GPU showed it). Compare two such folders with client_compare_frames.",
+    inputSchema: schema({
+      out: str("A new folder for the frames."),
+      count: int("How many frames (default 10).", { minimum: 2, maximum: 120 }),
+      intervalMs: int("Milliseconds between frames (default 100); at most 60 s in all.", { minimum: 50, maximum: 5000 }),
+      user: str("The client's account, when more than one is online."),
+    }, ["out"]),
+    run: simple("client_capture_frames"),
+  },
+  {
+    name: "client_compare_images",
+    description: "Compare two PNGs pixel by pixel, offline: how many pixels changed, RMSE, the largest change, and " +
+      "optionally a diff PNG (changed red, ignored blue). Fails when more changed than allowed.",
+    inputSchema: schema({ ...COMPARE_PARAMS,
+      reference: str("The reference PNG."), actual: str("The PNG to check."), diff: str("A new PNG to draw the differences in.") },
+    ["reference", "actual"]),
+    run: simple("client_compare_images"),
+  },
+  {
+    name: "client_compare_frames",
+    description: "Compare two client_capture_frames folders, offline: each frame's pixels, and each frame's time from the " +
+      "first against the reference's. Only the sampled frames; nothing between them.",
+    inputSchema: schema({ ...COMPARE_PARAMS,
+      reference: str("The reference frames.json."), actual: str("The frames.json to check."), diff: str("A new folder for the diff PNGs."),
+      maxTimingDriftMs: int("How far a frame's time may drift from the reference's (default 100).", { minimum: 0, maximum: 60000 }) },
+    ["reference", "actual"]),
+    run: simple("client_compare_frames"),
   },
   {
     name: "client_check_ui",
