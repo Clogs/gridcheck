@@ -668,8 +668,8 @@ class Agent(object):
         code = args.get('code') or ''
         if not isinstance(code, TEXT):
             raise ValueError('eval code must be text')
-        if isinstance(code, UNICODE) and sys.version_info[0] < 3:
-            code = code.encode('utf8')
+        # Compiled as unicode, so u"..." literals keep their characters on 2.7;
+        # its UTF-8 bytes would be read as Latin-1.
         namespace = self.namespace
         namespace['sm'] = self.sm
         namespace['session'] = getattr(builtins, 'session', None)

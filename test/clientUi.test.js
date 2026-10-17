@@ -210,3 +210,32 @@ print(json.dumps({
       pickChildren: [true, false],
     });
   });
+
+// The client's own interpreter: GRIDCHECK_PYTHON27, else the py launcher's 2.7, python2.7 or python2.
+const PYTHON27 = [process.env.GRIDCHECK_PYTHON27 && [process.env.GRIDCHECK_PYTHON27], ["py", "-2.7"], ["python2.7"], ["python2"]]
+  .filter(Boolean)
+  .find(([exe, ...pre]) => spawnSync(exe, [...pre, "-c", "import sys; assert sys.version_info[:2] == (2, 7)"]).status === 0);
+
+test("on the client's Python 2.7, optimized, eval keeps assert and non-ASCII text", { skip: !PYTHON27 && "no Python 2.7: set GRIDCHECK_PYTHON27" }, () => {
+  const [exe, ...pre] = PYTHON27;
+  const script = `import sys, types, json
+sys.modules['blue'] = types.ModuleType('blue')
+sys.modules['uthread'] = types.ModuleType('uthread')
+scope = {}
+exec(compile(open(sys.argv[1]).read(), '<agent>', 'exec'), scope)
+agent = scope['Agent'].__new__(scope['Agent'])
+agent.namespace = {}
+agent.sm = None
+agent.current_uicore = lambda: None
+caught = []
+for code in [u'assert False, "top"', u'def check():\\n    assert 1 == 2, "nested"\\ncheck()']:
+    try:
+        agent.op_eval({'code': code})
+    except AssertionError as error:
+        caught.append(str(error))
+text = agent.op_eval({'code': u'u"caf\\xe9"'})['json']
+print(json.dumps({'optimize': sys.flags.optimize, 'caught': caught, 'text': text}))`;
+  const run = spawnSync(exe, [...pre, "-O", "-c", script, AGENT], { encoding: "utf8" });
+  assert.strictEqual(run.status, 0, run.stderr);
+  assert.deepStrictEqual(JSON.parse(run.stdout), { optimize: 1, caught: ["top", "nested"], text: "café" });
+});
