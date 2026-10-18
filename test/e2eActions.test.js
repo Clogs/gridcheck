@@ -100,6 +100,11 @@ test("the ship's listing becomes slots, cargo and drone bay, and modules are pic
   assert.throws(() => pickModules(ITEMS, "name~Laser"), /no fitted module matches "name~Laser"; fitted: low Damage Control I \(11\)/);
 });
 
+test("a listing wrapped in a set, as EveJS 261018.1 answers ListByFlags, reads the same as a plain list", () => {
+  const asSet = { type: "objectex1", header: [{ type: "token", value: "__builtin__.set" }, [LISTED]], list: [], dict: [] };
+  assert.deepStrictEqual(shipItems(asSet, (typeID) => TYPES.get(typeID)), ITEMS);
+});
+
 function fakeIO({ grid = { characterID: 9, self: { itemID: 1 }, entities: ROWS }, refuse = {}, lockAfter = 2 } = {}) {
   const calls = [];
   let clock = 0;

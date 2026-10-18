@@ -273,6 +273,11 @@ function pickHoldItems(items, slot, spec) {
 
 // A ListByFlags reply -> plain rows with slot and type names.
 function shipItems(result, typeInfo = () => null) {
+  // EveJS 261018.1 answers as Tranquility does, the rows in a __builtin__.set.
+  if (result && result.type === "objectex1" && Array.isArray(result.header) &&
+      result.header[0] && result.header[0].value === "__builtin__.set" && Array.isArray(result.header[1])) {
+    result = result.header[1][0];
+  }
   const rows = result && Array.isArray(result.items) ? result.items : Array.isArray(result) ? result : [];
   const items = [];
   for (const raw of rows) {

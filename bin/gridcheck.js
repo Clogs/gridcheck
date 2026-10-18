@@ -429,8 +429,11 @@ async function cmdLogin(flags) {
     }
   }
 
+  // A tree with the AIR tutorial on (EveJS 261018.1 ships it on) would launch a new
+  // character into space in a capsule. The retail client's skip flag keeps it docked.
   const selected = await gateway("POST", "/session/select", {
     args: [characterID],
+    kwargs: { skipTutorial: true },
     confirm: true,
     session: { userid: accountID },
   });
