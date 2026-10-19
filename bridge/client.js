@@ -78,7 +78,11 @@ function clientNoise({ type, where }) {
 function createClientAgent({ log, patched = () => false, testTree = () => false, read = readAgentFile, now = Date.now,
   mintToken = () => crypto.randomBytes(24).toString("hex"), liveSessions = () => [] }) {
   const tokens = new Map(); // token -> { username, accountID }
-  const loginsByAccount = new Map(); // accountID -> token, from login until the signedFunc is built
+  // The token login the handshake is handling: { accountID, token } from resolveLogin until its
+  // signedFunc is built. The handshake makes both calls in one synchronous _handleAuthentication,
+  // so no other login comes between them. The client ID can't name the login instead: since
+  // EveJS 261018.1 it counts connections and no longer holds the account.
+  let pendingLogin = null;
   const lastLogin = new Map(); // accountID -> the token that logged in last
   const agents = new Map(); // token -> { token, username, accountID, session, attachedAtMs, lastSeenMs, pid, build, ... }
   const waiting = new Map(); // command id -> { token, settle }
@@ -118,6 +122,7 @@ function createClientAgent({ log, patched = () => false, testTree = () => false,
 
   // Called from the handshake (client-agent patch) with the decoded login dict.
   function resolveLogin(loginData, { accountStore, dictGet, strVal }) {
+    pendingLogin = null;
     try {
       const raw = dictGet(loginData, "user_sso_token");
       if (raw === undefined || raw === null) return false;
@@ -138,7 +143,7 @@ function createClientAgent({ log, patched = () => false, testTree = () => false,
       setDictEntry(loginData, "user_name", entry.username, strVal);
       setDictEntry(loginData, "user_password_hash", typeof account.passwordhash === "string" ? account.passwordhash : "", strVal);
       entry.accountID = accountID;
-      loginsByAccount.set(entry.accountID, token);
+      pendingLogin = { accountID, token };
       lastLogin.set(entry.accountID, token);
       log.info(`[AgentBridge] client login: ${entry.username} (account ${entry.accountID}) by token`);
       return true;
@@ -148,13 +153,13 @@ function createClientAgent({ log, patched = () => false, testTree = () => false,
     }
   }
 
-  // Called from buildTidiSignedFunc. clientId is 1000000 * accountID + the proxy node.
-  function wrapLoginExpression(expr, clientId) {
+  // Called from buildTidiSignedFunc, right after resolveLogin for the same login.
+  function wrapLoginExpression(expr, _clientId) {
+    const login = pendingLogin;
+    pendingLogin = null;
     try {
-      const accountID = Math.floor(Number(clientId) / 1000000);
-      const token = loginsByAccount.get(accountID);
-      if (!token) return expr;
-      loginsByAccount.delete(accountID);
+      if (!login) return expr;
+      const { accountID, token } = login;
       const source = `_gc_token = ${JSON.stringify(token)}\n${read("bootstrap.py")}`;
       const encoded = Buffer.from(source, "utf8").toString("base64");
       const run = `eval(compile(__import__('base64').b64decode('${encoded}'), '<gridcheck-client>', 'exec'), ` +

@@ -84,8 +84,11 @@ test("only the token login's signedFunc carries the bootstrap, once", () => {
   assert.equal(agent.wrapLoginExpression(expr, CLIENT_ID), expr, "no token login yet");
   const { token } = agent.mint({ username: "e2eclient" });
   agent.resolveLogin(ssoLogin(token), { accountStore, dictGet, strVal });
-  assert.equal(agent.wrapLoginExpression(expr, 8 * 1000000 + 888444), expr, "another account");
-  const wrapped = agent.wrapLoginExpression(expr, CLIENT_ID);
+  agent.resolveLogin({ type: "dict", entries: [["user_name", "someone"], ["user_password_hash", "a1b2"]] }, { accountStore, dictGet, strVal });
+  assert.equal(agent.wrapLoginExpression(expr, CLIENT_ID), expr, "a token login that failed leaves nothing for the next login");
+  agent.resolveLogin(ssoLogin(token), { accountStore, dictGet, strVal });
+  // EveJS 261018.1 numbers clients by connection (offset * 10^10 + node), so the ID no longer holds the account.
+  const wrapped = agent.wrapLoginExpression(expr, 1 * 10000000000 + 1000003120);
   assert.match(wrapped, /^\(lambda _gc_result: \(eval\(compile\(__import__\('base64'\)/);
   assert.ok(wrapped.endsWith(`)(${expr})`), "the stock expression still runs, and its result is the result");
   assert.ok(/^[\x20-\x7e]*$/.test(wrapped), "ASCII, as buildMarshaledString writes it");
