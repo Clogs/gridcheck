@@ -38,8 +38,9 @@ function savedWorldDir(treeRoot, name) {
 
 // On Windows a stopped server's files can stay locked for a moment (a virus
 // scanner, a handle the OS hasn't released), so a write to them is retried
-// briefly before it counts as failed.
-const LOCKED = /EBUSY|EPERM|EACCES|database is locked|SQLITE_BUSY/;
+// briefly before it counts as failed. SQLite reports a -shm or -wal it can't
+// open yet as "disk I/O error".
+const LOCKED = /EBUSY|EPERM|EACCES|database is locked|SQLITE_BUSY|disk I\/O error|SQLITE_IOERR/;
 function retryLocked(fn, { tries = 6, delayMs = 250 } = {}) {
   for (let attempt = 1; ; attempt += 1) {
     try {
@@ -142,7 +143,7 @@ function copyWorld(treeRoot, fromTree, { force = false } = {}) {
 function runHook(hook, method, ctx) {
   if (typeof hook[method] !== "function") return null;
   try {
-    return hook[method](ctx);
+    return retryLocked(() => hook[method](ctx));
   } catch (error) {
     throw new Error(`plugin ${hook.plugin}: world ${method} failed: ${error.message}`);
   }
@@ -274,6 +275,7 @@ module.exports = {
   liveLeases,
   restoreWorld,
   retryLocked,
+  runHook,
   saveWorld,
   savedWorldDir,
   savedWorldInfo,

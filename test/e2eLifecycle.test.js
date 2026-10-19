@@ -190,3 +190,21 @@ test("a world save retries a write a stopped server's lingering lock refuses, an
   assert.throws(() => retryLocked(() => { other += 1; throw new Error("disk full"); }, { delayMs: 1 }), /disk full/);
   assert.strictEqual(other, 1);
 });
+
+test("a plugin's world hook is retried when SQLite can't yet open the stopped world, and names the plugin when it fails", () => {
+  const { runHook } = require("../core/worlds");
+  let calls = 0;
+  const hook = {
+    plugin: "lu",
+    onSave: () => {
+      calls += 1;
+      if (calls < 3) throw Object.assign(new Error("disk I/O error"), { code: "ERR_SQLITE_ERROR", errcode: 10 });
+      return { savedSimNowMs: 1 };
+    },
+  };
+  assert.deepStrictEqual(runHook(hook, "onSave", {}), { savedSimNowMs: 1 });
+  assert.strictEqual(calls, 3);
+  assert.strictEqual(runHook({ plugin: "lu" }, "onSave", {}), null, "a plugin without the hook");
+  assert.throws(() => runHook({ plugin: "lu", onSave: () => { throw new Error("no such table"); } }, "onSave", {}),
+    /^Error: plugin lu: world onSave failed: no such table$/);
+});
