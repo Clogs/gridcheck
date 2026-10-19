@@ -164,6 +164,7 @@ const CLI_ARGS = {
     flag("profile", p.profile);
     flag("profile-every", p.profile ? p.profileEvery : undefined);
     flag("timeout", p.timeout);
+    for (const [name, value] of Object.entries(p.env || {})) args.push(`--env=${name}=${value}`);
     return args;
   },
   down(p) {
@@ -552,6 +553,12 @@ const TOOLS = [
         "break each window of ticks down by subsystem. Tick durations need no profiler."),
       profileEvery: int("With profile: ticks per profiler window (default 50, 5 s at 10 Hz).", { minimum: 1, maximum: 10000 }),
       timeout: int("Seconds to wait for boot (default 600).", { minimum: 10 }),
+      env: {
+        type: "object",
+        description: "Variables to set in the server's environment, such as a feature switch: { \"EVEJS_SOME_SWITCH\": true }. " +
+          "Not the ones gridcheck sets itself (ports, data dir, agent bridge, profiler, the plugins' up flags); those are refused.",
+        additionalProperties: { type: ["string", "number", "boolean"] },
+      },
     }),
     run: simple("up"),
   },

@@ -714,7 +714,7 @@ node tools/gridcheck/bin/gridcheck.js run loadout-npc-fight --reuse     # again:
 | Key | What it holds |
 | --- | --- |
 | `world` or `recipe` | A saved world (`gridcheck world list`), `"fresh"`, or `"recipe": "<name>"` for a world the tool builds ([WORLDS.md](WORLDS.md)). One is required. |
-| `up` | `market` (default `true`), `timeout` (boot, seconds), `profile` (boot with the tick profiler; turns `watch.perf` on), `profileEvery` (ticks per profiler window, default 50), and the plugins' `up` flags. |
+| `up` | `market` (default `true`), `timeout` (boot, seconds), `profile` (boot with the tick profiler; turns `watch.perf` on), `profileEvery` (ticks per profiler window, default 50), `env` (`{ "NAME": "value" }`, variables for the server's environment, as `up --env` sets them; not the ones gridcheck sets itself), and the plugins' `up` flags. A restore flag such as the lu plugin's `realClock` applies to a saved world or recipe only: its default is off in a `fresh` world, and setting it there is an error. |
 | `setup` | Steps, in order. A login runs first if the list doesn't start with one. |
 | `during` | Steps that run after setup, beside the stop conditions; see [During](#during). Optional. |
 | `watch` | `every` (2 s), `offgridEvery` (5 s), `client` (`diverge` by default; `FX` lines need `"fx"` or `"all"`, `CLIENT` lines `"all"`), `divergeMeters`, `log` (`true`), `grep`, `perf` (`true` for a `PERF` window every 5 s, or seconds), `ballpark` (`true`: each real client's ballpark against the server's grid every 2 s, or seconds; see [A real client in a scenario](#a-real-client-in-a-scenario)), `screenshots` (conditions, and `"stop"`, at which to take a picture of each real client). |

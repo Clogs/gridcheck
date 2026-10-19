@@ -22,6 +22,7 @@ const {
   resultRecord,
   runScenario,
   upForWorld,
+  upText,
   validateScenario,
 } = require("../core/scenario");
 const { createToolRegistry, emptyRegistry } = require("../core/plugins");
@@ -224,7 +225,7 @@ test("a scenario loads to its steps, conditions and defaults", LU, () => {
   assert.deepStrictEqual(scenario.setup[6].positionals, ["pirate"]);
   assert.deepStrictEqual(scenario.setup[6].flags, { doctrine: "sanshas", count: 2 });
   assert.deepStrictEqual(scenario.up, { realClock: true, market: true, offgridTravel: null, offgridActivity: null, timeout: null,
-    profile: false, profileEvery: null });
+    profile: false, profileEvery: null, env: {} });
   assert.strictEqual(scenario.watch.client, "diverge");
   assert.strictEqual(scenario.until.any.length, 2);
   assert.deepStrictEqual(scenario.expect.map((entry) => [entry.text, entry.absent]),
@@ -242,6 +243,18 @@ test("a restore flag's scenario default applies to a restored world only, and a 
   assert.strictEqual(load({ ...GOOD, world: "fresh", up: { realClock: false } }).up.realClock, null);
   assert.throws(() => load({ ...GOOD, world: "fresh", up: { realClock: true } }),
     /up\.realClock: applies to a restored world, and this scenario's world is "fresh"/);
+});
+
+test("a scenario's up.env sets the server's variables, as text, and says what's wrong with a bad one", LU, () => {
+  const load = (env) => validateScenario({ ...GOOD, up: { env } }, { ...STUBS, defaultName: "pirates" });
+  const scenario = load({ EVEJS_CREWS: true, EVEJS_LIMIT: 3, EVEJS_NAME: "x" });
+  assert.deepStrictEqual(scenario.up.env, { EVEJS_CREWS: "true", EVEJS_LIMIT: "3", EVEJS_NAME: "x" });
+  assert.match(upText(scenario.up), /env EVEJS_CREWS=true EVEJS_LIMIT=3 EVEJS_NAME=x/, "the report's up line");
+  for (const [env, pattern] of [
+    ["on", /up\.env: an object of variable names and their values/],
+    [{ "1ST": "x" }, /up\.env\.1ST: a variable name: letters, digits and _, not starting with a digit/],
+    [{ EVEJS_X: { on: true } }, /up\.env\.EVEJS_X: a string, a number, or true or false/],
+  ]) assert.throws(() => load(env), pattern);
 });
 
 test("every problem in a scenario is reported at load, each with where it is", LU, () => {
@@ -320,7 +333,7 @@ test("without a plugin, its kinds, data, steps and up keys are unknown, and the 
   assert.match(error.problems.join("\n"), /up.offgridTravel: unknown key; up takes market, timeout/);
   assert.match(error.problems.join("\n"), /setup\[1\]: unknown step; steps are login, undock/);
   const scenario = validateScenario({ world: "lowsec-docked", setup: ["undock"], until: { timeout: 5 }, expect: ["GRID"] }, { ...STUBS, registry, defaultName: "t" });
-  assert.deepStrictEqual(scenario.up, { market: true, timeout: null, profile: false, profileEvery: null });
+  assert.deepStrictEqual(scenario.up, { market: true, timeout: null, profile: false, profileEvery: null, env: {} });
 });
 
 test("a plugin's step validates, describes, binds and runs through the registry", () => {

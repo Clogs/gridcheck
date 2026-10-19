@@ -87,7 +87,7 @@ const TRIGGER_TOOL = {
 };
 
 const PRIMER = `Living Universe (plugin lu). The saved world lowsec-docked is a docked Rifter in Amamake with the Living Universe running.
-- up: realClock (default true in scenarios on a saved world or recipe: the Living Universe clock runs at real time, which grid checks need; a fresh world refuses it), offgridTravel/offgridActivity (1-100, smoke tests only).
+- up: realClock (default true, except in a fresh world: the clock runs at real time, which grid checks need), offgridTravel/offgridActivity (1-100, smoke tests only).
 - The trigger step and lu_trigger: { "trigger": "scout|hunt|fleet|materialize|skirmish", <args>, "as": "name", "retry": { "every": 15, "for": 480 } }. Args: system, flight, phase (stalking|committed), family, doctrine, to (self|system), count, anchor, go, shipClass, gap. "as" binds the flight or hunt IDs the reply names.
 - Kinds: SIGHTING HUNT HERE INCOMING ENTER EXIT ENGAGEMENT LOSS, from the off-grid tracker and hunter reports. Core grid events carry each NPC's flight, family, hunt phase and controller decision at ext.lu, and name them plainly in conditions (family on ARRIVE is ext.lu.family); groupKey is "flight:<flightID>". "self" on HUNT means the hunt targets you.
 - Example: "setup": ["undock", { "trigger": "fleet", "family": "pirate", "to": "self", "as": "fleet" }, { "waitFor": "INCOMING flightID=$fleet", "timeout": 300 }], "until": { "any": ["ARRIVE flightID=$fleet"], "timeout": 600 }, "expect": ["ARRIVE flightID=$fleet warpIn distanceMeters<=30km"].

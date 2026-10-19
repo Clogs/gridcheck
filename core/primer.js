@@ -53,7 +53,7 @@ function topicTexts({ registry, mode = "auto", surface = "mcp", scenarioDirs = {
   const t = namer(surface);
   const cli = surface === "cli";
   const see = (topic) => topicCall(surface, topic);
-  const upKeys = ["market", "timeout", "profile", "profileEvery", ...registry.upFlags.map((flag) => flag.key)].join(", ");
+  const upKeys = ["market", "timeout", "profile", "profileEvery", "env", ...registry.upFlags.map((flag) => flag.key)].join(", ");
   const pluginSteps = Object.keys(registry.steps);
   const kinds = kindsOf(registry).filter((kind) => !["CLIENT", "FX", "DIVERGE"].includes(kind)).join(" ");
   const pluginTools = registry.mcpTools.map((tool) => `\`${cli ? `gridcheck ${tool.name.replace(/^[^_]+_/, "")}` : tool.name}\``);
@@ -68,7 +68,7 @@ function topicTexts({ registry, mode = "auto", surface = "mcp", scenarioDirs = {
   const trustCheck = "The check names every problem at once, and an unknown key, step, kind or field comes back with the valid ones listed, so a check that passes means every name in the scenario is right.";
 
   const runs = cli
-    ? "Runs take minutes (boot about 25 s, then real-time grid behaviour). `gridcheck run <name>` blocks until the verdict; `gridcheck run <name> --detach` starts it in the background and prints its run ID, and `gridcheck report <run> --wait 600` waits for it and prints the verdict. Exit codes: 0 passed, 1 an expectation failed, 2 the run did not complete. `gridcheck report <run> --section pr` gives the markdown to cite the run in a PR description."
+    ? "Run `gridcheck up` in the foreground: it returns once a character can log in (`--timeout`, default 600 s), so there is nothing to poll. `--env NAME=VALUE`, repeatable, sets a variable in the server's environment. Runs take minutes (boot about 25 s, then real-time grid behaviour). `gridcheck run <name>` blocks until the verdict; `gridcheck run <name> --detach` starts it in the background and prints its run ID, and `gridcheck report <run> --wait 600` waits for it and prints the verdict. Exit codes: 0 passed, 1 an expectation failed, 2 the run did not complete. `gridcheck report <run> --section pr` gives the markdown to cite the run in a PR description."
     : `Runs take minutes (boot about 25 s, then real-time grid behaviour). wait:false starts one in the background; ${t("report", "{ run, waitSeconds }")} waits for it and reads the verdict. ${t("report", "{ run, section: \"pr\" }")} gives the markdown to cite the run in a PR description.`;
 
   const byHand = ["up", "login", "undock", "loadout", "grid", "act", "watch", "slash", "teleport", "log", "perf", "down"]

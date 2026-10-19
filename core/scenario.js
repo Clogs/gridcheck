@@ -38,7 +38,9 @@ const FRESH_WORLD = "fresh";
 const BUDGET_SECONDS = 3000;
 
 const TOP_KEYS = new Set(["name", "description", "world", "recipe", "up", "setup", "during", "watch", "until", "expect"]);
-const CORE_UP_KEYS = ["market", "timeout", "profile", "profileEvery"];
+const CORE_UP_KEYS = ["market", "timeout", "profile", "profileEvery", "env"];
+// An environment variable's name, as `up --env NAME=VALUE` and a scenario's up.env take it.
+const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const WATCH_KEYS = new Set(["every", "offgridEvery", "client", "divergeMeters", "log", "grep", "perf", "ballpark", "screenshots"]);
 // A tick profiler window every 50 ticks (5 s at 10 Hz), beside a PERF window every 5 s.
 const PROFILE_EVERY_TICKS = 50;
@@ -217,9 +219,25 @@ function describeStep(step, registry = defaultRegistry()) {
 
 // The `up` options a scenario takes: the core's and the plugins' upFlags.
 function upDefaults(registry) {
-  const up = { market: true, timeout: null, profile: false, profileEvery: null };
+  const up = { market: true, timeout: null, profile: false, profileEvery: null, env: {} };
   for (const flag of registry.upFlags) up[flag.key] = flag.scenarioDefault === undefined ? null : flag.scenarioDefault;
   return up;
+}
+
+// up.env: { NAME: value } -> the same with each value as text. Which names
+// gridcheck keeps for itself is checked where it boots (bin/gridcheck.js upOptions).
+function scenarioEnv(value, problem) {
+  if (!isObject(value)) {
+    problem("up.env", "an object of variable names and their values");
+    return {};
+  }
+  const env = {};
+  for (const [name, setting] of Object.entries(value)) {
+    if (!ENV_NAME.test(name)) problem(`up.env.${name}`, "a variable name: letters, digits and _, not starting with a digit");
+    else if (!["string", "number", "boolean"].includes(typeof setting)) problem(`up.env.${name}`, "a string, a number, or true or false");
+    else env[name] = String(setting);
+  }
+  return env;
 }
 
 // A restore flag (upFlags restore: true) changes how a saved world comes back,
@@ -290,6 +308,7 @@ function validateScenario(raw, { source = "scenario", defaultName = null, worldE
         else if (flag && flag.type === "number" && !(typeof value === "number" && value >= flag.min && value <= flag.max)) {
           problem(`up.${key}`, `a number from ${flag.min} through ${flag.max}`);
         } else if (key === "timeout" && !positive(value)) problem("up.timeout", "seconds, above 0");
+        else if (key === "env") up.env = scenarioEnv(value, problem);
         else if (flag && flag.restore && value === true && raw.world === FRESH_WORLD) {
           problem(`up.${key}`, `applies to a restored world, and this scenario's world is "${FRESH_WORLD}"`);
         } else up[key] = value;
@@ -1436,6 +1455,8 @@ function upText(up = {}, registry = defaultRegistry()) {
   }
   if (up.market === false) parts.push("no market");
   if (up.profile) parts.push(`tick profiler every ${up.profileEvery || PROFILE_EVERY_TICKS} ticks`);
+  const env = Object.entries(up.env || {});
+  if (env.length) parts.push(`env ${env.map(([name, value]) => `${name}=${value}`).join(" ")}`);
   return parts.filter(Boolean).join(", ");
 }
 
@@ -1589,6 +1610,7 @@ module.exports = {
   scenarioDirs,
   scenarioPath,
   stepTypes,
+  ENV_NAME,
   upDefaults,
   upForWorld,
   upText,

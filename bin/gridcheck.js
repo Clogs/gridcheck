@@ -126,9 +126,15 @@ function closest(word, candidates, limit = 3) {
 
 const didYouMean = (names) => (names.length ? ` Did you mean ${names.map((name) => `\`${name}\``).join(", ")}?` : "");
 
+// Flags that may be given more than once: their value is the list.
+const REPEATED_FLAGS = new Set(["env"]);
+
 function parseArgs(argv) {
   const positionals = [];
   const flags = {};
+  const set = (name, value) => {
+    flags[name] = REPEATED_FLAGS.has(name) ? [...(flags[name] || []), value] : value;
+  };
   for (let index = 0; index < argv.length; index += 1) {
     const token = argv[index];
     if (token === "--") {
@@ -142,11 +148,11 @@ function parseArgs(argv) {
     const body = token.slice(2);
     const equals = body.indexOf("=");
     if (equals >= 0) {
-      flags[body.slice(0, equals)] = body.slice(equals + 1);
+      set(body.slice(0, equals), body.slice(equals + 1));
     } else if (BOOLEAN_FLAGS.has(body)) {
       flags[body] = true;
     } else if (index + 1 < argv.length) {
-      flags[body] = argv[index + 1];
+      set(body, argv[index + 1]);
       index += 1;
     } else {
       throw new CliError(`--${body} needs a value`);
@@ -2033,6 +2039,8 @@ function upFlagsFor(up) {
     timeout: up.timeout || undefined,
     profile: up.profile ? true : undefined,
     "profile-every": up.profile && up.profileEvery ? up.profileEvery : undefined,
+    env: Object.keys(up.env || {}).length
+      ? Object.entries(up.env).sort(([a], [b]) => a.localeCompare(b)).map(([name, value]) => `${name}=${value}`) : undefined,
   };
   for (const flag of REGISTRY.upFlags) {
     const value = up[flag.key];
@@ -2044,7 +2052,7 @@ function upFlagsFor(up) {
 
 function printScenario(file, scenario) {
   const up = upFlagsFor(scenario.up);
-  const upText = Object.entries(up).filter(([key, value]) => key !== "timeout" && value !== undefined)
+  const upText = flagPairs(up).filter(([key]) => key !== "timeout")
     .map(([key, value]) => (value === true ? ` --${key}` : ` --${key} ${value}`)).join("");
   console.log(`${relativePath(file)}: ok`);
   console.log(`  world  ${scenario.world}${upText}`);
@@ -2136,8 +2144,14 @@ async function resetForReuse(run, recipe) {
 function upKeyFor(up) {
   const flags = upFlagsFor(up);
   delete flags.timeout;
+  return flagPairs(flags).sort(([a], [b]) => a.localeCompare(b))
+    .map(([key, value]) => `--${key}${value === true ? "" : ` ${value}`}`).join(" ") || "none";
+}
+
+// Flags -> [flag, value] pairs, one for each value of a repeated flag.
+function flagPairs(flags) {
   return Object.entries(flags).filter(([, value]) => value !== undefined)
-    .sort(([a], [b]) => a.localeCompare(b)).map(([key, value]) => `--${key}${value === true ? "" : ` ${value}`}`).join(" ") || "none";
+    .flatMap(([key, value]) => (Array.isArray(value) ? value.map((item) => [key, item]) : [[key, value]]));
 }
 
 // The systems a run's timeline saw, for the next reset to clear.
@@ -2706,7 +2720,40 @@ function upOptions(flags) {
     values[flag.key] = value;
     if (flag.env) env[flag.env] = String(value);
   }
-  return { values, env, restore };
+  return { values, env, restore, serverEnv: serverEnvFrom(flags.env) };
+}
+
+// The variables gridcheck sets on the server itself -> why --env may not.
+// Upper-cased: Windows reads a name in either case.
+function ownServerVariables() {
+  const own = new Map();
+  for (const name of Object.keys(serverEnvironment(TREE_PORTS, LISTENERS))) own.set(name.toUpperCase(), "it moves the server onto this tree's ports");
+  own.set("EVEJS_GAMESTORE_DATA_DIR", "it points the server at the data dir this tree's config names");
+  own.set("EVEJS_AGENT_BRIDGE", "it turns on the agent bridge every command talks to");
+  for (const name of ["EVEJS_TICK_PROFILE", "EVEJS_TICK_PROFILE_EVERY"]) own.set(name, "use --profile and --profile-every");
+  for (const flag of REGISTRY.upFlags) if (flag.env) own.set(flag.env.toUpperCase(), `use --${flag.flag}`);
+  return own;
+}
+
+// --env NAME=VALUE, once or repeated -> { NAME: VALUE } for the server's environment.
+function serverEnvFrom(raw) {
+  const own = ownServerVariables();
+  const env = {};
+  const seen = new Map();
+  for (const item of raw === undefined ? [] : [].concat(raw)) {
+    const text = String(item);
+    const equals = text.indexOf("=");
+    const name = equals > 0 ? text.slice(0, equals) : "";
+    if (!scenarioTools.ENV_NAME.test(name)) {
+      throw new CliError(`--env takes NAME=VALUE: a variable name (letters, digits and _), then its value (got ${JSON.stringify(text)})`);
+    }
+    const key = name.toUpperCase();
+    if (own.has(key)) throw new CliError(`--env ${name}: ${key} is gridcheck's own: ${own.get(key)}`);
+    if (seen.has(key)) throw new CliError(`--env sets ${seen.get(key)} twice`);
+    seen.set(key, name);
+    env[name] = text.slice(equals + 1);
+  }
+  return env;
 }
 
 async function cmdUp(flags) {
@@ -2788,7 +2835,7 @@ async function cmdUp(flags) {
   const child = spawn(process.execPath, serverStartArgs(), {
     cwd: CONFIG.serverDir,
     // The data dir as the config resolved it, so the server and this CLI agree.
-    env: { ...process.env, ...serverEnvironment(ports, LISTENERS), ...options.env, ...profileEnvironment(profile),
+    env: { ...process.env, ...options.serverEnv, ...serverEnvironment(ports, LISTENERS), ...options.env, ...profileEnvironment(profile),
       EVEJS_GAMESTORE_DATA_DIR: CONFIG.dataDir, EVEJS_AGENT_BRIDGE: "1" },
     detached: true,
     stdio: ["ignore", out, out],
@@ -2803,13 +2850,15 @@ async function cmdUp(flags) {
     ports,
     world: flags.world ? `saved ${flags.world}` : flags.fresh ? "fresh" : "kept",
     options: Object.keys(options.values).length ? options.values : null,
+    env: Object.keys(options.serverEnv).length ? options.serverEnv : null,
     profile,
     startedAtMs,
     readyAtMs: null,
     bootSeconds: null,
   };
   writeRun(run);
-  console.log(`starting server pid ${child.pid}; console in ${relativePath(SERVER_OUT_PATH)}`);
+  console.log(`starting server pid ${child.pid}; console in ${relativePath(SERVER_OUT_PATH)}` +
+    `${run.env ? `; its environment also sets ${Object.entries(run.env).map(([name, value]) => `${name}=${value}`).join(" ")}` : ""}`);
 
   const timeoutMs = Math.max(10, Number(flags.timeout) || 600) * 1000;
   while (Date.now() - startedAtMs < timeoutMs) {

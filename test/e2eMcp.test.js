@@ -35,6 +35,8 @@ test("tools map onto CLI arguments; free text goes after --", LU, () => {
   assert.deepStrictEqual(mcp.cliArgs("up", { world: "lowsec-docked", realClock: true, market: false, offgridTravel: 5 }),
     ["up", "--world=lowsec-docked", "--no-market", "--real-clock", "--offgrid-travel=5"], "the lu plugin's up flags too");
   assert.deepStrictEqual(mcp.cliArgs("up", {}), ["up"]);
+  assert.deepStrictEqual(mcp.cliArgs("up", { env: { EVEJS_CREWS: true, NOTE: "--x=y", EMPTY: "" } }),
+    ["up", "--env=EVEJS_CREWS=true", "--env=NOTE=--x=y", "--env=EMPTY="], "every variable, an empty one too");
   assert.deepStrictEqual(mcp.cliArgs("slash", { command: "/tr me --weird Amamake" }), ["slash", "--", "/tr me --weird Amamake"]);
   assert.deepStrictEqual(mcp.cliArgs("teleport", { system: "New Caldari" }), ["teleport", "--", "New Caldari"]);
   assert.deepStrictEqual(mcp.cliArgs("watch", {}), ["watch", "--for=60"], "a shorter default than the CLI's 600 s");

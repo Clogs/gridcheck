@@ -170,7 +170,7 @@ test("a plugin's up flags become the server's variables and the world restore's 
   });
   assert.deepStrictEqual(set.values, { offgridTravel: 10, offgridActivity: 4, realClock: true });
   assert.deepStrictEqual(set.restore, { realClock: true });
-  assert.deepStrictEqual(upOptions({}), { values: {}, env: {}, restore: {} });
+  assert.deepStrictEqual(upOptions({}), { values: {}, env: {}, restore: {}, serverEnv: {} });
   for (const bad of ["0", "101", "fast"]) assert.throws(() => upOptions({ "offgrid-travel": bad }), /1 through 100/);
   assert.throws(() => upOptions({ "real-clock": true }), /applies to a restored world/);
   assert.deepStrictEqual(parseArgs(["up", "--real-clock", "--world", "w"]).flags, { "real-clock": true, world: "w" },
@@ -183,6 +183,32 @@ test("a fresh-world scenario's up flags pass up --fresh, and a saved world's sti
     { defaultName: "smoke", resolveSystemID: (text) => text });
   assert.deepStrictEqual(upOptions({ fresh: true, ...upFlagsFor(scenario("fresh").up) }).restore, {});
   assert.deepStrictEqual(upOptions({ world: "lowsec-docked", ...upFlagsFor(scenario("lowsec-docked").up) }).restore, { realClock: true });
+});
+
+test("up --env sets the server's variables, repeatable, and refuses the ones gridcheck sets itself", LU, () => {
+  assert.deepStrictEqual(parseArgs(["up", "--env", "EVEJS_CREWS=true", "--env=NODE_OPTIONS=--a=b", "--env", "EMPTY="]).flags.env,
+    ["EVEJS_CREWS=true", "NODE_OPTIONS=--a=b", "EMPTY="], "every --env is kept, and only the first = splits");
+  assert.deepStrictEqual(upOptions({ env: ["EVEJS_CREWS=true", "EMPTY="] }).serverEnv, { EVEJS_CREWS: "true", EMPTY: "" });
+  assert.deepStrictEqual(upOptions({ env: "ONE=1" }).serverEnv, { ONE: "1" }, "one --env given as a value");
+  assert.deepStrictEqual(upOptions({}).serverEnv, {});
+  for (const [bad, pattern] of [
+    ["NOEQUALS", /--env takes NAME=VALUE/],
+    ["1ST=x", /--env takes NAME=VALUE/],
+    ["EVEJS_SERVER_PORT=1", /EVEJS_SERVER_PORT is gridcheck's own: it moves the server onto this tree's ports/],
+    ["evejs_agent_bridge=0", /EVEJS_AGENT_BRIDGE is gridcheck's own/],
+    ["EVEJS_GAMESTORE_DATA_DIR=x", /EVEJS_GAMESTORE_DATA_DIR is gridcheck's own/],
+    ["EVEJS_TICK_PROFILE=1", /use --profile/],
+    ["EVEJS_LIVING_UNIVERSE_OFFGRID_TRAVEL_TIME_MULTIPLIER=3", /use --offgrid-travel/],
+  ]) assert.throws(() => upOptions({ env: [bad] }), pattern, bad);
+  assert.throws(() => upOptions({ env: ["A=1", "a=2"] }), /--env sets A twice/);
+});
+
+test("a scenario's env reaches up as sorted --env flags, and counts for --reuse", () => {
+  const up = { market: true, timeout: null, profile: false, profileEvery: null, env: { EVEJS_B: "2", EVEJS_A: "1" } };
+  assert.deepStrictEqual(upFlagsFor(up).env, ["EVEJS_A=1", "EVEJS_B=2"]);
+  assert.strictEqual(upFlagsFor({ ...up, env: {} }).env, undefined);
+  assert.strictEqual(upKeyFor(up), "--env EVEJS_A=1 --env EVEJS_B=2");
+  assert.notStrictEqual(upKeyFor(up), upKeyFor({ ...up, env: { EVEJS_A: "1" } }), "a server booted with other variables isn't reused");
 });
 
 test("help lists the core commands, then each plugin's, and names the active plugins", LU, () => {

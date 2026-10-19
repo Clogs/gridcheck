@@ -103,10 +103,12 @@ const DOCS = {
       ["--fresh", null, "Delete the game store and boot a new one from the seed tables."],
       ["--no-market", null, "Don't start the market daemon."],
       ["--timeout", "600 s", "How long to wait for boot. After it, the server is left running."],
-      ["--profile", null, "Boot with the tick profiler."], ["--profile-every", "50 ticks", "The profiler's window."]],
-    note: "Refuses before touching the world when another process holds the world lease, a port in the tree's block is taken, " +
-      "or the world is missing. Sets EVEJS_AGENT_BRIDGE=1 for you.",
-    examples: [["gridcheck up --world starter", null]],
+      ["--profile", null, "Boot with the tick profiler."], ["--profile-every", "50 ticks", "The profiler's window."],
+      ["--env NAME=VALUE", null, "Set a variable in the server's environment; repeat for more. The ones gridcheck sets itself " +
+        "(ports, data dir, agent bridge, profiler, the plugins' up flags) are refused."]],
+    note: "Returns once a character can log in, so run it in the foreground. Refuses before touching the world when another " +
+      "process holds the world lease, a port in the tree's block is taken, or the world is missing. Sets EVEJS_AGENT_BRIDGE=1 for you.",
+    examples: [["gridcheck up --world starter", null], ["gridcheck up --world starter --env EVEJS_SOME_SWITCH=true", "with a feature switched on"]],
   },
   down: {
     group: "server", managed: true, mcp: "down",
