@@ -103,6 +103,21 @@ The patch adds nine hunks in `space/npc/npcBehaviorLoop.js`, one for each way ou
 The early return for a ship that has gone records nothing. Each think writes one string to the
 controller. The run that measured this cost is in the plan's run log.
 
+The patch's anchors follow stock's `tickController`, and LU's `tickControllerBehavior` no longer
+matches them, so the patch can't apply to LU. LU writes `controller.lastDecision` itself instead,
+and `detect` finds the write. Besides the labels above, LU's think records these:
+
+| Decision | When |
+| --- | --- |
+| `follow-warp` | a manual follow order whose target warped away, so the NPC warps after it |
+| `battery-support` | a remote-capacitor battery following the ship it keeps powered |
+| `hunt-order` | a pirate hunt order moves the NPC |
+| `order-movement` | no target, flying a manual order that names a live subject |
+| `pursuit` | no target, but a mark just warped off the grid, so the NPC follows it |
+| `boundary-avoid` | no target, steering clear of the grid boundary |
+| `flee-warp` | fleeing, and warping out |
+| `flee` | fleeing, still on grid, its guns and EWAR still on its pursuer |
+
 ### `slash-success`
 
 Stock's slash commands answer `{ handled, message }` and never say whether they did what was asked.

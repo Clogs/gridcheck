@@ -124,6 +124,37 @@ test("update takes a commit, not the working files, and a removed file leaves th
   assert.deepStrictEqual(fs.readdirSync(path.dirname(s.target)), ["gridcheck"], "no staging folders are left");
 });
 
+test("update retries a rename that Windows refuses while something holds the new folder", (t) => {
+  const s = setup(t);
+  vendor.updateVendored({ tree: s.tree, from: s.source });
+  const rename = fs.renameSync;
+  let refused = 0;
+  t.mock.method(fs, "renameSync", (from, to) => {
+    if (path.basename(from).endsWith(".new") && refused < 2) {
+      refused += 1;
+      throw Object.assign(new Error(`EPERM: operation not permitted, rename '${from}' -> '${to}'`), { code: "EPERM" });
+    }
+    return rename(from, to);
+  });
+  vendor.updateVendored({ tree: s.tree, from: s.source });
+  assert.strictEqual(refused, 2);
+  assert.ok(vendor.checkVendored({ tree: s.tree }).ok);
+  assert.deepStrictEqual(fs.readdirSync(path.dirname(s.target)), ["gridcheck"], "no staging folders are left");
+});
+
+test("an update whose rename keeps failing puts the old copy back", (t) => {
+  const s = setup(t);
+  vendor.updateVendored({ tree: s.tree, from: s.source });
+  const rename = fs.renameSync;
+  t.mock.method(fs, "renameSync", (from, to) => {
+    if (path.basename(from).endsWith(".new")) throw Object.assign(new Error("EXDEV: cross-device link not permitted"), { code: "EXDEV" });
+    return rename(from, to);
+  });
+  assert.throws(() => vendor.updateVendored({ tree: s.tree, from: s.source }), /EXDEV/);
+  assert.ok(vendor.checkVendored({ tree: s.tree }).ok);
+  assert.deepStrictEqual(fs.readdirSync(path.dirname(s.target)), ["gridcheck"], "no staging folders are left");
+});
+
 test("a dry run makes the same checks, lists what would change and writes nothing", (t) => {
   const s = setup(t);
   const first = vendor.updateVendored({ tree: s.tree, from: s.source, dryRun: true });

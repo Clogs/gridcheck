@@ -9,7 +9,7 @@ const assert = require("node:assert");
 const { needsPlugin } = require("./tree");
 
 const { formatDistance, formatGrid, formatClock } = require("../core/format");
-const { CORE_COMMANDS, helpText, parseArgs, selectLogLines, systemsSeen, upKeyFor, upOptions } = require("../bin/gridcheck");
+const { CORE_COMMANDS, helpText, parseArgs, selectLogLines, systemsSeen, upFlagsFor, upKeyFor, upOptions } = require("../bin/gridcheck");
 const { selectScouts } = require("../plugins/lu/tool/commands");
 
 // These read the lu plugin through the default registry, so they need a tree
@@ -175,6 +175,14 @@ test("a plugin's up flags become the server's variables and the world restore's 
   assert.throws(() => upOptions({ "real-clock": true }), /applies to a restored world/);
   assert.deepStrictEqual(parseArgs(["up", "--real-clock", "--world", "w"]).flags, { "real-clock": true, world: "w" },
     "a plugin's bool flag takes no value");
+});
+
+test("a fresh-world scenario's up flags pass up --fresh, and a saved world's still restore at real time", LU, () => {
+  const { validateScenario } = require("../core/scenario");
+  const scenario = (world) => validateScenario({ world, setup: ["undock"], until: { any: ["GRID"], timeout: 60 }, expect: ["GRID"] },
+    { defaultName: "smoke", resolveSystemID: (text) => text });
+  assert.deepStrictEqual(upOptions({ fresh: true, ...upFlagsFor(scenario("fresh").up) }).restore, {});
+  assert.deepStrictEqual(upOptions({ world: "lowsec-docked", ...upFlagsFor(scenario("lowsec-docked").up) }).restore, { realClock: true });
 });
 
 test("help lists the core commands, then each plugin's, and names the active plugins", LU, () => {

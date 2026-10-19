@@ -21,6 +21,7 @@ const {
   renderReport,
   resultRecord,
   runScenario,
+  upForWorld,
   validateScenario,
 } = require("../core/scenario");
 const { createToolRegistry, emptyRegistry } = require("../core/plugins");
@@ -228,6 +229,19 @@ test("a scenario loads to its steps, conditions and defaults", LU, () => {
   assert.strictEqual(scenario.until.any.length, 2);
   assert.deepStrictEqual(scenario.expect.map((entry) => [entry.text, entry.absent]),
     [["SIGHTING", false], ["ARRIVE flightID=$scout", false], ["no DIVERGE", true]]);
+});
+
+test("a restore flag's scenario default applies to a restored world only, and a fresh world refuses it set", LU, () => {
+  const load = (raw) => validateScenario(raw, { ...STUBS, defaultName: "pirates" });
+  const fresh = load({ ...GOOD, world: "fresh" });
+  assert.strictEqual(fresh.up.realClock, null, "a fresh world has no saved clock to set");
+  assert.strictEqual(upForWorld(fresh.up, "lowsec-docked").realClock, true, "run --world <saved> brings the default back");
+  const saved = load(GOOD);
+  assert.strictEqual(upForWorld(saved.up, "fresh").realClock, null, "run --world fresh drops it");
+  assert.strictEqual(upForWorld({ ...saved.up, realClock: false }, "lowsec-docked").realClock, false, "a false the scenario wrote stays");
+  assert.strictEqual(load({ ...GOOD, world: "fresh", up: { realClock: false } }).up.realClock, null);
+  assert.throws(() => load({ ...GOOD, world: "fresh", up: { realClock: true } }),
+    /up\.realClock: applies to a restored world, and this scenario's world is "fresh"/);
 });
 
 test("every problem in a scenario is reported at load, each with where it is", LU, () => {

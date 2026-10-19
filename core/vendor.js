@@ -289,6 +289,22 @@ function checkVendored({ tree, copy = null }) {
   return { ok: problems.length === 0, manifest, problems };
 }
 
+// On Windows a folder just written can stay locked for a moment while a virus
+// scanner or a file watcher reads it, so a rename is retried for up to about
+// 7 s. Like worlds.js retryLocked, kept here because this file must load when
+// the rest of the copy doesn't.
+const RENAME_LOCKED = new Set(["EPERM", "EBUSY", "EACCES"]);
+function renameRetrying(from, to, { tries = 8, delayMs = 250 } = {}) {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      return fs.renameSync(from, to);
+    } catch (error) {
+      if (attempt >= tries || !RENAME_LOCKED.has(error.code)) throw error;
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, delayMs * attempt);
+    }
+  }
+}
+
 function problemLines(problems) {
   return problems.map((row) => `  ${row.problem.padEnd(12)} ${row.file}`);
 }
@@ -351,11 +367,11 @@ function updateVendored({ tree, from, force = false, dryRun = false }) {
       fs.writeFileSync(out, bytes);
     }
     fs.writeFileSync(path.join(staged, MANIFEST_NAME), `${JSON.stringify(manifest, null, 2)}\n`);
-    if (fs.existsSync(target)) fs.renameSync(target, retired);
+    if (fs.existsSync(target)) renameRetrying(target, retired);
     try {
-      fs.renameSync(staged, target);
+      renameRetrying(staged, target);
     } catch (error) {
-      if (fs.existsSync(retired)) fs.renameSync(retired, target);
+      if (fs.existsSync(retired)) renameRetrying(retired, target);
       throw error;
     }
   } finally {

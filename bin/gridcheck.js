@@ -2311,7 +2311,7 @@ async function cmdRun(positionals, flags) {
   }
   if (boots && override === null && loaded.recipe) await ensureRecipeWorld(loaded.recipe);
   const world = boots ? override || loaded.world : null;
-  const scenario = boots ? { ...loaded, world }
+  const scenario = boots ? { ...loaded, world, up: scenarioTools.upForWorld(loaded.up, world, REGISTRY) }
     : reusing ? { ...loaded, world: `${loaded.world}, reused server pid ${running.pid} reset in place` }
       : { ...loaded, world: `attached to pid ${running.pid}`, up: {} };
   const runID = flags.run ? String(flags.run).replace(/[^A-Za-z0-9._-]/g, "_") : `${runStamp(Date.now())}-${scenario.name}`;
@@ -3654,6 +3654,7 @@ module.exports = {
   parseArgs,
   selectLogLines,
   systemsSeen,
+  upFlagsFor,
   upKeyFor,
   upOptions,
 };

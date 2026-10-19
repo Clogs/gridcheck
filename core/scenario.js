@@ -222,6 +222,23 @@ function upDefaults(registry) {
   return up;
 }
 
+// A restore flag (upFlags restore: true) changes how a saved world comes back,
+// so it means nothing to a fresh one: `gridcheck up --fresh` refuses it. Its
+// scenario default applies only when the run restores a world, which
+// `run --world` can change either way; a null left by a fresh world takes the
+// default again.
+function upForWorld(up, world, registry = defaultRegistry()) {
+  const out = { ...up };
+  for (const flag of registry.upFlags) {
+    if (!flag.restore) continue;
+    if (world === FRESH_WORLD) out[flag.key] = null;
+    else if (out[flag.key] === null || out[flag.key] === undefined) {
+      out[flag.key] = flag.scenarioDefault === undefined ? null : flag.scenarioDefault;
+    }
+  }
+  return out;
+}
+
 // raw JSON -> a checked scenario, or a ScenarioError listing every problem.
 // `context.worldExists(name)`, `context.recipeExists(name)` and
 // `context.resolveSystemID(text)` come from the CLI, which knows the tree;
@@ -273,7 +290,9 @@ function validateScenario(raw, { source = "scenario", defaultName = null, worldE
         else if (flag && flag.type === "number" && !(typeof value === "number" && value >= flag.min && value <= flag.max)) {
           problem(`up.${key}`, `a number from ${flag.min} through ${flag.max}`);
         } else if (key === "timeout" && !positive(value)) problem("up.timeout", "seconds, above 0");
-        else up[key] = value;
+        else if (flag && flag.restore && value === true && raw.world === FRESH_WORLD) {
+          problem(`up.${key}`, `applies to a restored world, and this scenario's world is "${FRESH_WORLD}"`);
+        } else up[key] = value;
       }
     }
   }
@@ -896,7 +915,8 @@ function validateScenario(raw, { source = "scenario", defaultName = null, worldE
   }
   if (problems.length) throw new ScenarioError(source, problems);
   // A recipe's world is saved under the recipe's name.
-  return { name, description: raw.description || "", world: recipe || raw.world, recipe, up, setup, during, watch, until, expect,
+  return { name, description: raw.description || "", world: recipe || raw.world, recipe,
+    up: upForWorld(up, recipe || raw.world, registry), setup, during, watch, until, expect,
     bindings: [...bindings] };
 }
 
@@ -1570,6 +1590,7 @@ module.exports = {
   scenarioPath,
   stepTypes,
   upDefaults,
+  upForWorld,
   upText,
   validateScenario,
 };
