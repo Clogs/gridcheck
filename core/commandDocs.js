@@ -107,7 +107,9 @@ const DOCS = {
       ["--env NAME=VALUE", null, "Set a variable in the server's environment; repeat for more. The ones gridcheck sets itself " +
         "(ports, data dir, agent bridge, profiler, the plugins' up flags) are refused."]],
     note: "Returns once a character can log in, so run it in the foreground. Refuses before touching the world when another " +
-      "process holds the world lease, a port in the tree's block is taken, or the world is missing. Sets EVEJS_AGENT_BRIDGE=1 for you.",
+      "process holds the world lease, a port in the tree's block is taken, or the world is missing. Sets EVEJS_AGENT_BRIDGE=1 for you. " +
+      "New characters skip the AIR tutorial (EVEJS_NEW_CHARACTER_EXPERIENCE_MODE=disabled); " +
+      "`--env EVEJS_NEW_CHARACTER_EXPERIENCE_MODE=tutorial` keeps it.",
     examples: [["gridcheck up --world starter", null], ["gridcheck up --world starter --env EVEJS_SOME_SWITCH=true", "with a feature switched on"]],
   },
   down: {

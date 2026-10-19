@@ -9,7 +9,7 @@ const assert = require("node:assert");
 const { needsPlugin } = require("./tree");
 
 const { formatDistance, formatGrid, formatClock } = require("../core/format");
-const { CORE_COMMANDS, helpText, parseArgs, selectLogLines, systemsSeen, upFlagsFor, upKeyFor, upOptions } = require("../bin/gridcheck");
+const { CORE_COMMANDS, helpText, parseArgs, selectLogLines, serverSpawnEnv, systemsSeen, upFlagsFor, upKeyFor, upOptions } = require("../bin/gridcheck");
 const { selectScouts } = require("../plugins/lu/tool/commands");
 
 // These read the lu plugin through the default registry, so they need a tree
@@ -201,6 +201,23 @@ test("up --env sets the server's variables, repeatable, and refuses the ones gri
     ["EVEJS_LIVING_UNIVERSE_OFFGRID_TRAVEL_TIME_MULTIPLIER=3", /use --offgrid-travel/],
   ]) assert.throws(() => upOptions({ env: [bad] }), pattern, bad);
   assert.throws(() => upOptions({ env: ["A=1", "a=2"] }), /--env sets A twice/);
+});
+
+test("a booted server skips the new-character tutorial unless the shell or --env asks for it, and gridcheck's own variables win", LU, () => {
+  const options = (flags = {}) => upOptions(flags);
+  const env = serverSpawnEnv(options(), { base: { PATH: "x" } });
+  assert.strictEqual(env.EVEJS_NEW_CHARACTER_EXPERIENCE_MODE, "disabled", "a real client would otherwise start in the AIR tutorial");
+  assert.strictEqual(env.PATH, "x");
+  assert.strictEqual(env.EVEJS_AGENT_BRIDGE, "1");
+  assert.ok(env.EVEJS_SERVER_PORT, "the tree's ports");
+  assert.strictEqual(serverSpawnEnv(options(), { base: { EVEJS_NEW_CHARACTER_EXPERIENCE_MODE: "tutorial" } })
+    .EVEJS_NEW_CHARACTER_EXPERIENCE_MODE, "tutorial", "a value the shell sets");
+  assert.strictEqual(serverSpawnEnv(options({ env: ["EVEJS_NEW_CHARACTER_EXPERIENCE_MODE=cinematic"] }), { base: {} })
+    .EVEJS_NEW_CHARACTER_EXPERIENCE_MODE, "cinematic", "a value --env sets");
+  assert.strictEqual(serverSpawnEnv(options({ "offgrid-travel": "5" }), { base: {}, profile: { everyTicks: 20 } })
+    .EVEJS_TICK_PROFILE_EVERY, "20");
+  assert.strictEqual(serverSpawnEnv(options({ "offgrid-travel": "5" }), { base: {} })
+    .EVEJS_LIVING_UNIVERSE_OFFGRID_TRAVEL_TIME_MULTIPLIER, "5");
 });
 
 test("a scenario's env reaches up as sorted --env flags, and counts for --reuse", () => {

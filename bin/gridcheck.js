@@ -2723,6 +2723,19 @@ function upOptions(flags) {
   return { values, env, restore, serverEnv: serverEnvFrom(flags.env) };
 }
 
+// What a booted server's environment holds unless the shell or --env says
+// otherwise. EveJS 261018.1's config starts a new character in the AIR tutorial,
+// where a real client sits in a capsule behind its dialogue; with the mode off,
+// characters made while it was on count as having finished it.
+const SERVER_DEFAULTS = Object.freeze({ EVEJS_NEW_CHARACTER_EXPERIENCE_MODE: "disabled" });
+
+// The server's environment: the defaults, the shell's, --env, then gridcheck's own,
+// with the data dir as the config resolved it so the server and this CLI agree.
+function serverSpawnEnv(options, { base = process.env, profile = null, ports = TREE_PORTS } = {}) {
+  return { ...SERVER_DEFAULTS, ...base, ...options.serverEnv, ...serverEnvironment(ports, LISTENERS), ...options.env,
+    ...profileEnvironment(profile), EVEJS_GAMESTORE_DATA_DIR: CONFIG.dataDir, EVEJS_AGENT_BRIDGE: "1" };
+}
+
 // The variables gridcheck sets on the server itself -> why --env may not.
 // Upper-cased: Windows reads a name in either case.
 function ownServerVariables() {
@@ -2834,9 +2847,7 @@ async function cmdUp(flags) {
   const out = fs.openSync(SERVER_OUT_PATH, "w");
   const child = spawn(process.execPath, serverStartArgs(), {
     cwd: CONFIG.serverDir,
-    // The data dir as the config resolved it, so the server and this CLI agree.
-    env: { ...process.env, ...options.serverEnv, ...serverEnvironment(ports, LISTENERS), ...options.env, ...profileEnvironment(profile),
-      EVEJS_GAMESTORE_DATA_DIR: CONFIG.dataDir, EVEJS_AGENT_BRIDGE: "1" },
+    env: serverSpawnEnv(options, { profile, ports }),
     detached: true,
     stdio: ["ignore", out, out],
     windowsHide: true,
@@ -3702,6 +3713,7 @@ module.exports = {
   helpText,
   parseArgs,
   selectLogLines,
+  serverSpawnEnv,
   systemsSeen,
   upFlagsFor,
   upKeyFor,

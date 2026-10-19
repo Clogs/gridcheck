@@ -83,7 +83,8 @@ gridcheck down
 `gridcheck up` returns once a character can log in (`--timeout`, default 600 s), so run it in the
 foreground; don't background it and poll its log. `--env NAME=VALUE`, repeatable, sets a variable in
 the server's environment, such as a feature switch the tree's config leaves off. A scenario sets the
-same with `"up": { "env": { "NAME": "value" } }`.
+same with `"up": { "env": { "NAME": "value" } }`. New characters skip the AIR tutorial, which EveJS
+261018.1's config turns on; `--env EVEJS_NEW_CHARACTER_EXPERIENCE_MODE=tutorial` keeps it.
 
 Start `gridcheck watch --for 60` in the background before you act, to see the action's effect. `gridcheck
 perf --for 10` measures server ticks; the primer covers performance runs.
