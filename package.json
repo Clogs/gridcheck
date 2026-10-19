@@ -1,6 +1,6 @@
 {
   "name": "gridcheck",
-  "version": "0.3.4",
+  "version": "0.3.5",
   "description": "Boot an EveJS server, fly a headless character and read the grid as a timeline.",
   "private": true,
   "license": "AGPL-3.0-only",
