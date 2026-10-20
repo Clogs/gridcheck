@@ -1518,7 +1518,8 @@
       for (const call of gateway.missing) lines.push(`             ${call.service}.${call.method} (${call.usedBy})`);
     }
     const destiny = report.destiny || {};
-    lines.push(destiny.ok ? `destiny    the decoder reads this Eve.js instance's ball layout (${destiny.balls} probe balls); client view on`
+    lines.push(destiny.ok ? `destiny    the decoder reads this Eve.js instance's ball layout (${destiny.balls} probe balls); client view on` +
+      `${destiny.warpOff ? `, warp-landing check off: ${destiny.warpOff}` : ""}`
       : `destiny    client view OFF: ${destiny.error}`);
     lines.push(`patches    ${(report.patches || []).map((patch) => `${patch.id} ${patch.state}${patch.version ? ` v${patch.version}` : ""}`).join(", ") || "none known"}`);
     const listeners = Object.entries(report.listeners || {});

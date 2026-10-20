@@ -276,30 +276,33 @@ const PROBE_EXPECT = Object.freeze([
   { itemID: "1", modeName: "STOP", position: { x: 1000, y: 2000, z: 3000 }, isFree: true },
   { itemID: "2", modeName: "GOTO", targetPoint: { x: 5e6, y: 0, z: 0 }, velocity: { x: 120, y: -3, z: 0 } },
   { itemID: "3", modeName: "ORBIT", followID: "1", followRange: 2500 },
-  { itemID: PROBE_BIG_ID.toString(), modeName: "WARP", targetPoint: { x: 9e9, y: 1, z: 2 }, minimumRange: 15_000 },
+  { itemID: PROBE_BIG_ID.toString(), modeName: "WARP" },
   { itemID: "60004603", modeName: "STOP", position: { x: 1e9, y: 2e9, z: 3e9 }, isFree: false },
   { itemID: "40000001", modeName: "RIGID", position: { x: -1e11, y: 0, z: 4e10 }, isFree: false },
 ]);
+// The warp ball's mode data, checked apart from the layout. A tree can write
+// the stock bytes yet read a warp's state from somewhere other than
+// entity.warpState, and then encodes the probe's warp with no destination.
+// Only the warp-landing check reads these values.
+const PROBE_WARP_INDEX = 3;
+const PROBE_WARP_EXPECT = Object.freeze({ targetPoint: { x: 9e9, y: 1, z: 2 }, minimumRange: 15_000 });
 
 // Has the tree's encoder (its buildAddBallsStateBuffer) write the probe
 // balls and reads them back. A mismatch means the decoder would misread the
 // tree's destiny updates, so the client view must stay off rather than report
-// DIVERGEs that aren't there. -> { ok, error, balls }
+// DIVERGEs that aren't there. warpOff: the layout reads, but the warp ball's
+// destination doesn't, so the client view runs without the warp-landing check.
+// -> { ok, error, balls, warpOff }
 function probeDestinyLayout(encode) {
   let buffer;
   try {
     buffer = encode(PROBE_STAMP, PROBE_ENTITIES.map((entity) => ({ ...entity })));
   } catch (error) {
-    return { ok: false, error: `the tree's ball encoder threw: ${error && error.message ? error.message : error}`, balls: 0 };
+    return { ok: false, error: `the tree's ball encoder threw: ${error && error.message ? error.message : error}`, balls: 0,
+      warpOff: null };
   }
   const decoded = decodeBallState(buffer);
-  const problems = [];
-  if (decoded.error) problems.push(decoded.error);
-  if (decoded.stamp !== PROBE_STAMP) problems.push(`stamp read as ${decoded.stamp}, written as ${PROBE_STAMP}`);
-  if (decoded.balls.length !== PROBE_EXPECT.length) {
-    problems.push(`${decoded.balls.length} balls read, ${PROBE_EXPECT.length} written`);
-  }
-  PROBE_EXPECT.forEach((expected, index) => {
+  const compare = (index, expected, problems) => {
     const ball = decoded.balls[index];
     if (!ball) return;
     for (const [key, want] of Object.entries(expected)) {
@@ -307,11 +310,24 @@ function probeDestinyLayout(encode) {
         problems.push(`ball ${index + 1} ${key} read as ${JSON.stringify(ball[key])}, written as ${JSON.stringify(want)}`);
       }
     }
-  });
+  };
+  const problems = [];
+  if (decoded.error) problems.push(decoded.error);
+  if (decoded.stamp !== PROBE_STAMP) problems.push(`stamp read as ${decoded.stamp}, written as ${PROBE_STAMP}`);
+  if (decoded.balls.length !== PROBE_EXPECT.length) {
+    problems.push(`${decoded.balls.length} balls read, ${PROBE_EXPECT.length} written`);
+  }
+  PROBE_EXPECT.forEach((expected, index) => compare(index, expected, problems));
+  const ok = problems.length === 0;
+  const warpProblems = [];
+  if (ok) compare(PROBE_WARP_INDEX, PROBE_WARP_EXPECT, warpProblems);
   return {
-    ok: problems.length === 0,
-    error: problems.length ? `this tree's destiny ball layout is not the one the decoder reads: ${problems.slice(0, 3).join("; ")}` : null,
+    ok,
+    error: ok ? null : `this tree's destiny ball layout is not the one the decoder reads: ${problems.slice(0, 3).join("; ")}`,
     balls: decoded.balls.length,
+    warpOff: warpProblems.length
+      ? `the tree's encoder didn't write the probe warp's destination and minimum range (entity.warpState): ${warpProblems.join("; ")}`
+      : null,
   };
 }
 
@@ -384,7 +400,9 @@ const MOVEMENT_MODES = {
   EntityWarpIn: "WARP",
 };
 
-function createClientModel({ now = Date.now } = {}) {
+// warpOff: probeDestinyLayout's reason not to trust a warp ball's encoded
+// destination. Such a ball still leaves warp when the server's does, unchecked.
+function createClientModel({ now = Date.now, warpOff = null } = {}) {
   const balls = new Map();
   // Updates that named a ball the client does not hold: id -> { op, firstAtMs, count }.
   const orphans = new Map();
@@ -417,10 +435,11 @@ function createClientModel({ now = Date.now } = {}) {
     if (decoded.isFree && decoded.modeName !== "WARP") {
       ball.check = { position: decoded.position, velocity: ball.velocity, atMs, source };
     }
-    if (decoded.modeName === "WARP" && decoded.targetPoint) {
+    if (decoded.modeName === "WARP" && (warpOff || decoded.targetPoint)) {
       // The server encoded this ball in warp: it was warping when this left.
-      ball.warp = { dest: decoded.targetPoint, minRange: Number(decoded.minimumRange) || 0, atMs,
-        source, serverWasWarping: true };
+      ball.warp = warpOff
+        ? { dest: null, minRange: 0, atMs, source, serverWasWarping: true }
+        : { dest: decoded.targetPoint, minRange: Number(decoded.minimumRange) || 0, atMs, source, serverWasWarping: true };
     }
     return ball;
   }
@@ -684,7 +703,7 @@ function isGatewaySession(session) {
 
 // off: why the tee must not run (probeDestinyLayout's error). An off tee
 // attaches to nothing and says why, so a watch reports no client view instead
-// of a misread one.
+// of a misread one. warpOff: probeDestinyLayout's warpOff, for each model.
 function createDestinyTee({
   decodePackaged = null,
   now = Date.now,
@@ -692,9 +711,11 @@ function createDestinyTee({
   ringSize = LIMITS.ringSize,
   maxSessions = LIMITS.maxSessions,
   off = null,
+  warpOff = null,
 } = {}) {
   const states = new Map();
   const offReason = off ? String(off) : null;
+  const warpReason = !offReason && warpOff ? String(warpOff) : null;
 
   function prune() {
     for (const [session, state] of states) {
@@ -745,7 +766,7 @@ function createDestinyTee({
     const state = {
       characterID: Number(session.characterID || session.charid) || null,
       attachedAtMs: now(),
-      model: createClientModel({ now }),
+      model: createClientModel({ now, warpOff: warpReason }),
       ring: [],
       seq: 0,
       costs: { notifications: 0, updates: 0, errors: 0, msTotal: 0, msMax: 0 },
@@ -796,7 +817,7 @@ function createDestinyTee({
     };
   }
 
-  return { attach, drain, describe, isGatewaySession, size: () => states.size, off: offReason };
+  return { attach, drain, describe, isGatewaySession, size: () => states.size, off: offReason, warpOff: warpReason };
 }
 
 // --- divergence ---------------------------------------------------------------

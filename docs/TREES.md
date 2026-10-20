@@ -135,6 +135,8 @@ when no server is up. `--offline` always reads the files; `--json` prints the wh
 - **destiny**: the bridge has the tree's own encoder write a set of test balls and reads them back
   with its decoder. If the layout differs, the client view stays off and the bridge says so in its
   log, on `/tee` and in every watch's `START` line, rather than reporting DIVERGEs that aren't there.
+  If only the test warp ball's destination and minimum range read back wrong, the client view stays
+  on without the `warp-landing` check, and the line says `warp-landing check off` with the reason.
 - **patches**: each optional stock edit in `patches/` as `applied` (its marker comments are in the
   file), `partial` (some are), `detected` (equivalent code without the marker, as in the LU fork),
   `absent`, or `no-target` (a file it changes isn't in the tree). `gridcheck patch` applies and reverts

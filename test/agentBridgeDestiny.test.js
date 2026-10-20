@@ -187,9 +187,30 @@ const shiftedEncoder = (stamp, entities) => {
   return Buffer.concat([buffer.subarray(0, 13), Buffer.from([0]), buffer.subarray(13)]);
 };
 
+// The stock bytes, but the warp ball carries what the stock encoder writes when
+// it finds no warp state on the entity: position + 1e16 m along x, and no
+// minimum range. A tree that keeps warp state elsewhere than entity.warpState
+// writes this for the probe.
+const warplessEncoder = (stamp, entities) => {
+  const buffer = Buffer.from(treeEncoder(stamp, entities));
+  const pattern = Buffer.alloc(24);
+  pattern.writeDoubleLE(9e9, 0);
+  pattern.writeDoubleLE(1, 8);
+  pattern.writeDoubleLE(2, 16);
+  const at = buffer.indexOf(pattern);
+  assert.ok(at > 0, "the probe's warp destination is in the stock bytes");
+  buffer.writeDoubleLE(1000 + 1e16, at);
+  buffer.writeDoubleLE(2000, at + 8);
+  buffer.writeDoubleLE(3000, at + 16);
+  // After the destination: effect stamp (int32), total distance, minimum range.
+  assert.strictEqual(buffer.readDoubleLE(at + 24 + 4 + 8), 15_000);
+  buffer.writeDoubleLE(0, at + 24 + 4 + 8);
+  return buffer;
+};
+
 test("the layout check reads back every probe ball the tree's encoder writes", () => {
   const probe = probeDestinyLayout(treeEncoder);
-  assert.deepStrictEqual(probe, { ok: true, error: null, balls: PROBE_ENTITIES.length });
+  assert.deepStrictEqual(probe, { ok: true, error: null, balls: PROBE_ENTITIES.length, warpOff: null });
   assert.strictEqual(decodeBallState(treeEncoder(PROBE_STAMP, PROBE_ENTITIES.map((entity) => ({ ...entity })))).stamp, PROBE_STAMP);
 });
 
@@ -222,6 +243,53 @@ test("a changed destiny layout turns the client view off with a clear message", 
   assert.deepStrictEqual([lines[0].kind, lines[0].clientMode, lines[0].clientOff], ["START", "off", probe.error]);
   assert.ok(!lines.some((event) => event.kind === "CLIENT" || event.kind === "DIVERGE"),
     lines.map((event) => event.kind).join(" "));
+});
+
+test("a tree whose encoder writes no warp destination for the probe keeps the client view, without the warp-landing check", async () => {
+  const probe = probeDestinyLayout(warplessEncoder);
+  assert.strictEqual(probe.ok, true, probe.error);
+  assert.strictEqual(probe.error, null);
+  assert.strictEqual(probe.balls, PROBE_ENTITIES.length);
+  assert.match(probe.warpOff, /ball 4 targetPoint read as \{"x":10000000000001000,"y":2000,"z":3000\}/);
+  assert.match(probe.warpOff, /ball 4 minimumRange read as 0, written as 15000/);
+  assert.strictEqual(probeDestinyLayout(shiftedEncoder).warpOff, null, "a layout failure turns the whole view off instead");
+
+  const tee = createDestinyTee({ decodePackaged: marshalDecodeExact, warpOff: probe.warpOff });
+  assert.strictEqual(tee.off, null);
+  assert.strictEqual(tee.warpOff, probe.warpOff);
+  const session = gatewaySession();
+  assert.strictEqual(tee.attach(session).ok, true);
+
+  const { createGridWatch } = require("../bridge/watch");
+  let clock = 0;
+  const watch = createGridWatch({
+    findSession: () => session,
+    readGrid: () => ({ inSpace: true, solarSystemID: 30000142, systemName: "Jita", self: { itemID: 1 },
+      entities: [{ kind: "ship", itemID: 1, isSelf: true, typeName: "Rifter", mode: "STOP", position: { x: 0, y: 0, z: 0 } }] }),
+    destinyTee: tee,
+    now: () => clock,
+    perfNow: () => clock,
+    wait: async (ms) => { clock += ms; },
+  });
+  const lines = [];
+  await watch.run({ characterID: 90000001, forMs: 2_000, everyMs: 2_000, offGridEveryMs: 60_000, clientMode: "all" },
+    { write: (event) => lines.push(event), closed: () => false });
+  assert.deepStrictEqual([lines[0].kind, lines[0].clientMode, lines[0].clientOff, lines[0].warpOff],
+    ["START", "all", undefined, probe.warpOff]);
+});
+
+test("without warp mode data, a ball bound in mid-warp leaves warp when the server's does, with no landing check", () => {
+  const model = createClientModel({ warpOff: "the probe's warp read back wrong" });
+  apply(model, setState([ship(1)]), 0);
+  apply(model, addBalls([ship(4, { mode: "WARP", warpState: { targetPoint: { x: 0, y: 0, z: 0 }, stopDistance: 0,
+    effectStamp: 1, totalDistance: 1e9 } })]), 0);
+  assert.strictEqual(model.balls.get("4").mode, "WARP");
+  assert.strictEqual(model.balls.get("4").warp.dest, null, "the encoded destination isn't trusted");
+
+  const checker = createDivergenceChecker({ positionMeters: 5000 });
+  const events = checker.step(serverGrid([row(1), row(4, { mode: "STOP", position: { x: 250_000, y: 0, z: 0 } })]), model, 1000);
+  assert.deepStrictEqual(events, []);
+  assert.strictEqual(model.balls.get("4").mode, "STOP", "the client drops out of warp by itself");
 });
 
 test("the tee wraps gateway sessions only and returns the original's result", () => {

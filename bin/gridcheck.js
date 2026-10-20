@@ -3327,7 +3327,8 @@ function formatDoctor(report) {
   }
   const destiny = report.destiny || {};
   lines.push(destiny.ok
-    ? `destiny    the decoder reads this tree's ball layout (${destiny.balls} probe balls); client view on`
+    ? `destiny    the decoder reads this tree's ball layout (${destiny.balls} probe balls); client view on` +
+      `${destiny.warpOff ? `, warp-landing check off: ${destiny.warpOff}` : ""}`
     : `destiny    client view OFF: ${destiny.error}`);
   lines.push(`patches    ${(report.patches || []).map((patch) => `${patch.id} ${patch.state}${patch.version ? ` v${patch.version}` : ""}`).join(", ") || "none known"}`);
   const plugins = report.plugins || { active: [], skipped: [] };

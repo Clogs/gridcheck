@@ -367,6 +367,9 @@ changes; the code is `bridge/destiny.js`.
 At boot the bridge has the tree's own encoder write a set of test balls and reads them back. If
 the layout differs from what the decoder knows, the client view stays off and says so in the log,
 on `/tee` and in every watch's `START` line, rather than reporting DIVERGEs that aren't there.
+A tree can write the stock layout but keep a warp's state somewhere other than `entity.warpState`,
+so the test warp ball comes back without its destination. Then only the `warp-landing` check is
+off: the client view runs, and the log, `gridcheck doctor` and the `START` line say why.
 
 `gridcheck login` attaches the tee through `POST /tee`, so the client view starts from the undock's
 SetState. A watch also attaches it, but the view then stays empty until the next undock, jump or

@@ -140,6 +140,7 @@ function eventBody(event, registry) {
       return [`character ${event.characterID}, ${Math.round(event.forMs / 1000)}s, sample every ` +
         `${event.everyMs / 1000}s, off grid every ${event.offGridEveryMs / 1000}s`,
       [event.clientOff ? `client=off (${event.clientOff})` : event.clientMode ? `client=${event.clientMode}` : "",
+        event.warpOff ? `warp-landing check off (${event.warpOff})` : "",
         event.perf ? `perf every ${event.perf.everyMs / 1000}s, profiler ${event.perf.profiler ? `on (${event.perf.everyTicks} ticks)` : "off"}` : ""]
         .filter(Boolean).join(", ")];
     case "PERF":

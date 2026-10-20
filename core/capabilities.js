@@ -6,7 +6,8 @@
 //
 //   gateway    which of the gateway calls the CLI makes the tree allows
 //   destiny    whether the decoder reads the tree's ball layout (else the
-//              client view stays off)
+//              client view stays off), and warpOff when only the warp ball's
+//              destination doesn't (the warp-landing check stays off)
 //   patches    which optional stock edits are applied, detected or absent
 //   plugins    active, and skipped with the reason
 //   listeners  which ports `gridcheck up` can move (gridcheck.config.json)

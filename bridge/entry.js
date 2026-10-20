@@ -144,6 +144,7 @@ function createService({ serverRoot, stock: givenStock = null, pluginsDir = DEFA
     });
     const layout = probeLayout(stock);
     if (!layout.ok) log.warn(`[AgentBridge] client view off: ${layout.error}`);
+    else if (layout.warpOff) log.warn(`[AgentBridge] client view on, warp-landing check off: ${layout.warpOff}`);
     // Loaded on the first loadout or capabilities call: the ship runtime pulls
     // in half the server, which must not happen while the loader only scans.
     let loadoutBuilder = null;
@@ -159,6 +160,7 @@ function createService({ serverRoot, stock: givenStock = null, pluginsDir = DEFA
     const destinyTee = createDestinyTee({
       decodePackaged: (bytes) => stock.marshal.marshalDecodeExact(bytes),
       off: layout.ok ? null : layout.error,
+      warpOff: layout.ok ? layout.warpOff : null,
     });
     // Tick figures from the runtime's ring; the profiler's windows when the
     // server runs with EVEJS_TICK_PROFILE=1 (perf.js).

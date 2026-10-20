@@ -764,6 +764,7 @@ function createGridWatch({
 
     emit({ kind: "START", characterID, forMs, everyMs, offGridEveryMs, clientMode: client ? clientMode : "off",
       ...(destinyTee && destinyTee.off && clientMode !== "off" ? { clientOff: destinyTee.off } : {}),
+      ...(client && destinyTee.warpOff ? { warpOff: destinyTee.warpOff } : {}),
       positions: positions === true,
       ...(sampler ? { perf: { everyMs: perfEveryMs, profiler: perf.profiler.enabled, everyTicks: perf.profiler.everyTicks } } : {}) });
     // Stamped when the bridge got them; clientAtMs is when the client recorded them.
