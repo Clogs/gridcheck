@@ -241,7 +241,10 @@ function readConsole({ pid, run = spawnSync }) {
 // with PrintWindow(PW_CLIENTONLY | PW_RENDERFULLCONTENT), which captures the
 // D3D window from outside. A minimized window can't be drawn. With -FromFile
 // it scales and converts that picture instead (one the client saved itself).
-const SCREENSHOT_PS1 = String.raw`param([int]$TargetPid, [string]$Out, [int]$MaxWidth = 0, [string]$Format = 'png', [string]$FromFile = '')
+// -Crop "left,top,width,height" in UI units, with -UiWidth the desktop's width
+// in them, cuts the picture to that rect before it is scaled.
+const SCREENSHOT_PS1 = String.raw`param([int]$TargetPid, [string]$Out, [int]$MaxWidth = 0, [string]$Format = 'png', [string]$FromFile = '',
+  [string]$Crop = '', [double]$UiWidth = 0)
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Drawing
 Add-Type @"
@@ -296,6 +299,16 @@ if ($FromFile) {
   $g.ReleaseHdc($dc); $g.Dispose()
   if (-not $ok) { $bmp.Dispose(); Write-Output "ERROR PrintWindow failed"; exit 5 }
 }
+if ($Crop) {
+  $c = $Crop.Split(',') | ForEach-Object { [double]$_ }
+  $f = 1.0
+  if ($UiWidth -gt 0) { $f = $w / $UiWidth }
+  $cx = [int][Math]::Floor($c[0] * $f); $cy = [int][Math]::Floor($c[1] * $f)
+  $cw = [int][Math]::Min($w - $cx, [Math]::Round($c[2] * $f)); $ch = [int][Math]::Min($hh - $cy, [Math]::Round($c[3] * $f))
+  if ($cx -lt 0 -or $cy -lt 0 -or $cw -le 0 -or $ch -le 0) { $bmp.Dispose(); Write-Output "ERROR the crop $Crop lies outside the picture"; exit 6 }
+  $part = $bmp.Clone((New-Object System.Drawing.Rectangle $cx, $cy, $cw, $ch), $bmp.PixelFormat)
+  $bmp.Dispose(); $bmp = $part; $w = $cw; $hh = $ch
+}
 $outW = $w; $outH = $hh
 if ($MaxWidth -gt 0 -and $w -gt $MaxWidth) {
   $outW = $MaxWidth; $outH = [int][Math]::Round($hh * $MaxWidth / $w)
@@ -311,8 +324,10 @@ if ($h -ne [IntPtr]::Zero) { [void][GridcheckShot]::GetWindowText($h, $t, 256) }
 Write-Output ("OK {0} {1} {2}" -f $outW, $outH, $t.ToString())
 `;
 
-function screenshotArgs({ pid, out, maxWidth, format, from }) {
-  return ["-TargetPid", String(pid || 0), "-Out", out, "-MaxWidth", String(maxWidth), "-Format", format, ...(from ? ["-FromFile", from] : [])];
+// crop: { rect: [left, top, width, height], uiWidth } in UI units, or null.
+function screenshotArgs({ pid, out, maxWidth, format, from, crop = null }) {
+  return ["-TargetPid", String(pid || 0), "-Out", out, "-MaxWidth", String(maxWidth), "-Format", format, ...(from ? ["-FromFile", from] : []),
+    ...(crop ? ["-Crop", crop.rect.join(","), "-UiWidth", String(crop.uiWidth)] : [])];
 }
 
 function screenshotReply(reply, out) {
@@ -326,7 +341,7 @@ function screenshotReply(reply, out) {
 // The pid's window, or with from the picture in that file, saved as out. It
 // doesn't block: a run keeps reading its watch while PowerShell draws.
 // -> Promise of { file, width, height, title } or { error }.
-function captureScreenshot({ pid, from = null, out, maxWidth = 0, format = "png", spawnImpl = spawn }) {
+function captureScreenshot({ pid, from = null, out, maxWidth = 0, format = "png", crop = null, spawnImpl = spawn }) {
   if (process.platform !== "win32") return Promise.resolve({ error: "screenshots are drawn with Windows' PowerShell; this isn't Windows" });
   fs.mkdirSync(path.dirname(out), { recursive: true });
   const script = path.join(os.tmpdir(), `gridcheck-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.ps1`);
@@ -343,7 +358,7 @@ function captureScreenshot({ pid, from = null, out, maxWidth = 0, format = "png"
     let child;
     try {
       child = spawnImpl("powershell.exe", ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", script,
-        ...screenshotArgs({ pid, out, maxWidth, format, from })], { windowsHide: true });
+        ...screenshotArgs({ pid, out, maxWidth, format, from, crop })], { windowsHide: true });
     } catch (error) {
       done(error);
       return;
@@ -592,16 +607,38 @@ function clientErrorText(error) {
 // Pointer coordinates are UI units (uicore.desktop's size); a picture is in pixels, scaled or not.
 // uiWidth is the desktop's width the picture shows, width the saved picture's: a pointer
 // coordinate is the pixel times uiPerPixel. Null when the UI size is unknown.
-function uiScale({ width, uiWidth, uiHeight }) {
+// A cropped picture shows uiWidth UI units from origin [left, top]: a pointer coordinate is
+// the origin plus the pixel times uiPerPixel.
+function uiScale({ width, uiWidth, uiHeight, origin = null }) {
   if (!(Number(width) > 0) || !(Number(uiWidth) > 0)) return null;
-  return { uiWidth: Number(uiWidth), uiHeight: Number(uiHeight) || null, uiPerPixel: Math.round((Number(uiWidth) / Number(width)) * 10000) / 10000 };
+  return { uiWidth: Number(uiWidth), uiHeight: Number(uiHeight) || null, uiPerPixel: Math.round((Number(uiWidth) / Number(width)) * 10000) / 10000,
+    ...(origin ? { uiOrigin: origin } : {}) };
 }
 
 // "1600x900; pointer coordinates are pixels x 1.2", for a picture that has a scale.
 function scaleText(shot) {
   const size = `${shot.width}x${shot.height}`;
   if (!shot.uiPerPixel) return `${size}; pointer coordinates are in UI pixels, which this picture's size doesn't tell`;
-  return `${size}; pointer coordinates are pixels x ${shot.uiPerPixel}`;
+  const origin = shot.uiOrigin && (shot.uiOrigin[0] || shot.uiOrigin[1]) ? `, plus (${shot.uiOrigin[0]}, ${shot.uiOrigin[1]})` : "";
+  return `${size}; pointer coordinates are pixels x ${shot.uiPerPixel}${origin}`;
+}
+
+// What `client events` shows: the content host's noise hidden unless noise; with exceptions,
+// only exceptions; with frame, only exceptions with a traceback line (or where) containing it,
+// case-insensitive, e.g. "lu-luCommand" for the module LU delivers. -> { events, hiddenNoise }.
+function filterClientEvents(rows, { noise = false, exceptions = false, frame = null } = {}) {
+  const wanted = frame ? String(frame).toLowerCase() : null;
+  let hiddenNoise = 0;
+  const events = rows.filter((event) => {
+    const exception = event.kind === "CLIENT_EXCEPTION";
+    if (exception && event.noise && !noise) {
+      hiddenNoise += 1;
+      return false;
+    }
+    if ((exceptions || wanted) && !exception) return false;
+    return !wanted || [event.where, ...(event.traceback || [])].some((line) => String(line || "").toLowerCase().includes(wanted));
+  });
+  return { events, hiddenNoise };
 }
 
 // Whether an eval's value is true in Python's sense: the agent's own answer (truth, from version 10),
@@ -673,7 +710,9 @@ module.exports = {
   redactSwitches,
   repairNodePath,
   evalTruth,
+  filterClientEvents,
   scaleText,
+  screenshotArgs,
   startClient,
   uiScale,
 };

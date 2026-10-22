@@ -38,6 +38,9 @@ const PROTOCOL_VERSIONS = ["2025-06-18", "2025-03-26", "2024-11-05"];
 // Claude Code warns above 10,000 tokens of tool output. The full text is
 // always in a file the reply names.
 const OUTPUT_LIMIT = 20_000;
+// The whole guide has no file to point at, so it gets room to come back whole
+// (still under that warning).
+const GUIDE_LIMIT = 30_000;
 const WATCH_DEFAULT_SECONDS = 60;
 const MAX_WAIT_SECONDS = 600;
 const NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/;
@@ -323,6 +326,7 @@ const CLI_ARGS = {
     flag("file", p.file);
     flag("assert", p.assert);
     flag("out", p.out);
+    flag("vars", p.vars === undefined ? undefined : JSON.stringify(p.vars));
     args.push("--", "eval", ...(p.code === undefined ? [] : [String(p.code)]));
     return args;
   },
@@ -382,6 +386,7 @@ const CLI_ARGS = {
     flag("class", p.cls);
     flag("name", p.name);
     flag("text", p.text);
+    flag("window", p.window);
     flag("depth", p.depth);
     flag("hidden", p.hidden);
     flag("limit", p.limit);
@@ -405,12 +410,16 @@ const CLI_ARGS = {
     args.push("--", "diff");
     return args;
   },
+  // Here since defaults to last: each call answers what came after the one before.
   client_events(p) {
     const { args, flag } = argList("client");
     flag("user", p.user);
-    flag("since", p.since);
+    flag("since", p.since === undefined ? (p.all ? undefined : "last") : p.since);
     flag("all", p.all);
     flag("limit", p.limit);
+    flag("exceptions", p.exceptions);
+    flag("frame", p.frame);
+    flag("noise", p.noise);
     // An empty list is a value here: it stops recording notify events.
     if (Array.isArray(p.notify)) args.push(`--notify=${p.notify.join(",")}`);
     flag("json", p.json);
@@ -424,7 +433,27 @@ const CLI_ARGS = {
     flag("max-width", p.maxWidth === undefined ? 1600 : p.maxWidth);
     flag("format", p.format || "jpg");
     flag("source", p.source);
+    flag("window", p.window);
+    flag("path", p.path);
+    flag("fresh", p.fresh);
     args.push("--json", "--", "screenshot");
+    return args;
+  },
+  client_inspect(p) {
+    const { args, flag } = argList("client");
+    flag("user", p.user);
+    flag("module", p.module);
+    flag("inherited", p.inherited);
+    flag("json", p.json);
+    args.push("--", "inspect", String(p.cls));
+    return args;
+  },
+  client_rpc_log(p) {
+    const { args, flag } = argList("client");
+    flag("reads", p.reads);
+    flag("all", p.all);
+    flag("json", p.json);
+    args.push("--", "rpc-log");
     return args;
   },
   client_find: (p) => clientDriveArgs("find", p),
@@ -451,15 +480,17 @@ const CLI_ARGS = {
     flag("user", p.user);
     flag("payload", p.payload === undefined ? undefined : JSON.stringify(p.payload));
     flag("args", p.args === undefined ? undefined : JSON.stringify(p.args));
+    flag("out", p.out);
+    flag("shape", p.shape);
     flag("json", p.json);
     args.push("--", "rpc", String(p.service), String(p.method));
     return args;
   },
-  // text is what to type here; intoText finds the edit by its text.
-  client_type: (p) => clientDriveArgs("type", { ...p, text: p.intoText }, (flag) => {
+  // value is what to type; text, like the other node properties, finds the edit.
+  client_type: (p) => clientDriveArgs("type", p, (flag) => {
     flag("set", p.set);
     flag("enter", p.enter);
-  }, p.text === undefined ? [] : [String(p.text)]),
+  }, p.value === undefined ? [] : [String(p.value)]),
   client_key: (p) => clientDriveArgs("key", p, null, [String(p.key)]),
   client_cmd(p) {
     const { args, flag } = argList("client");
@@ -489,7 +520,9 @@ function clientNodeProps() {
     path: str("The node's path as client_ui prints it. Siblings with one label are Button[0], Button[1] ...; Button alone matches all of them."),
     cls: str("Class name contains this, e.g. Button."),
     name: str("Node name contains this."),
-    text: str("Label or caption contains this, e.g. Undock (a button's own label counts). With path, cls and name: all must match."),
+    text: str("Label or caption contains this, e.g. Undock (a button's own label counts; markup and spacing don't matter). With path, cls " +
+      "and name: all must match, and those three may name the node a click on the text goes to (a label's own button)."),
+    window: str("Only this window's nodes: its windowID, name, class or caption (exact, else contains), e.g. LuCorpConsole."),
     index: { type: "integer", minimum: 0, description: "Which of several matches, from 0." },
     hidden: bool("Also look in hidden nodes."),
   };
@@ -512,6 +545,7 @@ function clientDriveArgs(sub, p, more = null, tail = []) {
   flag("text", p.text);
   flag("index", p.index);
   flag("hidden", p.hidden);
+  flag("window", p.window);
   if (more) more(flag);
   flag("wait", p.wait);
   flag("json", p.json);
@@ -530,9 +564,9 @@ function textResult(text, isError = false) {
   return { content: [{ type: "text", text: text || "(no output)" }], isError: Boolean(isError) };
 }
 
-function cliResult({ code, output, aborted }, where = "") {
+function cliResult({ code, output, aborted }, where = "", limit = OUTPUT_LIMIT) {
   const end = aborted ? "\n(cancelled)" : code ? `\n(exit ${code})` : "";
-  return textResult(`${clip(output, OUTPUT_LIMIT, where)}${end}`, code !== 0 || aborted);
+  return textResult(`${clip(output, limit, where)}${end}`, code !== 0 || aborted);
 }
 
 // ---------- scenarios and runs ----------
@@ -628,7 +662,7 @@ const TOOLS = [
     inputSchema: schema({
       topic: str(Object.entries(TOPICS).map(([key, what]) => `${key}: ${what}`).join("; "), { enum: Object.keys(TOPICS) }),
     }),
-    run: simple("guide"),
+    run: async (params, context) => cliResult(await runCli(cliArgs("guide", params), context), "", GUIDE_LIMIT),
   },
   {
     name: "up",
@@ -896,6 +930,8 @@ const TOOLS = [
     inputSchema: schema({
       code: str("Python, e.g. cfg.evelocations.Get(session.solarsystemid2).name. Give code or file."),
       file: str("A Python file to run instead of code, at most 256 KiB."),
+      vars: { type: "object", description: "Names to set in the namespace before the code runs, e.g. { \"page\": \"operations\", \"member\": 9000001 }: " +
+        "JSON values, so no globals on __builtin__ are needed to pass them. They stay set for later calls." },
       assert: bool("Fail unless the value is exactly True (1, None and False fail)."),
       out: str("Also save the answer to this JSON file."),
       user: str("The client's account, when more than one is online."),
@@ -1004,7 +1040,8 @@ const TOOLS = [
     inputSchema: schema({
       cls: str("Class name contains this, e.g. Button."),
       name: str("Node name contains this."),
-      text: str("Label or caption contains this, e.g. Undock."),
+      text: str("Label or caption contains this, e.g. Undock (markup and spacing don't matter)."),
+      window: str("Only this window: its windowID, name, class or caption (exact, else contains). Without a filter, the tree from the window."),
       depth: int("How deep to walk (default 3, or 40 with a filter).", { minimum: 0, maximum: 60 }),
       hidden: bool("Also walk hidden nodes."),
       limit: int("Most nodes (tree) or matches to list.", { minimum: 1, maximum: 20000 }),
@@ -1018,8 +1055,12 @@ const TOOLS = [
     description: "A picture of the EVE client. By default the client saves what it last drew, which works while its window " +
       "is covered or minimized; if it can't, the window is drawn with PrintWindow from outside. Saved under " +
       "_local/gridcheck/client/ (or the run's client/ folder) and returned as an image. The text says how to turn " +
-      "pixels in the picture into the UI coordinates client_pointer takes.",
+      "pixels in the picture into the UI coordinates client_pointer takes. Crop to one window (window) to keep the picture small, and " +
+      "pass fresh after changing the UI, so the picture can't be a frame from before the change.",
     inputSchema: schema({
+      window: str("Crop to this window: its windowID, name, class or caption (exact, else contains), e.g. LuCorpConsole."),
+      path: str("Crop to this node instead, by its path as client_ui prints it."),
+      fresh: bool("First wait until the client has drawn frames after this call (about 0.1 s), so what the calls before it changed shows."),
       run: str("Save it in this run's folder."),
       source: str("auto (default), client (only the client's own picture) or window (only PrintWindow, not while minimized).",
         { enum: ["auto", "client", "window"] }),
@@ -1073,13 +1114,18 @@ const TOOLS = [
     name: "client_events",
     description: "The EVE client's logged exceptions (unhandled tasklet errors included), the notify events it records " +
       "(OnSessionChanged by default), every message it shows the player (notices that fade, UserError and other dialog text), " +
-      "its actions and the agent's own errors, oldest first: the attached client's since it " +
-      "attached, the last 50. The answer ends with the since to pass for newer ones. A watch shows the same as " +
-      "CLIENT_EXCEPTION and CLIENT_EVENT lines beside the server's.",
+      "its actions and the agent's own errors, oldest first, the last 50. Each call answers only what came after the call " +
+      "before (the first: the attached client's events since it attached). Known noise, such as the content host's gaierror, " +
+      "is hidden and counted. \"Did my code throw?\": { frame: \"lu-luCommand\" } lists only exceptions from that code, with " +
+      "tracebacks. A watch shows the same as CLIENT_EXCEPTION and CLIENT_EVENT lines beside the server's.",
     inputSchema: schema({
-      since: int("Only events after this sequence number, from any client.", { minimum: 0 }),
-      all: bool("Every client's events since the server started."),
+      since: { type: ["integer", "string"], description: "Only events after this sequence number, from any client; \"last\" (default) " +
+        "after where the previous call ended." },
+      all: bool("Every client's events since the server started (since then defaults to none)."),
       limit: int("The most recent this many (default 50).", { minimum: 1, maximum: 1000 }),
+      exceptions: bool("Only exceptions, each with its traceback."),
+      frame: str("Only exceptions with a traceback line containing this, e.g. lu-luCommand for the module LU delivers, or a file name."),
+      noise: bool("Also show the noise exceptions."),
       notify: { type: "array", items: { type: "string" }, description: "Record these notify events from now on instead, e.g. [\"OnSessionChanged\", \"OnDamageStateChange\"]; [] records none." },
       user: str("The client's account, when more than one is online."),
       json: bool("The answer as JSON."),
@@ -1101,7 +1147,8 @@ const TOOLS = [
     name: "client_click",
     description: "Click a node of the EVE client's UI (found as client_find finds it) from inside the client: its own " +
       "click handler runs (a button's press, which checks it is enabled), so the client's window may stay in the " +
-      "background. A node in a scroll container is scrolled into view first. Answers whether what it started finished " +
+      "background. A node in a scroll container is scrolled into view first. Of several matches, those that take no click (a header " +
+      "caption) are skipped, and matches that click the same node count once. Answers whether what it started finished " +
       "within wait, any dialog it opened (then client_click that dialog's button), and what the client told the player " +
       "meanwhile (a refusal such as \"That system has no asteroid belt\").",
     inputSchema: schema({ ...clientNodeProps(), double: bool("Double-click (OnDblClick)."), ...clientDriveProps() }),
@@ -1109,13 +1156,13 @@ const TOOLS = [
   },
   {
     name: "client_type",
-    description: "Type into an edit of the EVE client, character by character through the client's own key input " +
-      "(uilib._OnChar), or set its value at once. The client drops its focus while its window is in the background, " +
-      "so name the edit (path, cls, name or intoText).",
+    description: "Type value into an edit of the EVE client, character by character through the client's own key input " +
+      "(uilib._OnChar), or set it at once. The client drops its focus while its window is in the background, " +
+      "so name the edit: path, cls, name or text find it as client_find does (text is the edit's own text, not what to type), " +
+      "and window keeps to one window. The answer reads the edit's value back.",
     inputSchema: schema({
-      text: str("What to type."),
+      value: str("What to type, e.g. \"12000000\"."),
       ...clientNodeProps(),
-      intoText: str("Find the edit by its text (contains)."),
       set: bool("Set the edit's value with its SetValue instead of typing."),
       enter: bool("Press enter after."),
       user: str("The client's account, when more than one is online."),
@@ -1210,16 +1257,46 @@ const TOOLS = [
     description: "Call a server service from inside the EVE client as its character: sm.RemoteSvc(service).method(...). " +
       "With payload, the one argument is that value JSON-encoded and a JSON " +
       "string reply is decoded. With args, they are passed as they are. A server UserError comes back as an error with " +
-      "its message.",
+      "its message. For a long reply, out saves it and shape answers its keys, types, array lengths and a sample. " +
+      "Every call is logged; client_rpc_log lists the ones that may have changed state.",
     inputSchema: schema({
       service: str("The service's name."),
       method: str("The method's name."),
       payload: { type: ["object", "array", "string", "number", "boolean"], description: "Sent as one JSON string." },
       args: { type: "array", description: "Sent as separate arguments (strings, numbers, booleans, lists, objects)." },
+      out: str("Save the reply to this file (its JSON, else its repr)."),
+      shape: bool("Answer the reply's shape (keys, types, array lengths, one sample element) instead of the whole of it."),
       user: str("The client's account, when more than one is online."),
       json: bool("The answer as JSON."),
     }, ["service", "method"]),
     run: simple("client_rpc"),
+  },
+  {
+    name: "client_rpc_log",
+    description: "The rpc calls made through gridcheck on this server (client_rpc and the plugins' rpc tools such as lu_rpc), " +
+      "oldest first, with what each sent and whether it was refused, so you can put back the state a test changed. " +
+      "Calls named like reads (Get..., List..., Status) are left out unless reads.",
+    inputSchema: schema({
+      reads: bool("Also list the calls named like reads."),
+      all: bool("Also list calls made on earlier servers."),
+      json: bool("The calls as JSON."),
+    }),
+    run: simple("client_rpc_log"),
+  },
+  {
+    name: "client_inspect",
+    description: "A class of the EVE client by name, found in the modules it has loaded (no import path needed): the module that " +
+      "defines it and the ones it can be imported from, its base classes, its default_* attributes (carbonui's construction " +
+      "defaults) with their values and the class that sets each, and its own methods with their arguments. A module the client " +
+      "hasn't imported yet isn't searched.",
+    inputSchema: schema({
+      cls: str("The class name, e.g. Slider or ToggleButtonGroup (exact case first, else any case)."),
+      module: str("Only modules whose name contains this, e.g. carbonui."),
+      inherited: bool("Also list inherited methods by class (otherwise counted)."),
+      user: str("The client's account, when more than one is online."),
+      json: bool("The answer as JSON."),
+    }, ["cls"]),
+    run: simple("client_inspect"),
   },
   {
     name: "run_scenario",
@@ -1488,6 +1565,7 @@ function main() {
 if (require.main === module) main();
 
 module.exports = {
+  GUIDE_LIMIT,
   INSTRUCTIONS,
   TOOLS,
   callTool,

@@ -135,18 +135,19 @@ Expect a budget like "no PERF overBudget>=5" (no 5 s window with 5 ticks over th
   const c = (name, mcpArgs = "", cliArgs = "") => (cli ? `\`gridcheck client ${name.replace(/_/g, "-")}${cliArgs ? ` ${cliArgs}` : ""}\`` : t(`client_${name}`, mcpArgs));
   const client = `Some bugs only show in the real EVE client: its UI, what its ballpark holds, its own exceptions. ${c("launch")} starts the client Play.bat starts, logged in by token as its own account (e2eclient, never the headless character's account) and waits until it is in game, docked or in space; a client already in game on that account is used as it is. It needs the opt-in client-agent patch (\`gridcheck patch apply client-agent\`, then restart the server). ${t("doctor")} says whether the patch, the service and the client are there, and the fix for each.
 - ${c("status")}: the attached clients, with pid and build. ${c("stop")} ends one.
-- ${c("ui", "{ text: \"Undock\" }", "--text Undock")}: the open windows and every UI node whose class, name or text contains it, with its path and rect. With no filter, the tree from the desktop to a depth.
-- ${c("screenshot")}: a picture of what the client draws, saved by the client, so also while its window is covered or minimized. It gives the scale to pointer coordinates.
+- ${c("ui", "{ text: \"Undock\" }", "--text Undock")}: the open windows and every UI node whose class, name or text contains it, with its path and rect. With no filter, the tree from the desktop to a depth. ${cli ? "--window" : "window"} (its ID, name, class or caption) keeps this, find, click and type to one window.
+- ${c("screenshot")}: a picture of what the client draws, saved by the client, so also while its window is covered or minimized. It gives the scale to pointer coordinates. ${cli ? "--window or --path" : "window or path"} crops to one window or node; ${cli ? "--fresh" : "fresh"} first waits for frames drawn after the call, so a change just made shows.
 - ${c("ballpark")}: the balls the client holds, with position, velocity and mode; ${c("diff")} compares them with the server's grid for the same character (missing, extra, moved, other mode).
-- ${c("events")}: the client's logged exceptions (unhandled tasklet errors included), the notify events it records and the messages it shows the player (CLIENT_EVENT message: key, text), since it attached. While a client is attached, every watch and run also carries them as CLIENT_EXCEPTION and CLIENT_EVENT, so "no CLIENT_EXCEPTION" is an expectation.
-- ${c("eval", "{ code }", "\"<python>\"")}: Python 2.7 inside the client, on its own tasklet: sm, session, uicore, blue and uthread are defined; it answers the last expression's value, else result. Long loops stall the client.
+- ${c("events")}: the client's logged exceptions (unhandled tasklet errors included), the notify events it records and the messages it shows the player (CLIENT_EVENT message: key, text), since it attached${cli ? "; --since last answers only what came after the previous call" : "; each call answers only what came after the one before"}. Known noise is hidden and counted; ${cli ? "--frame <text>" : "frame"} lists only exceptions whose traceback has that text, with the traceback. While a client is attached, every watch and run also carries them as CLIENT_EXCEPTION and CLIENT_EVENT, so "no CLIENT_EXCEPTION" is an expectation.
+- ${c("eval", "{ code }", "\"<python>\"")}: Python 2.7 inside the client, on its own tasklet: sm, session, uicore, blue and uthread are defined; it answers the last expression's value, else result; ${cli ? "--vars <json>" : "vars"} sets names first. Long loops stall the client.
+- ${c("inspect", "{ cls: \"Slider\" }", "Slider")}: a loaded class by name: its module, bases, default_* attributes and methods with their arguments.
 - ${c("check_ui", "{ spec, wait }", "--spec <json> --wait <s>")}: assert on UI nodes, waiting until it holds.
 Driving it, all from inside the client, so its window can stay in the background:
 - ${c("act", "{ action: \"warpTo\", target }", "warpTo <itemID>")}: what a player does, through the client's own services: undock, dock (the nearest station unless given a target), jump, warpTo, approach, orbit, keepAtRange, stop, lock, unlock, activate and deactivate a module (a slot such as high1, or its itemID; ${c("act", "{ action: \"modules\" }", "modules")} lists them), logoff to character selection and select a character. It answers once the action is done, with where the client is and what it logged meanwhile, not done in time is an error, and so is the server's refusal.
 - ${c("click", "{ text: \"Undock\" }", "--text Undock")}: runs the click handler of that node (or the nearest above it that takes a click), scrolled into view first; ${c("find")} says which node that is. A dialog it opens, and any message the client flashed meanwhile, are in the answer; click its button too. Path, class, name and text all apply; repeated labels in a path are Button[0], Button[1].
 - ${c("menu", "{ text: \"Roster\", entries: [\"Expel Member\", \"Confirm Expel Member\"] }", "--text Roster -- \"Expel Member\" \"Confirm Expel Member\"")}: a whole context menu in one call (${cli ? "--item" : "itemID"} for a space item); an entry that isn't there lists those that are.
-- ${c("wait", "{ code }", "\"<python>\" --timeout 30")} polls the Python until true, in place of a shell sleep;${c("rpc", "{ service, method, payload }", "<service> <method> --payload <json>")} is sm.RemoteSvc(...) as the client's character.
-- ${c("type", "{ text, name }", "\"<text>\" --name <edit>")} and ${c("key", "{ key: \"enter\" }", "enter")}: through the client's own key input. Name the edit (the client has no focus in the background); no ctrl, shift or alt.
+- ${c("wait", "{ code }", "\"<python>\" --timeout 30")} polls the Python until true, in place of a shell sleep; ${c("rpc", "{ service, method, payload }", "<service> <method> --payload <json>")} is sm.RemoteSvc(...) as the client's character (${cli ? "--shape" : "shape"} for a long reply's outline); ${c("rpc_log")} lists the calls that may have changed state, to put it back.
+- ${c("type", "{ value, name }", "\"<text>\" --name <edit>")} and ${c("key", "{ key: \"enter\" }", "enter")}: through the client's own key input. Name the edit (the client has no focus in the background)${cli ? "" : "; text finds the edit by its own text"}; no ctrl, shift or alt.
 - ${c("cmd", "{ name: \"OpenInventory\" }", "OpenInventory")}: a client command, as its key binding runs it (CmdToggleMap opens and closes the map); with no name, the list.
 Several clients run at once, one account each (${cli ? "--user" : "user"} picks one; launch another with its own user and name).
 ${t("slash")} and ${t("teleport")} take ${cli ? "`--as client`" : "as: \"client\""} to act on the client's character. Stock \`/tr me <name>\` misses some systems; ${t("teleport")} with the name or an ID reaches them. After changing server code, ${t("restart", "{ clients: true }", "--clients")} brings the server and its clients back.
@@ -182,13 +183,26 @@ function brief({ registry, mode = "auto" }) {
   const plugins = registry.primers.map((entry) => entry.plugin);
   const topics = Object.entries(TOPICS).filter(([key]) => key !== "plugins" || plugins.length)
     .map(([key, what]) => `"${key}" (${key === "plugins" ? `notes from ${plugins.join(", ")}` : what.split(":")[0]})`);
+  const has = (name) => registry.mcpTools.some((tool) => tool.name === name);
+  const rows = [
+    ["wait for the client", `${t("client_wait")}, not a sleep in client_eval`],
+    ["read its UI", `${t("client_ui")}, ${t("client_find")} (window: one window)`],
+    ["call the server", `${t("client_rpc")}${has("lu_rpc") ? ` or ${t("lu_rpc")}` : ""} (shape for a long reply)`],
+    ...(has("lu_reload") ? [["reload client Python sent at login", t("lu_reload")]] : []),
+    ["did it throw", `${t("client_events", "{ frame }")}`],
+    ["a class's defaults and methods", t("client_inspect")],
+    ["a picture", `${t("client_screenshot", "{ window, fresh }")}`],
+  ];
   return `End-to-end grid testing for EveJS with no EVE client: a server boots from a saved world, a character logs in through the web gateway and undocks, and you read its grid, run slash commands, act as the player and watch what happens as a timeline.
 
 This is an outline. Before writing a scenario, read ${t("guide")} { topic }: ${topics.join(", ")}; no topic gives all of them.
 
 Start with ${t("status")}. ${modeText(mode, t)}
 
-The loop: ${t("run_scenario", "{ name, scenario, check: true }")} validates without booting; an unknown key, kind or field comes back with the valid ones listed, so trust a check that passes. Then ${t("run_scenario", "{ name }")} runs it (minutes) and ${t("report")} reads the verdict. By hand: ${["up", "login", "undock", "grid", "act", "watch", "slash", "perf", "down"].map((name) => t(name)).join(", ")}.`;
+The loop: ${t("run_scenario", "{ name, scenario, check: true }")} validates without booting; an unknown key, kind or field comes back with the valid ones listed, so trust a check that passes. Then ${t("run_scenario", "{ name }")} runs it (minutes) and ${t("report")} reads the verdict. By hand: ${["up", "login", "undock", "grid", "act", "watch", "slash", "perf", "down"].map((name) => t(name)).join(", ")}.
+
+With a real EVE client (guide "client"), for X use Y:
+${rows.map(([what, use]) => `- ${what}: ${use}`).join("\n")}`;
 }
 
 module.exports = { BRIEF_LIMIT, TOPICS, brief, primer, topicTexts };

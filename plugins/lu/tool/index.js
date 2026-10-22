@@ -91,12 +91,16 @@ const RPC_TOOL = {
   cli: "lu-rpc",
   description: "Call a Living Universe command (the luCommand service) from the attached EVE client, as its character: " +
     "json.loads(sm.RemoteSvc('luCommand').<Method>(json.dumps(payload))), done for you. Answers the decoded reply; a refusal " +
-    "(UserError) comes back as the error. What the client flashes at the player after a click is in client_events.",
+    "(UserError) comes back as the error. What the client flashes at the player after a click is in client_events. " +
+    "To learn a long reply's fields (GetCorp's), shape: true answers its keys, types, array lengths and one sample element, " +
+    "and out saves the whole reply. Calls are logged: client_rpc_log lists the ones that may have changed state.",
   inputSchema: {
     type: "object",
     properties: {
       method: str("The luCommand method, e.g. Status."),
       payload: { type: "object", description: "What the method takes, as an object (default {})." },
+      out: str("Save the reply to this file."),
+      shape: bool("Answer the reply's shape instead of the whole of it."),
       user: str("The client's account, when more than one is online."),
       json: bool("The whole answer as JSON."),
     },
@@ -106,9 +110,42 @@ const RPC_TOOL = {
   args(p) {
     const args = ["lu-rpc"];
     if (p.payload !== undefined) args.push(`--payload=${JSON.stringify(p.payload)}`);
+    if (p.out) args.push(`--out=${p.out}`);
+    if (p.shape) args.push("--shape");
     if (p.user) args.push(`--user=${p.user}`);
     if (p.json) args.push("--json");
     args.push("--", String(p.method));
+    return args;
+  },
+};
+
+const RELOAD_TOOL = {
+  name: "reload",
+  cli: "lu-reload",
+  description: "Reload a client module the server delivers at login (luCommand, LU Command and the corp console) in the running EVE " +
+    "client, without logging in again: the source comes from the server's own readSource, joined as a login gets it; each " +
+    "file is compiled under its own name, so a SyntaxError answers corpWindow.py:1234, not a line of the joined text, and so " +
+    "do tracebacks and client_events frames (lu-luCommand/corpWindow.py). The previous controller is disposed and install runs; " +
+    "is_ready is forced true when this client's copy came from an earlier server process. Server code still needs restart.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      module: str("The module's ID (default the only one the server delivers), e.g. luCommand."),
+      check: bool("Only compile it in the client's Python; install nothing."),
+      then: str("Python to run after install, as client_eval runs it; lu_module (the module's namespace) and lu_controller " +
+        "(what install returned) are defined. E.g. lu_controller.corp.go('operations')."),
+      user: str("The client's account, when more than one is online."),
+      json: bool("The answer as JSON."),
+    },
+    additionalProperties: false,
+  },
+  args(p) {
+    const args = ["lu-reload"];
+    if (p.check) args.push("--check");
+    if (p.then !== undefined) args.push(`--then=${p.then}`);
+    if (p.user) args.push(`--user=${p.user}`);
+    if (p.json) args.push("--json");
+    args.push("--", ...(p.module ? [String(p.module)] : []));
     return args;
   },
 };
@@ -119,7 +156,8 @@ const PRIMER = `Living Universe (plugin lu). The saved world lowsec-docked is a 
 - Kinds: SIGHTING HUNT HERE INCOMING ENTER EXIT ENGAGEMENT LOSS, from the off-grid tracker and hunter reports. Core grid events carry each NPC's flight, family, hunt phase and controller decision at ext.lu, and name them plainly in conditions (family on ARRIVE is ext.lu.family); groupKey is "flight:<flightID>". "self" on HUNT means the hunt targets you.
 - Example: "setup": ["undock", { "trigger": "fleet", "family": "pirate", "to": "self", "as": "fleet" }, { "waitFor": "INCOMING flightID=$fleet", "timeout": 300 }], "until": { "any": ["ARRIVE flightID=$fleet"], "timeout": 600 }, "expect": ["ARRIVE flightID=$fleet warpIn distanceMeters<=30km"].
 - A target can name a flight: "flight=$fleet", "family=police". The saved world's Rifter has no ammo, so give and load it in setup ({ "slash": "/giveitem EMP S 1000" }, { "loadAmmo": "weapons", "charge": "EMP S" }).
-- lu_rpc { method, payload } (CLI \`gridcheck lu-rpc\`): a luCommand call from the attached EVE client, JSON handled; a refusal is the error. The LU Command window opens from its Neocom button: client_click { name: "LuCommand" }.
+- lu_rpc { method, payload } (CLI \`gridcheck lu-rpc\`): a luCommand call from the attached EVE client, JSON handled; a refusal is the error. shape: true answers a long reply's fields, out saves it. The LU Command window opens from its Neocom button: client_click { name: "LuCommand" }.
+- lu_reload { module: "luCommand" } (CLI \`gridcheck lu-reload\`): after editing the module's client Python, reload it in the running client, no login; check: true only compiles. Errors name file:line; then runs Python after install with lu_controller defined. client_events { frame: "lu-luCommand" } then answers "did my code throw?". Server JS changes still need restart { clients: true }.
 - By hand: lu_trigger, then watch in the same turn to see its effect. teleport has no flight pin; trigger materialize with go does that.`;
 
 module.exports = {
@@ -149,7 +187,7 @@ module.exports = {
   },
   commands: COMMANDS,
   handles: HANDLES,
-  mcpTools: [TRIGGER_TOOL, RPC_TOOL],
+  mcpTools: [TRIGGER_TOOL, RPC_TOOL, RELOAD_TOOL],
   primer: PRIMER,
   colours: [
     { match: { family: "pirate" }, colour: "#d1242f", label: "red pirate" },

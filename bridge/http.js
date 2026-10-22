@@ -9,7 +9,9 @@ const fs = require("fs");
 const http = require("http");
 const path = require("path");
 
-const MAX_BODY_BYTES = 16 * 1024;
+// Read only after the token checks out. A client eval carries up to 256 KiB of Python, and
+// lu-reload a client module's whole source, deflated.
+const MAX_BODY_BYTES = 2 * 1024 * 1024;
 const LOOPBACK_HOST = "127.0.0.1";
 
 function sendJSON(response, statusCode, payload) {

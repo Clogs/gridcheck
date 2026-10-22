@@ -72,12 +72,81 @@ function isClientProcess(pid, options = {}) {
   return Boolean(image && CLIENT_IMAGE.test(image));
 }
 
+// Where the last `client events` listing ended, for --since last: { serverPid, seq }. A
+// cursor from another server process is no cursor, since its numbers start again.
+function cursorPath(e2eDir) {
+  return path.join(e2eDir, "client", "events-cursor.json");
+}
+
+function readEventsCursor(e2eDir, serverPid) {
+  try {
+    const value = JSON.parse(fs.readFileSync(cursorPath(e2eDir), "utf8"));
+    return value && value.serverPid === serverPid && Number.isInteger(value.seq) ? value.seq : null;
+  } catch (_error) {
+    return null;
+  }
+}
+
+function writeEventsCursor(e2eDir, serverPid, seq) {
+  const file = cursorPath(e2eDir);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, `${JSON.stringify({ serverPid, seq })}\n`);
+}
+
+// Every `client rpc` and plugin rpc call made through the CLI, one JSON line each, so the
+// state a test changed can be put back: { atMs, serverPid, user, service, method, payload |
+// args, ok, error }. Cut to the last RPC_LOG_KEEP lines once it passes RPC_LOG_MAX_BYTES.
+const RPC_LOG_KEEP = 500;
+const RPC_LOG_MAX_BYTES = 1024 * 1024;
+// Methods named like a read. A guess from the name alone: the log lists the rest unless asked for all.
+const READ_METHOD = /^(Get|List|Status|Is|Has|Find|Search|Query|Read|Describe|Ping|Check|Can)(?![a-z])/;
+
+function rpcLogPath(e2eDir) {
+  return path.join(e2eDir, "client", "rpc-log.jsonl");
+}
+
+function appendRpcLog(e2eDir, entry) {
+  const file = rpcLogPath(e2eDir);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.appendFileSync(file, `${JSON.stringify(entry)}\n`);
+  if (fs.statSync(file).size > RPC_LOG_MAX_BYTES) {
+    const lines = fs.readFileSync(file, "utf8").split("\n").filter(Boolean);
+    fs.writeFileSync(file, `${lines.slice(-RPC_LOG_KEEP).join("\n")}\n`);
+  }
+}
+
+// -> the calls made on that server process (all of them with serverPid null), oldest first.
+function readRpcLog(e2eDir, { serverPid = null, reads = false } = {}) {
+  let text = "";
+  try {
+    text = fs.readFileSync(rpcLogPath(e2eDir), "utf8");
+  } catch (_error) {
+    return [];
+  }
+  const rows = [];
+  for (const line of text.split("\n")) {
+    if (!line.trim()) continue;
+    try {
+      rows.push(JSON.parse(line));
+    } catch (_error) {
+      // a line cut short by a crash
+    }
+  }
+  return rows.filter((row) => (serverPid === null || row.serverPid === serverPid) && (reads || !READ_METHOD.test(String(row.method))));
+}
+
 module.exports = {
   LAUNCH_FLAGS,
+  READ_METHOD,
+  appendRpcLog,
   forgetLaunched,
   isClientProcess,
   processImage,
+  readEventsCursor,
   readLaunched,
+  readRpcLog,
   recordLaunched,
   recordPath,
+  rpcLogPath,
+  writeEventsCursor,
 };

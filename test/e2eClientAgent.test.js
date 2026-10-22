@@ -603,7 +603,7 @@ print(json.dumps({'replies': replies, 'hellos': hellos, 'batches': batches, 'log
     [36, true], [37, true]], JSON.stringify(replies.filter((reply) => !reply.ok).map((reply) => [reply.id, reply.error.trim().split("\n").pop()])));
 
   assert.deepEqual([hellos.length, hellos[0].agent, hellos[0].build, hellos[0].checkedBuild, typeof hellos[0].pid],
-    [1, 10, 3396210, 3396210, "number"]);
+    [1, 11, 3396210, 3396210, "number"]);
   assert.match(byID[28].error, /ui uses client code checked against build 3396210; this client is build 3400000/,
     "another build: ops that use client names refuse, eval and anyBuild still run");
   assert.equal(byID[1].value.session.charid, 90000001);
@@ -1025,15 +1025,32 @@ test("the MCP client tools map onto `gridcheck client`; free text and the subcom
   assert.deepEqual(cliArgs("client_eval", { code: "--x", user: "u" }), ["client", "--user=u", "--", "eval", "--x"]);
   assert.deepEqual(cliArgs("client_launch", { wait: 0 }), ["client", "--wait=0", "--", "launch"]);
   assert.deepEqual(cliArgs("client_ui", { cls: "Button", hidden: true }), ["client", "--class=Button", "--hidden", "--", "ui"]);
-  assert.deepEqual(cliArgs("client_events", { notify: [] }), ["client", "--notify=", "--", "events"], "an empty list clears");
+  assert.deepEqual(cliArgs("client_events", { notify: [] }), ["client", "--since=last", "--notify=", "--", "events"], "an empty list clears");
+  assert.deepEqual(cliArgs("client_events", { since: 0, exceptions: true, frame: "lu-luCommand", noise: true }),
+    ["client", "--since=0", "--exceptions", "--frame=lu-luCommand", "--noise", "--", "events"]);
+  assert.deepEqual(cliArgs("client_events", { all: true }), ["client", "--all", "--", "events"], "all reads from the start, not the cursor");
+  assert.deepEqual(cliArgs("client_screenshot", { window: "LuCorpConsole", fresh: true }),
+    ["client", "--max-width=1600", "--format=jpg", "--window=LuCorpConsole", "--fresh", "--json", "--", "screenshot"]);
+  assert.deepEqual(cliArgs("client_screenshot", { path: "/Desktop/l_main" }),
+    ["client", "--max-width=1600", "--format=jpg", "--path=/Desktop/l_main", "--json", "--", "screenshot"]);
+  assert.deepEqual(cliArgs("client_ui", { window: "LuCorpConsole" }), ["client", "--window=LuCorpConsole", "--", "ui"]);
+  assert.deepEqual(cliArgs("client_find", { text: "Expel", window: "corp" }), ["client", "--text=Expel", "--window=corp", "--", "find"]);
+  assert.deepEqual(cliArgs("client_eval", { code: "page", vars: { page: "ops", n: 2 } }),
+    ["client", "--vars={\"page\":\"ops\",\"n\":2}", "--", "eval", "page"]);
+  assert.deepEqual(cliArgs("client_rpc", { service: "luCommand", method: "Status", out: "s.json", shape: true }),
+    ["client", "--out=s.json", "--shape", "--", "rpc", "luCommand", "Status"]);
+  assert.deepEqual(cliArgs("client_rpc_log", { reads: true }), ["client", "--reads", "--", "rpc-log"]);
+  assert.deepEqual(cliArgs("client_inspect", { cls: "Slider", module: "carbonui", inherited: true }),
+    ["client", "--module=carbonui", "--inherited", "--", "inspect", "Slider"]);
   assert.deepEqual(cliArgs("client_screenshot", {}), ["client", "--max-width=1600", "--format=jpg", "--json", "--", "screenshot"]);
   assert.deepEqual(cliArgs("client_screenshot", { source: "window" }),
     ["client", "--max-width=1600", "--format=jpg", "--source=window", "--json", "--", "screenshot"]);
   assert.deepEqual(cliArgs("client_click", { text: "Undock", double: true, wait: 5 }),
     ["client", "--text=Undock", "--double", "--wait=5", "--", "click"]);
-  assert.deepEqual(cliArgs("client_type", { text: "--hi", name: "chatEdit", enter: true }),
-    ["client", "--name=chatEdit", "--enter", "--", "type", "--hi"], "the typed text goes after --; text isn't a filter here");
-  assert.deepEqual(cliArgs("client_type", { text: "x", intoText: "Search" }), ["client", "--text=Search", "--", "type", "x"]);
+  assert.deepEqual(cliArgs("client_type", { value: "--hi", name: "chatEdit", enter: true }),
+    ["client", "--name=chatEdit", "--enter", "--", "type", "--hi"], "the typed value goes after --");
+  assert.deepEqual(cliArgs("client_type", { value: "x", text: "Search", window: "market" }),
+    ["client", "--text=Search", "--window=market", "--", "type", "x"], "text finds the edit, as on the other node tools");
   assert.deepEqual(cliArgs("client_key", { key: "escape" }), ["client", "--", "key", "escape"]);
   assert.deepEqual(cliArgs("client_cmd", { filter: "inv" }), ["client", "--filter=inv", "--", "cmd"]);
   assert.deepEqual(cliArgs("client_cmd", { name: "OpenInventory" }), ["client", "--", "cmd", "OpenInventory"]);

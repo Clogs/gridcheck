@@ -7,6 +7,7 @@
 const fs = require("node:fs");
 const path = require("node:path");
 
+const { cmdLuReload } = require("./reload");
 const triggerTools = require("./triggers");
 const warpTools = require("./warp");
 
@@ -290,8 +291,7 @@ async function cmdLuRpc(positionals, flags, io) {
     ...(flags.timeout === undefined ? {} : { timeout: flags.timeout }),
   });
   const value = reply.value || {};
-  const decoded = value.json !== null && value.json !== undefined;
-  io.print(flags.json ? JSON.stringify(value, null, 2) : decoded ? JSON.stringify(value.json, null, 2) : String(value.repr));
+  io.printRpcReply(value, flags);
   return value;
 }
 
@@ -310,10 +310,18 @@ const COMMANDS = {
     run: cmdTrigger,
   },
   "lu-rpc": {
-    usage: ["lu-rpc <Method> [--payload <json object>] [--user <account>]"],
-    summary: "Calls a Living Universe command (luCommand) from the attached EVE client, as its character, and prints the decoded reply.",
+    usage: ["lu-rpc <Method> [--payload <json object>] [--out <file>] [--shape] [--user <account>]"],
+    summary: "Calls a Living Universe command (luCommand) from the attached EVE client, as its character, and prints the decoded reply " +
+      "(--shape: its keys, types and array lengths; --out saves it).",
     needs: "up",
     run: cmdLuRpc,
+  },
+  "lu-reload": {
+    usage: ["lu-reload [<module>] [--check] [--then \"<python>\"] [--user <account>] [--json]"],
+    summary: "Reloads a client module LU delivers at login (luCommand) in the running EVE client, from the server's own source: " +
+      "each file compiled under its name, so errors name file:line. --check only compiles it.",
+    needs: "up",
+    run: cmdLuReload,
   },
   clock: { usage: ["clock [--stages] [--json]"], summary: "The Living Universe clock and its offset; --stages adds its stages.", needs: "up",
     booleanFlags: ["stages"], run: cmdClock },

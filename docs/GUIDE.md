@@ -75,8 +75,8 @@ by hand. When an entry already runs this tree's `mcp.js`, setup leaves it as it 
 | `perf` | `perf` | `seconds` (default 10) to sample, or `now`. See [Performance testing](#performance-testing). `up` takes `profile` and `profileEvery`, and `watch` takes `perf` and `perfEvery`. |
 | `run_scenario` | `run` | Writes a scenario it is handed, checks it, runs it. See below. |
 | `report` | none | Reads a run's `report.md` and `result.json`; waits for a background run. |
-| `client_launch`, `client_status`, `client_stop`, `client_eval`, `client_console`, `client_ui`, `client_ballpark`, `client_diff`, `client_events`, `client_find`, `client_click`, `client_menu`, `client_wait`, `client_rpc`, `client_type`, `client_key`, `client_cmd`, `client_act` | `client <subcommand>` | A real EVE client; see [A real EVE client](#a-real-eve-client). `client_events` takes `notify` as a list; `[]` records none. In `client_type`, `text` is what to type and `intoText` finds the edit by its text. |
-| `client_screenshot` | `client screenshot --json` | Returns the picture itself, as a JPEG 1,600 pixels wide unless `format` or `maxWidth` say otherwise. |
+| `client_launch`, `client_status`, `client_stop`, `client_eval`, `client_console`, `client_ui`, `client_ballpark`, `client_diff`, `client_events`, `client_find`, `client_click`, `client_menu`, `client_wait`, `client_rpc`, `client_rpc_log`, `client_inspect`, `client_type`, `client_key`, `client_cmd`, `client_act` | `client <subcommand>` | A real EVE client; see [A real EVE client](#a-real-eve-client). `client_events` takes `notify` as a list (`[]` records none), and `since` defaults to `"last"`: each call answers only what came after the call before, where the CLI needs `--since last`. In `client_type`, `value` is what to type and `text` finds the edit, as it finds a node in the other tools. `client_eval` takes `vars` as an object. |
+| `client_screenshot` | `client screenshot --json` | Returns the picture itself, as a JPEG 1,600 pixels wide unless `format` or `maxWidth` say otherwise. `window` or `path` crops it; `fresh` waits for a new frame first. |
 
 A plugin's tools are named `<plugin>_<tool>`. The server's MCP instructions are a brief of under
 2,000 characters, because clients cut long instructions off: what the tool is, the server mode, the
@@ -179,7 +179,15 @@ Every watch times each server hook and reports it in END, as `costs.hooks["<plug
 `msMax`). A plugin can't add whole-world cost without it showing there.
 
 The repo ships one plugin, `plugins/lu`, for the X-Eve Living Universe fork. Its guide is that
-tree's `docs/E2E-GRID-TESTING.md`.
+tree's `docs/E2E-GRID-TESTING.md`. Besides `trigger` and `lu-rpc`, it has `lu-reload [<module>]`
+(MCP `lu_reload`): it reloads, in the running client, a client module the server delivers at login,
+with no new login. The bridge's `GET /client-module` reads the source from the delivery's own
+`readSource`, as the next login would get it. Each file joined into it is compiled under its own
+name, so a `SyntaxError` names `corpWindow.py:1234` and tracebacks name
+`lu-luCommand/corpWindow.py`. Then the old controller is disposed and `install` runs, with
+`is_ready` forced true when this client's copy came from an earlier server process. `--check` only
+compiles; `--then "<python>"` runs after install with `lu_module` and `lu_controller` defined.
+Server code still needs `restart`.
 
 ## Worlds
 
@@ -533,6 +541,11 @@ gridcheck client click --text undock  # the Undock button's own click handler
 gridcheck client menu --text Roster -- "Expel Member" "Confirm Expel Member"   # a context menu, in one call
 gridcheck client wait "session.stationid" --timeout 30   # until the expression is true in the client
 gridcheck client rpc luCommand Status --payload '{}'     # sm.RemoteSvc(...).Status(...) as the client's character
+gridcheck client rpc luCommand GetCorp --payload '{}' --shape   # the reply's keys and types, not the whole of it
+gridcheck client rpc-log              # the calls that may have changed state, to put it back
+gridcheck client inspect Slider       # a client class: module, bases, default_* attributes, methods
+gridcheck client events --since last --frame lu-luCommand   # did my code throw since I last asked?
+gridcheck client screenshot --window LuCorpConsole --fresh   # one window, drawn after this call
 gridcheck client type "rifter" --name quickFilterInputBox
 gridcheck client cmd OpenInventory    # a client command, as its key binding runs it
 gridcheck client stop
@@ -588,7 +601,12 @@ the client, as any client code would.
   unless you pass `--hidden`. A button counts its label as its text. A path names one node: siblings
   that share a label are `Button[0]`, `Button[1]` ..., counted among all of them, hidden ones too, so
   the same node keeps its path. A path without the `[n]` still matches, and names every sibling with
-  that label.
+  that label. Text matching reads a label's whole text, not what it shows clipped, with markup
+  (`<b>`, `<color=...>`, `&amp;`) taken out and runs of spaces, non-breaking ones included, read as
+  one, though a match as written counts too; spaces aside, `--text "75 %"` matches "75%". `--window <window>` keeps `ui`, `find`,
+  `click`, `menu`, `type` and `key` to one window, named by its `windowID`, name, class or caption:
+  an exact match first, else one that contains it. With no other filter, `ui --window` prints that
+  window's tree.
 - `screenshot` has the client save what it last drew (its back buffer, as its own Print Screen
   does). The client keeps drawing while its window is covered or minimized, so this works then too.
   It takes about 130 ms of the client's time. When the agent can't answer, it draws the window from
@@ -599,7 +617,12 @@ the client, as any client code would.
   coordinates are UI pixels (the desktop's size), not the picture's pixels, so the answer says how
   they relate: `1600x900; pointer coordinates are pixels x 1.2` (`uiWidth`, `uiHeight` and `uiPerPixel`
   in `--json`). `uiPerPixel` is for the saved picture, after `--max-width`. A picture drawn by the
-  `PrintWindow` fallback has it only when the client answers a ping.
+  `PrintWindow` fallback has it only when the client answers a ping. `--window <window>` or `--path
+  <path>` crops the picture to that window or node (clipped to the desktop): the agent gives the rect
+  in UI pixels and the picture is cut before it is scaled, so a crop keeps its detail at
+  `--max-width`. The answer then adds the crop's corner: `pointer coordinates are pixels x 1.2, plus
+  (310, 120)` (`uiOrigin` in `--json`). `--fresh` first lets the client draw three frames, about
+  0.1 s, so the picture can't be one from before the call that changed the UI.
 - `ballpark` lists every ball with a slim item: position, velocity, mode, radius and distance from
   your ship. Docked, there's no ballpark.
 - `diff` reads the client's ballpark and the bridge's grid for the client's character at the same
@@ -616,13 +639,29 @@ the client, as any client code would.
   `QuickMessage.show_message`, and the mining and bounty notices at `Logger.SayMessage`. The
   per-hit combat text isn't recorded: it fires on every shot. This is how a refusal that only
   flashes on screen ("That system has no asteroid belt") is kept.
+  The listing hides known noise exceptions, such as the content host's `gaierror`, and counts them;
+  `--noise` shows them. `--since last` lists only what came after the previous listing on this
+  server (`_local/gridcheck/client/events-cursor.json`; the MCP tool does this by default).
+  `--exceptions` lists only exceptions, each with its traceback, and `--frame <text>` only those with
+  a traceback line containing the text, case-insensitively: `--frame lu-luCommand` answers "did the
+  module LU delivers throw?", for its login copy (`<lu-luCommand>`) and a reloaded one
+  (`lu-luCommand/corpWindow.py`) alike.
 - `eval` runs Python and prints the value: an expression's, else the last statement's if it's an
   expression, else what the code leaves in `result`. `--file probe.py` reads the code from a file
   (at most 256 KiB), `--out x.json` saves the answer, and `--assert` exits 1 unless the value is
   exactly `True` (`1`, `None` and `False` fail). The client runs Python optimized, which compiles
   `assert` away, so the agent rewrites each `assert` in eval code into an `if ...: raise
   AssertionError`. That covers eval code only; a module the code imports keeps the client's
-  optimization. Run `client eval "assert False"` once on a new client: it must fail.
+  optimization. Run `client eval "assert False"` once on a new client: it must fail. `--vars
+  '{"page": "operations"}'` sets names in the eval's namespace before the code runs, as JSON values,
+  so a value needn't be pasted into the code or left on `__builtin__`. They stay set for later evals;
+  the agent's own names (`sm`, `session` ...) are refused.
+- `inspect <Class>` finds a class by name among the modules the client has loaded, exact case first,
+  else any case, with no import path needed: the module that defines it and those it can be imported
+  from, its bases, its `default_*` attributes (carbonui's construction defaults) with their values
+  and the class that sets each, and its own methods with their arguments. `--inherited` lists the
+  inherited methods by class instead of counting them; `--module carbonui` narrows the search. A
+  module the client hasn't imported yet isn't searched.
 
 **Checking the UI.** `ui` is for finding a node; `ui-state` and `check-ui` are for asserting on
 one. `ui-state` lists every node under the desktop, hidden ones too, flat: its path, rect, whether
@@ -694,7 +733,11 @@ the decompiled client (build 3396210); `agent.py` lists them.
   no mouse input, so a click on its text goes through to what is under it: `--text Roster` clicks the
   tab, not the label. A node that does take input and is disabled (a disabled button) is the error,
   and it names that node. `find` says which node a click goes to without clicking. When a button and
-  its own label both match, the button counts. More than one match is an error that lists them with
+  its own label both match, the button counts. With `--text`, `--path`, `--class` and `--name` may
+  name the node the click goes to instead of the text's own node, so a path copied from `find` works
+  with the text: `--class Button --text Undock` finds the button whose label says Undock. Of several
+  matches, those that take no click (a header caption) are dropped when another does, and matches
+  that click the same node count once. More than one match left is an error that lists them with
   unique paths; pass `--index` or `--path`.
   A node inside a scroll container (`ScrollContainer`) that sits outside what it shows is scrolled
   into view first, with the container's own `ScrollToVerticalPixels` (and the horizontal one); `find`
@@ -719,9 +762,18 @@ the decompiled client (build 3396210); `agent.py` lists them.
   commands take it, and decodes a reply that is a JSON string; `--args '[1, "two"]'` passes the
   values as they are. A server `UserError` comes back as the error, with the text the player would
   have read. The Living Universe plugin's `lu-rpc <Method> --payload '<json>'` is this for the
-  `luCommand` service.
+  `luCommand` service. `--out <file>` saves the reply (its JSON, else its repr). `--shape` prints the
+  reply's outline instead of the whole of it: each key with its type, each list's length and its
+  first element's keys, and a sample of each value, which is how to learn a long reply's fields.
+  Both work on `lu-rpc` too.
+- `rpc-log` lists the rpc calls made through gridcheck (`client rpc` and the plugins' rpc commands)
+  on this server, oldest first, with what each sent and whether it was refused, so a test can put
+  back what it changed. Calls named like reads (`Get...`, `List...`, `Status`, `Is...` ...) are left
+  out unless `--reads`; `--all` adds earlier servers'. It's a log, kept in
+  `_local/gridcheck/client/rpc-log.jsonl`: it doesn't work out the inverse of a call.
 - `type "<text>"` sends each character through the client's key input (`uilib._OnChar`), as the
-  window would; `--set` sets the edit's value at once, `--enter` presses enter after. `key <name>`
+  window would, into the edit `--path`, `--class`, `--name` or `--text` finds (the edit's own text,
+  not what to type); `--set` sets the edit's value at once, `--enter` presses enter after. `key <name>`
   presses one key (enter, escape, tab, backspace, arrows, a-z, 0-9, f1-f12), so the edit and the
   key bindings see it. Escape opens the settings menu, as it does for a player. Name the edit
   (`--name quickFilterInputBox`): the client drops its focus while its window is in the

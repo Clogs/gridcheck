@@ -10,7 +10,12 @@ const assert = require("node:assert");
 const { needsPlugin } = require("./tree");
 const { createClientAgent } = require("../bridge/client");
 const { waitForClient } = require("../core/clientWait");
-const { evalTruth, scaleText, uiScale, actSummary } = require("../core/client");
+const fs = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
+const { evalTruth, scaleText, uiScale, actSummary, filterClientEvents, screenshotArgs } = require("../core/client");
+const { describeShape } = require("../core/shape");
+const clientRecord = require("../core/clientRecord");
 const { checkUi, pathMatches } = require("../core/clientUi");
 const { EVENT_FIELDS, parseCondition } = require("../core/conditions");
 const { formatTimelineEvent } = require("../core/timeline");
@@ -91,6 +96,78 @@ test("a screenshot says how pointer coordinates relate to its pixels, scaled or 
   assert.equal(uiScale({ width: 1600 }), null, "an agent that doesn't say the UI size");
   assert.equal(scaleText({ width: 1600, height: 900, ...uiScale({ width: 1600, uiWidth: 1920 }) }), "1600x900; pointer coordinates are pixels x 1.2");
   assert.match(scaleText({ width: 1600, height: 900 }), /^1600x900; pointer coordinates are in UI pixels/);
+});
+
+test("a cropped screenshot is cut in UI units, and its pointer coordinates start at the crop's corner", () => {
+  const cropped = uiScale({ width: 400, uiWidth: 480, uiHeight: 300, origin: [100, 50] });
+  assert.deepEqual(cropped, { uiWidth: 480, uiHeight: 300, uiPerPixel: 1.2, uiOrigin: [100, 50] });
+  assert.equal(scaleText({ width: 400, height: 250, ...cropped }), "400x250; pointer coordinates are pixels x 1.2, plus (100, 50)");
+  assert.equal(scaleText({ width: 400, height: 250, ...uiScale({ width: 400, uiWidth: 480, origin: [0, 0] }) }),
+    "400x250; pointer coordinates are pixels x 1.2", "an origin at the corner says nothing");
+  const base = { pid: 7, out: "o.jpg", maxWidth: 1600, format: "jpg" };
+  assert.deepEqual(screenshotArgs(base), ["-TargetPid", "7", "-Out", "o.jpg", "-MaxWidth", "1600", "-Format", "jpg"]);
+  assert.deepEqual(screenshotArgs({ ...base, from: "s.png", crop: { rect: [100, 50, 480, 300], uiWidth: 1920 } }),
+    ["-TargetPid", "7", "-Out", "o.jpg", "-MaxWidth", "1600", "-Format", "jpg", "-FromFile", "s.png", "-Crop", "100,50,480,300", "-UiWidth", "1920"]);
+});
+
+test("client events hide noise and count it; exceptions and frame keep only the exceptions asked for", () => {
+  const rows = [
+    { seq: 1, kind: "CLIENT_EXCEPTION", type: "gaierror", noise: true, traceback: [] },
+    { seq: 2, kind: "CLIENT_EVENT", event: "OnSessionChanged" },
+    { seq: 3, kind: "CLIENT_EXCEPTION", type: "AttributeError", where: "corpWindow.py",
+      traceback: ['  File "lu-luCommand/corpWindow.py", line 12, in go'] },
+    { seq: 4, kind: "CLIENT_EXCEPTION", type: "KeyError", traceback: ['  File "<lu-luCommand>", line 900, in Status'] },
+    { seq: 5, kind: "CLIENT_EXCEPTION", type: "ValueError", traceback: ['  File "menusvc.py", line 9, in Dock'] },
+  ];
+  const seqs = (result) => [result.events.map((event) => event.seq), result.hiddenNoise];
+  assert.deepEqual(seqs(filterClientEvents(rows)), [[2, 3, 4, 5], 1]);
+  assert.deepEqual(seqs(filterClientEvents(rows, { noise: true })), [[1, 2, 3, 4, 5], 0]);
+  assert.deepEqual(seqs(filterClientEvents(rows, { exceptions: true })), [[3, 4, 5], 1]);
+  assert.deepEqual(seqs(filterClientEvents(rows, { frame: "LU-LUCOMMAND" })), [[3, 4], 1],
+    "a reloaded file and the login copy both match, whatever the case");
+  assert.deepEqual(seqs(filterClientEvents(rows, { frame: "corpWindow" })), [[3], 1], "where counts too");
+});
+
+test("a reply's shape: keys with types, arrays with lengths and one element, values sampled", () => {
+  assert.deepEqual(describeShape({ ok: true, corp: { members: [{ id: 1 }, { id: 2 }], tags: ["x", "y"], none: [] }, n: null }), [
+    "object (3 keys)",
+    "  ok: boolean true",
+    "  corp: object (3 keys)",
+    "    members: array[2] of object",
+    "      [0]: object (1 key)",
+    "        id: number 1",
+    "    tags: array[2] of string, e.g. \"x\"",
+    "    none: array[0]",
+    "  n: null"]);
+  assert.deepEqual(describeShape({ a: { b: 1 } }, { maxDepth: 1 }), ["object (1 key)", "  a: object (1 key)", "    ..."]);
+  assert.deepEqual(describeShape({ a: 1, b: 2, c: 3 }, { maxKeys: 2 }), ["object (3 keys)", "  a: number 1", "  b: number 2", "  ... 1 more key(s)"]);
+  assert.match(describeShape("x".repeat(100))[0], /^string "x{59}\.\.\.$/);
+});
+
+test("the events cursor and the rpc log are kept per server process", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "gridcheck-record-"));
+  try {
+    assert.equal(clientRecord.readEventsCursor(dir, 100), null, "no cursor yet");
+    clientRecord.writeEventsCursor(dir, 100, 42);
+    assert.equal(clientRecord.readEventsCursor(dir, 100), 42);
+    assert.equal(clientRecord.readEventsCursor(dir, 101), null, "another server's numbers start again");
+
+    assert.deepEqual(clientRecord.readRpcLog(dir), []);
+    const call = (serverPid, method) => clientRecord.appendRpcLog(dir, { atMs: 1, serverPid, service: "luCommand", method, payload: {}, ok: true });
+    call(100, "Status");
+    call(100, "ExpelMember");
+    call(100, "GetCorp");
+    call(101, "SetTaxRate");
+    call(100, "Getaway");
+    fs.appendFileSync(clientRecord.rpcLogPath(dir), "{\"cut short\n");
+    const methods = (rows) => rows.map((row) => row.method);
+    assert.deepEqual(methods(clientRecord.readRpcLog(dir, { serverPid: 100 })), ["ExpelMember", "Getaway"],
+      "reads are left out by name; Getaway isn't Get-something");
+    assert.deepEqual(methods(clientRecord.readRpcLog(dir, { serverPid: 100, reads: true })), ["Status", "ExpelMember", "GetCorp", "Getaway"]);
+    assert.deepEqual(methods(clientRecord.readRpcLog(dir)), ["ExpelMember", "SetTaxRate", "Getaway"], "every server's with none named");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("a path without [n] matches each sibling with the label; one with it names one node", () => {
@@ -184,6 +261,17 @@ test("lu_rpc is a plugin tool for `gridcheck lu-rpc`, and the plugin's primer sa
   assert.match(registry.primers.find((entry) => entry.plugin === "lu").text, /lu_rpc \{ method, payload \}/);
 });
 
+test("lu_rpc's out and shape and lu_reload's options go to the CLI commands", () => {
+  const { mcpTools } = require("../plugins/lu/tool");
+  const tool = (name) => mcpTools.find((entry) => entry.name === name);
+  assert.deepEqual(tool("rpc").args({ method: "GetCorp", out: "corp.json", shape: true }),
+    ["lu-rpc", "--out=corp.json", "--shape", "--", "GetCorp"]);
+  assert.deepEqual(tool("reload").args({}), ["lu-reload", "--"], "the module defaults to the only one delivered");
+  assert.deepEqual(tool("reload").args({ module: "luCommand", check: true, then: "lu_controller.corp.go('operations')", user: "u", json: true }),
+    ["lu-reload", "--check", "--then=lu_controller.corp.go('operations')", "--user=u", "--json", "--", "luCommand"]);
+  assert.equal(tool("reload").cli, "lu-reload");
+});
+
 test("lu-rpc passes the payload as one object to the client's rpc, defaulting to {}", LU, async () => {
   const { defaultRegistry } = require("../core/plugins");
   const command = defaultRegistry().commands["lu-rpc"];
@@ -196,13 +284,14 @@ test("lu-rpc passes the payload as one object to the client's rpc, defaulting to
       calls.push([op, args, flags]);
       return { value: { json: { ok: true }, repr: "{}" } };
     },
+    printRpcReply: (value, flags) => printed.push([value.json, Boolean(flags.shape)]),
   };
   await command.run(["Status"], {}, io);
-  await command.run(["Draft"], { payload: '{"system":"Amamake"}', user: "u2" }, io);
+  await command.run(["Draft"], { payload: '{"system":"Amamake"}', user: "u2", shape: true }, io);
   assert.deepEqual(calls, [
     ["rpc", { service: "luCommand", method: "Status", payload: {} }, {}],
     ["rpc", { service: "luCommand", method: "Draft", payload: { system: "Amamake" } }, { user: "u2" }]]);
-  assert.equal(printed[0], JSON.stringify({ ok: true }, null, 2));
+  assert.deepEqual(printed, [[{ ok: true }, false], [{ ok: true }, true]], "the CLI's rpc printer, which takes --shape and --out");
   await assert.rejects(command.run(["Draft"], { payload: "{nope" }, io), /--payload isn't JSON/);
   await assert.rejects(command.run([], {}, io), /usage: gridcheck lu-rpc/);
 });

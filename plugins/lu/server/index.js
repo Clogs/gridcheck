@@ -2,7 +2,7 @@
 
 // The Living Universe plugin's server half: the flight join on grid rows, the
 // sightings and decision labels on each sample, the off-grid tracker, and the
-// /clock, /economy, /warp and /trigger routes. Each
+// /clock, /economy, /warp, /trigger and /client-module routes. Each
 // piece is optional, so a world with part of the mod switched off still gets
 // the rest.
 

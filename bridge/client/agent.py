@@ -90,11 +90,14 @@
 #   gameui LogOffCharacter()             eve/client/script/parklife/gameui.py
 #   CharacterSelection.ConfirmWithCharID(charID)
 #                                        eve/client/script/ui/login/charSelection/characterSelection.py
+#   blue.pyos.synchro.Yield()            native: wakes once a frame (LU's docs/CLIENT-UI-DELIVERY.md client classes)
+#   window caption (a property)          carbonui/control/window.py
 #   trinity.device.GetRenderContext().GetDefaultBackBuffer() (width, height, format, isReadable, Resolve),
 #          Tr2RenderTarget, Tr2HostBitmap (format, ChangeFormat, Save), PIXEL_FORMAT
 #                                        native (trinity), as carbonui/services/command.py PrintScreen uses them
 import ast
 import collections
+import inspect
 import json
 import math
 import os
@@ -102,6 +105,7 @@ import re
 import sys
 import time
 import traceback
+import types
 
 import blue
 import uthread
@@ -111,11 +115,11 @@ try:
 except ImportError:
     import builtins
 
-VERSION = 10
+VERSION = 11
 # The build the client names above were checked against. Ops that use them
 # refuse on another build unless the command passes anyBuild; these don't.
 CHECKED_BUILD = 3396210
-BUILD_FREE_OPS = ('ping', 'eval', 'events', 'flush', 'rpc')
+BUILD_FREE_OPS = ('ping', 'eval', 'events', 'flush', 'rpc', 'inspect')
 # Ops whose errors are their caller's alone: a poll loop of them would bury the timeline.
 CALLER_ERROR_OPS = ('eval', 'rpc')
 MESSAGE_LIMIT = 500
@@ -158,12 +162,21 @@ SESSION_KEYS = ('userid', 'charid', 'corpid', 'allianceid', 'solarsystemid2', 's
 MODE_NAMES = ('GOTO', 'FOLLOW', 'STOP', 'WARP', 'ORBIT', 'MISSILE', 'MUSHROOM', 'BOID', 'TROLL',
               'MINIBALL', 'FIELD', 'RIGID', 'FORMATION')
 DEFAULT_NOTIFY = ('OnSessionChanged',)
+# The names eval always defines; vars can't replace them.
+EVAL_NAMES = ('sm', 'session', 'uicore', 'agent', 'blue', 'uthread', 'result')
+# Frames a fresh screenshot waits for: one drawn after the call, and the swap chain past it.
+FRESH_FRAMES = 3
+INSPECT_LIMIT = 10
+# Python 2.7's old-style classes are types.ClassType.
+CLASS_TYPES = (type,) + ((types.ClassType,) if hasattr(types, 'ClassType') else ())
 # carbonui.uiconst UI_NORMAL, UI_DISABLED, UI_HIDDEN, UI_PICKCHILDREN.
 STATE_NAMES = {0: 'normal', 1: 'disabled', 2: 'hidden', 3: 'pickChildren'}
 UI_DISABLED = 1
 # How deep node_text looks into a button for its label.
 BUTTON_LABEL_DEPTH = 3
 TAG_PATTERN = re.compile(r'<[^>]*>')
+ENTITY_PATTERN = re.compile(r'&(#[xX][0-9a-fA-F]+|#\d+|[A-Za-z]+);')
+ENTITIES = {'amp': u'&', 'lt': u'<', 'gt': u'>', 'quot': u'"', 'apos': u"'", 'nbsp': u' '}
 SEGMENT_INDEX = re.compile(r'\[\d+\]$')
 # Inventory flags of the fitting racks: LoSlot0 11, MedSlot0 19, HiSlot0 27, eight each.
 RACKS = (('high', 27), ('med', 19), ('low', 11))
@@ -525,6 +538,25 @@ def strip_tags(text):
     return TAG_PATTERN.sub('', text)
 
 
+def unescape(text):
+    def one(match):
+        body = match.group(1)
+        if body.startswith('#'):
+            code = attempt(lambda: int(body[2:], 16) if body[1:2] in ('x', 'X') else int(body[1:]))
+            return attempt(lambda: unichr(code), None) or attempt(lambda: chr(code), match.group(0)) if code is not None else match.group(0)
+        return ENTITIES.get(body.lower(), match.group(0))
+    return ENTITY_PATTERN.sub(one, text)
+
+
+# What a text search compares: markup and entities gone, any run of whitespace (a no-break space
+# too) one space, lower case. "75%" finds "<color=0xff00ff00>75</color>&nbsp;%" as "75 %".
+def search_text(value):
+    if not isinstance(value, (bytes, UNICODE)):
+        return ''
+    text = re.sub(r'<br\s*/?>', ' ', as_text(value), flags=re.I)
+    return u' '.join(unescape(strip_tags(text)).replace(u'\xa0', u' ').split()).lower()
+
+
 # What a player reads: markup gone, line breaks as spaces.
 def plain_text(text):
     if not isinstance(text, TEXT):
@@ -587,21 +619,30 @@ def descendant_text(node):
 # A node's own text or caption. A button without one answers its label (a Button's text is its
 # label string; another button class keeps it in a label node), so a search for what the player
 # reads finds the button.
-def node_text(node):
+def full_text(node):
     value = own_text(node)
     if value is None and button_like(node):
         label = attempt(lambda: getattr(node, 'label', None))
         value = label if isinstance(label, TEXT) and label else descendant_text(node)
+    return value or None
+
+
+def node_text(node):
+    value = full_text(node)
     return clip(value) if value else None
 
 
-# wanted is lowered already (lower()). The markup counts as part of the text, and does not.
+# The whole text, not the clipped one a listing shows. The markup counts as part of the text, and
+# does not: "<b>Issue" matches as written, and "75 %" matches "75%" (spaces aside).
 def text_matches(wanted, text):
     if not wanted:
         return True
     if not text:
         return False
-    return wanted in (lower(text) or '') or wanted in (lower(strip_tags(as_text(text))) or '')
+    if lower(wanted) in (lower(text) or ''):
+        return True
+    want, have = search_text(wanted), search_text(text)
+    return bool(want) and (want in have or want.replace(u' ', u'') in have.replace(u' ', u''))
 
 
 # Siblings that share a label get a [n] suffix (n from 0, counting hidden siblings), so a path names one node.
@@ -707,10 +748,11 @@ def node_label(node):
     return clip(attempt(lambda: node.name)) or type(node).__name__
 
 
-def walk_nodes(root, hidden):
+def walk_nodes(root, hidden, here=None, chain=()):
     """Every node under root, depth first, as (node, path, ancestors); the paths
-    are the ones op ui prints. Hidden subtrees are skipped unless hidden."""
-    stack = [(root, '/' + node_label(root), ())]
+    are the ones op ui prints. Hidden subtrees are skipped unless hidden. A root
+    below the desktop takes its own path and ancestors (Agent.path_of)."""
+    stack = [(root, here or '/' + node_label(root), tuple(chain))]
     visited = 0
     while stack and visited < UI_MAX_VISITED:
         node, here, chain = stack.pop()
@@ -782,6 +824,25 @@ def char_for(vk):
     if 0x41 <= vk <= 0x5A:
         return vk + 32
     return None
+
+
+# "Name(self, a, b=1, *args, **kwargs)" for a class's function, staticmethod or classmethod.
+def signature(name, item):
+    function = getattr(item, '__func__', item)
+    reader = getattr(inspect, 'getfullargspec', None) or inspect.getargspec
+    spec = attempt(lambda: reader(function))
+    if spec is None:
+        return name
+    args = list(spec.args)
+    defaults = list(spec.defaults or ())
+    plain = len(args) - len(defaults)
+    parts = args[:plain] + ['%s=%s' % (arg, clip(attempt(lambda: repr(value), '?'), 40)) for arg, value in zip(args[plain:], defaults)]
+    if spec.varargs:
+        parts.append('*' + spec.varargs)
+    keywords = getattr(spec, 'keywords', None) or getattr(spec, 'varkw', None)
+    if keywords:
+        parts.append('**' + keywords)
+    return '%s(%s)' % (name, ', '.join(parts))
 
 
 def type_name(typeID):
@@ -918,6 +979,14 @@ class Agent(object):
         code = args.get('code') or ''
         if not isinstance(code, TEXT):
             raise ValueError('eval code must be text')
+        given = args.get('vars')
+        if given is not None:
+            if not isinstance(given, dict):
+                raise ValueError('vars: an object of names and the values to give them')
+            for key in given:
+                if not re.match(r'^[A-Za-z_][A-Za-z0-9_]*$', key) or key in EVAL_NAMES:
+                    raise refuse('vars: %s is not a name eval can be given (a Python identifier, not %s)' % (key, ', '.join(EVAL_NAMES)))
+            self.namespace.update((str(key), value) for key, value in given.items())
         try:
             value = self.eval_value(code)
         except SyntaxError:
@@ -1073,15 +1142,16 @@ class Agent(object):
             'sampleMs': max(0, int((time.time() - started) * 1000)),
         }
 
-    # args: {"depth", "cls", "name", "text", "hidden", "limit"}. Without a filter,
-    # the tree from uicore.desktop to depth (default 3). With one, every node at
+    # args: {"depth", "cls", "name", "text", "hidden", "limit", "window"}. Without a filter,
+    # the tree from uicore.desktop (or the window) to depth (default 3). With one, every node at
     # any depth whose class, name or text contains it (case-insensitive), each
     # with its path. Hidden subtrees are skipped unless hidden is true.
     def op_ui(self, args):
-        uicore = self.current_uicore()
-        desktop = getattr(uicore, 'desktop', None)
-        if desktop is None:
-            raise ValueError('uicore.desktop is not ready')
+        uicore, desktop = self.desktop()
+        root, root_path = desktop, '/' + node_label(desktop)
+        if args.get('window'):
+            root = self.window_scope(args.get('window'))
+            root_path = self.path_of(root)[0]
         filters = dict((key, lower(args.get(key))) for key in ('cls', 'name', 'text'))
         finding = any(filters.values())
         depth = bounded(args.get('depth'), 40 if finding else 3, 0, 60)
@@ -1090,19 +1160,19 @@ class Agent(object):
         counts = {'visited': 0, 'listed': 0, 'truncated': False}
         matches = []
 
-        def matched(info):
+        def matched(node, info):
             for key in ('cls', 'name'):
                 wanted = filters[key]
                 if wanted and wanted not in (lower(info.get(key)) or ''):
                     return False
-            return text_matches(filters['text'], info.get('text'))
+            return text_matches(filters['text'], full_text(node))
 
         def walk(node, level, here):
             counts['visited'] += 1
             info = node_info(node)
             kids = node_children(node)
             info['children'] = len(kids)
-            if finding and matched(info):
+            if finding and matched(node, info):
                 info['path'] = here
                 matches.append(info)
                 if len(matches) >= limit:
@@ -1128,11 +1198,11 @@ class Agent(object):
                 info['kids'] = shown
             return info
 
-        tree = walk(desktop, 0, '/' + node_label(desktop))
+        tree = walk(root, 0, root_path)
         registry = getattr(uicore, 'registry', None)
         windows = attempt(registry.GetWindows, []) if registry is not None else []
         value = {
-            'windows': [window_info(window) for window in windows or []],
+            'windows': [window_info(window) for window in windows or [] if root is desktop or window is root],
             'visited': counts['visited'],
             'truncated': counts['truncated'],
         }
@@ -1205,6 +1275,110 @@ class Agent(object):
         return {'file': target, 'width': back.width, 'height': back.height, 'ms': int((time.time() - started) * 1000),
                 'uiWidth': whole(attempt(lambda: desktop.width)), 'uiHeight': whole(attempt(lambda: desktop.height))}
 
+    # args: {"fresh", "window", "path", "hidden"}. Before a screenshot: fresh waits until the
+    # client has drawn FRESH_FRAMES frames after this call, so the picture shows what the calls
+    # before it changed; window or path answers that node's rect in UI units, cut to the desktop,
+    # for the picture to be cropped to.
+    def op_area(self, args):
+        _uicore, desktop = self.desktop()
+        if args.get('fresh'):
+            for _frame in range(FRESH_FRAMES):
+                blue.pyos.synchro.Yield()
+        width, height = whole(attempt(lambda: desktop.width)), whole(attempt(lambda: desktop.height))
+        value = {'ui': [width, height], 'rect': None}
+        if args.get('window') or args.get('path'):
+            if args.get('window') and args.get('path'):
+                raise refuse('crop to a window or a path, not both')
+            if args.get('window'):
+                node = self.window_scope(args.get('window'))
+                where = node_label(node)
+            else:
+                node, where, _chain = self.locate({'path': args.get('path'), 'hidden': args.get('hidden')})
+            rect = attempt(lambda: node.GetAbsolute())
+            if not rect or not attempt(lambda: node.display, False):
+                raise refuse('%s is not displayed, so it has no area to crop to' % where)
+            left, top = max(0, whole(rect[0])), max(0, whole(rect[1]))
+            right, bottom = min(width or 0, whole(rect[0] + rect[2])), min(height or 0, whole(rect[1] + rect[3]))
+            if right <= left or bottom <= top:
+                raise refuse('%s lies outside the desktop (%s)' % (where, [whole(v) for v in rect]))
+            value['rect'] = [left, top, right - left, bottom - top]
+        return value
+
+    # args: {"cls": a class name, "module": part of a module's name, "inherited": bool}. The
+    # classes of that name in the client's loaded modules (sys.modules), exact name first, else
+    # case-insensitive: where each is defined and importable from, its base classes, its default_*
+    # attributes (carbonui's construction defaults) with their values, and its own methods with
+    # their arguments; inherited lists the inherited ones by class too. A module the client hasn't
+    # loaded yet isn't searched.
+    def op_inspect(self, args):
+        wanted = args.get('cls')
+        if not isinstance(wanted, TEXT) or not re.match(r'^[A-Za-z_][A-Za-z0-9_]*$', wanted):
+            raise refuse('cls: a class name, e.g. Slider')
+        wanted = str(wanted)
+        within = lower(args.get('module'))
+        exact = collections.OrderedDict()
+        loose = collections.OrderedDict()
+        scanned = 0
+        for name, mod in list(sys.modules.items()):
+            if mod is None or (within and within not in name.lower()):
+                continue
+            space = attempt(lambda: vars(mod))
+            if not isinstance(space, dict):
+                continue
+            scanned += 1
+            if scanned % 500 == 0:
+                blue.pyos.synchro.SleepWallclock(1)
+            found = space.get(wanted)
+            if isinstance(found, CLASS_TYPES):
+                exact.setdefault(id(found), [found, []])[1].append(name)
+            elif not exact:
+                for key, value in list(space.items()):
+                    if isinstance(value, CLASS_TYPES) and isinstance(key, str) and key.lower() == wanted.lower():
+                        loose.setdefault(id(value), [value, []])[1].append(name)
+        rows = list((exact or loose).values())
+        return {'cls': wanted, 'scanned': scanned, 'count': len(rows),
+                'matches': [self.class_info(klass, modules, bool(args.get('inherited'))) for klass, modules in rows[:INSPECT_LIMIT]]}
+
+    def class_info(self, klass, modules, inherited):
+        mro = attempt(lambda: list(inspect.getmro(klass)), [klass])
+
+        def owner(name):
+            for base in mro:
+                if name in attempt(lambda: vars(base), {}):
+                    return base
+            return None
+
+        def label(base):
+            return '%s.%s' % (getattr(base, '__module__', '?'), base.__name__)
+
+        defaults = []
+        for name in sorted(attempt(lambda: dir(klass), [])):
+            if name.startswith('default_'):
+                base = owner(name)
+                defaults.append({'name': name, 'value': clip(attempt(lambda: repr(getattr(klass, name)), '?'), 160),
+                                 'from': base.__name__ if base is not None else None})
+        own = attempt(lambda: vars(klass), {})
+        methods = []
+        properties = []
+        for name in sorted(own):
+            item = own[name]
+            if isinstance(item, property):
+                properties.append(name)
+            elif callable(item) or isinstance(item, (classmethod, staticmethod)):
+                if not name.startswith('__') or name == '__init__':
+                    methods.append(signature(name, item))
+        others = collections.OrderedDict()
+        for base in mro[1:]:
+            names = sorted(name for name, item in attempt(lambda: vars(base), {}).items()
+                           if (callable(item) or isinstance(item, (classmethod, staticmethod))) and not name.startswith('__')
+                           and name not in own and owner(name) is base)
+            if names:
+                others[label(base)] = names if inherited else len(names)
+        defining = getattr(klass, '__module__', None)
+        return {'name': klass.__name__, 'module': defining, 'importable': sorted(set(modules))[:12],
+                'bases': [label(base) for base in mro[1:]], 'defaults': defaults, 'methods': methods,
+                'properties': properties, 'inherited': others}
+
     # args: {"since": seq, "limit", "notify": [names]}. The agent's own ring;
     # notify replaces which notify events it records.
     def op_events(self, args):
@@ -1275,29 +1449,88 @@ class Agent(object):
             raise ValueError('uicore.desktop is not ready')
         return uicore, desktop
 
+    # The open window wanted names: its windowID, name, class or caption, exact first, else
+    # contains (case-insensitive). None or several is an error listing the open windows.
+    def window_scope(self, wanted):
+        uicore = self.current_uicore()
+        registry = getattr(uicore, 'registry', None)
+        windows = [window for window in (attempt(lambda: registry.GetWindows(), []) or [])
+                   if not attempt(lambda: window.destroyed, False)]
+        key = lower(as_text(wanted) if isinstance(wanted, (bytes, UNICODE)) else str(wanted))
+        if not key:
+            raise refuse('window: a window\'s ID, name, class or caption')
+
+        def labels(window):
+            values = [attempt(lambda: getattr(window, 'windowID', None)), attempt(lambda: window.name), type(window).__name__,
+                      full_text(window)]
+            return [lower(value if isinstance(value, (bytes, UNICODE)) else str(value)) for value in values if value is not None]
+        rows = [(window, labels(window)) for window in windows]
+        found = [window for window, names in rows if key in names] or [window for window, names in rows if any(key in name for name in names)]
+        if len(found) == 1:
+            return found[0]
+        listed = ', '.join('%s (%s)' % (attempt(lambda: window.windowID) or node_label(window), type(window).__name__)
+                           for window in (found or windows)[:20])
+        raise refuse('%s window "%s"; %s' % ('no' if not found else '%d windows match' % len(found), wanted,
+                                             'the open windows are: %s' % (listed or '(none)') if not found else listed))
+
+    # A node's path and ancestors, as walk_nodes from the desktop gives them.
+    def path_of(self, target):
+        _uicore, desktop = self.desktop()
+        for node, here, chain in walk_nodes(desktop, True):
+            if node is target:
+                return here, chain
+        raise ValueError('%s is not under the desktop' % node_label(target))
+
     # The one displayed node args name: path (as ui prints it; a segment without
     # its [n] matches each sibling with that label), cls, name and text (contains,
     # case-insensitive), all of them together, with index to pick among what is left.
-    def locate(self, args):
+    # window keeps to one window's nodes. With text, path, cls and name may name the
+    # node a click on the text goes to instead (the label's own button). handler (a
+    # click's OnClick or OnDblClick) prefers the matches that take that click, and of
+    # matches a click sends to the same node, keeps one.
+    def locate(self, args, handler=None):
         uicore, desktop = self.desktop()
         path = args.get('path')
         filters = dict((key, lower(args.get(key))) for key in ('cls', 'name', 'text'))
         if not path and not any(filters.values()):
             raise ValueError('name the node: path (from ui), or cls, name or text')
+        root, here, chain = desktop, None, ()
+        if args.get('window'):
+            root = self.window_scope(args.get('window'))
+            here, chain = self.path_of(root)
+
+        def selects(node, where):
+            if path and not path_matches(path, where):
+                return False
+            for key in ('cls', 'name'):
+                have = type(node).__name__ if key == 'cls' else attempt(lambda: node.name)
+                if filters[key] and filters[key] not in (lower(have) or ''):
+                    return False
+            return True
+
         found = []
-        for node, here, chain in walk_nodes(desktop, bool(args.get('hidden'))):
-            if path and not path_matches(path, here):
+        for node, where, above in walk_nodes(root, bool(args.get('hidden')), here, chain):
+            if not text_matches(filters['text'], full_text(node) if filters['text'] else None):
                 continue
-            if any(filters.values()):
-                info = {'cls': type(node).__name__, 'name': attempt(lambda: node.name)}
-                if any(wanted and wanted not in (lower(info[key]) or '') for key, wanted in filters.items() if key != 'text'):
+            if not selects(node, where):
+                if not filters['text']:
                     continue
-                if not text_matches(filters['text'], node_text(node)):
+                target, target_path, _passed = clickable(node, where, above, 'OnClick')
+                if target is None or not selects(target, target_path):
                     continue
-            found.append((node, here, chain))
+            found.append((node, where, above))
         # A button and its own label both match its text; the outermost stands for both.
         matched = set(id(node) for node, _here, _chain in found)
-        found = [row for row in found if not any(id(above) in matched for above in row[2])]
+        found = [row for row in found if not any(id(up) in matched for up in row[2])]
+        if handler is not None:
+            takers = []
+            targets = set()
+            for row in found:
+                target = clickable(row[0], row[1], row[2], handler)[0]
+                if target is not None and id(target) not in targets:
+                    targets.add(id(target))
+                    takers.append(row)
+            found = takers or found
         index = args.get('index')
         if index is not None:
             index = bounded(index, -1, 0, 100000)
@@ -1308,7 +1541,7 @@ class Agent(object):
             return found[0]
         if not found:
             raise ValueError('no displayed node matches %s; ui --hidden also lists hidden ones' % (
-                json.dumps(dict((k, v) for k, v in dict(filters, path=path).items() if v)),))
+                json.dumps(dict((k, v) for k, v in dict(filters, path=path, window=args.get('window')).items() if v)),))
         listed = '\n'.join('  [%d] %s' % (n, here) for n, (_node, here, _chain) in enumerate(found[:12]))
         raise ValueError('%d nodes match; pass index or path:\n%s%s' % (len(found), listed, '\n  ...' if len(found) > 12 else ''))
 
@@ -1436,7 +1669,7 @@ class Agent(object):
     # The node, and the nearest node from it up that takes a click; whether a scroll container
     # holds the node out of view (click scrolls it in first).
     def op_find(self, args):
-        node, here, chain = self.locate(args)
+        node, here, chain = self.locate(args, 'OnClick')
         clicked, clicked_path, passed = clickable(node, here, chain, 'OnClick')
         found = self.described(node, here)
         found['scrolledOut'] = self.scrolled_out(node, chain)
@@ -1449,8 +1682,8 @@ class Agent(object):
     # the click goes through it): Button.press() for a button, which checks it is enabled, else
     # OnClick (OnDblClick with double).
     def op_click(self, args):
-        node, here, chain = self.locate(args)
         handler = 'OnDblClick' if args.get('double') else 'OnClick'
+        node, here, chain = self.locate(args, handler)
         target, target_path, passed = clickable(node, here, chain, handler)
         if target is None:
             raise refuse('neither %s nor a node above it has %s%s' % (

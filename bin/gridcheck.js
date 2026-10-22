@@ -72,6 +72,7 @@ const clientVisualTools = require("../core/clientVisual");
 const { nodeExecutable } = require("../core/node");
 const clientRecord = require("../core/clientRecord");
 const clientWaitTools = require("../core/clientWait");
+const { describeShape } = require("../core/shape");
 
 const REPO_ROOT = DEFAULT_TREE_ROOT;
 const REGISTRY = defaultRegistry();
@@ -102,6 +103,7 @@ const AUTO = MODE === "auto";
 const BOOLEAN_FLAGS = new Set(["all", "json", "any-pid", "force", "fresh", "no-market", "no-log", "help",
   "check", "keep-up", "reuse", "positions", "once", "serve", "offline", "dry-run", "profile", "perf", "now", "detach", "mcp", "save", "hidden",
   "double", "set", "enter", "list", "any-build", "assert", "no-console", "keep-clients", "clients", "npc", "no-modules",
+  "noise", "exceptions", "shape", "inherited", "reads",
   ...REGISTRY.booleanFlags]);
 
 class CliError extends Error {}
@@ -553,8 +555,21 @@ async function clientCommand(op, args, flags) {
     timeoutMs: (seconds + 10) * 1000,
   });
   if (status === 404) throw new CliError("this server's bridge has no client agent. `gridcheck client status` says why.");
-  if (status >= 400 || json.ok === false) throw new CliError(`client ${op}: ${json.error ? clientTools.clientErrorText(json.error) : `HTTP ${status}`}`);
+  const failed = status >= 400 || json.ok === false ? (json.error ? clientTools.clientErrorText(json.error) : `HTTP ${status}`) : null;
+  if (op === "rpc") logRpc(handshake, args, json, failed);
+  if (failed) throw new CliError(`client ${op}: ${failed}`);
   return json;
+}
+
+// Every rpc goes in the client's rpc log (`client rpc-log`), refused ones too: a refusal may still have changed something.
+function logRpc(handshake, args, json, failed) {
+  try {
+    clientRecord.appendRpcLog(E2E_DIR, { atMs: Date.now(), serverPid: handshake.pid || null, user: json.username || null,
+      service: args.service, method: args.method, ...(args.payload !== undefined ? { payload: args.payload } : {}),
+      ...(args.args !== undefined ? { args: args.args } : {}), ok: !failed, ...(failed ? { error: String(failed).split("\n").pop().slice(0, 300) } : {}) });
+  } catch (_error) {
+    // the log is a convenience; the call's own answer matters more
+  }
 }
 
 // The most Python one eval sends: the bridge carries it in a single notification.
@@ -630,6 +645,7 @@ async function cmdClient(positionals, flags) {
   }
   // Before the bridge check: a client outlives a server stopped under it.
   if (sub === "stop") return cmdClientStop(flags);
+  if (sub === "rpc-log") return clientRpcLog(flags);
   const handshake = requireHandshake();
   if (sub === "status") {
     const { status, json: listed } = await requestJSON(`http://${handshake.host}:${handshake.port}/client/agents`, {
@@ -662,7 +678,12 @@ async function cmdClient(positionals, flags) {
     const code = flags.file ? readEvalFile(path.resolve(String(flags.file))) : rest.join(" ");
     if (!code.trim()) throw new CliError("client eval needs Python, e.g. gridcheck client eval \"session.charid\"");
     if (Buffer.byteLength(code) > MAX_EVAL_BYTES) throw new CliError(`client eval takes at most ${MAX_EVAL_BYTES / 1024} KiB of Python`);
-    const reply = await clientCommand("eval", { code }, flags);
+    let vars;
+    if (flags.vars !== undefined) {
+      vars = parseJsonFlag(String(flags.vars), "--vars");
+      if (!vars || typeof vars !== "object" || Array.isArray(vars)) throw new CliError("--vars takes a JSON object of names and values, e.g. --vars '{\"page\": \"operations\"}'");
+    }
+    const reply = await clientCommand("eval", { code, ...(vars ? { vars } : {}) }, flags);
     const value = reply.value || {};
     if (flags.out) writeJsonFile(path.resolve(String(flags.out)), value);
     if (flags.json) json(value);
@@ -741,7 +762,7 @@ async function cmdClient(positionals, flags) {
   }
   if (sub === "ui") {
     const args = { depth: flags.depth, cls: flags.class, name: flags.name, text: flags.text, hidden: flags.hidden === true,
-      limit: flags.limit };
+      limit: flags.limit, window: flags.window === undefined ? undefined : String(flags.window) };
     const reply = await clientCommand("ui", Object.fromEntries(Object.entries(args).filter(([, value]) => value !== undefined)), flags);
     if (flags.json) return json(reply.value);
     printClientUi(reply.value);
@@ -778,25 +799,40 @@ async function cmdClient(positionals, flags) {
     }
     const limit = flags.limit === undefined ? 50 : Number(flags.limit);
     if (!(limit >= 1)) throw new CliError("--limit takes a count, 1 or more");
-    const query = new URLSearchParams({ since: String(flags.since || 0), limit: "1000",
+    // --since last: after where the last listing on this server ended; with none yet, as if not given.
+    let since = flags.since;
+    if (since === "last") since = clientRecord.readEventsCursor(E2E_DIR, handshake.pid || null) ?? undefined;
+    else if (since !== undefined && !/^\d+$/.test(String(since))) throw new CliError("--since takes a sequence number, or last");
+    const query = new URLSearchParams({ since: String(since || 0), limit: "1000",
       ...(flags.user ? { user: String(flags.user) } : {}) });
     const [listed, agents] = await Promise.all([callBridge(handshake, "GET", `/client/events?${query}`),
       callBridge(handshake, "GET", "/client/agents")]);
+    clientRecord.writeEventsCursor(E2E_DIR, handshake.pid || null, listed.seq);
     // By default, only the attached client's events since it attached: the bridge keeps earlier clients' too.
-    const scope = flags.all || flags.since !== undefined ? null : clientEventScope(agents.agents || [], flags.user);
-    const rows = (listed.events || []).filter((event) => !scope ||
+    const scope = flags.all || since !== undefined ? null : clientEventScope(agents.agents || [], flags.user);
+    const scoped = (listed.events || []).filter((event) => !scope ||
       scope.some((agent) => event.username === agent.username && event.atMs >= agent.attachedAtMs));
+    const { events: rows, hiddenNoise } = clientTools.filterClientEvents(scoped, { noise: flags.noise === true,
+      exceptions: flags.exceptions === true, frame: flags.frame === undefined ? null : String(flags.frame) });
     const shown = rows.slice(-limit);
-    if (flags.json) return json({ ...listed, events: shown });
+    if (flags.json) return json({ ...listed, events: shown, hiddenNoise });
     if (scope) {
       console.log(`events of ${scope.map((agent) => `${agent.username} since it attached at ${new Date(agent.attachedAtMs).toLocaleTimeString()}`)
         .join(", ")}${rows.length > shown.length ? `, the last ${shown.length} of ${rows.length}` : ""} (--all: every client's since the server started)`);
-    } else if (!flags.all && flags.since === undefined) {
+    } else if (!flags.all && since === undefined) {
       console.log(`no client has been attached in the last 10 minutes; the last ${shown.length} event(s) of any client`);
+    } else if (flags.since === "last") {
+      console.log(`events after #${since}, where the last listing ended`);
     }
-    for (const event of shown) console.log(`#${event.seq} ${formatTimelineEvent(event, REGISTRY, { clock: true })}`);
-    if (!shown.length) console.log(`no client events${flags.since ? ` after #${flags.since}` : ""}`);
-    console.log(`(--since ${listed.seq} for newer ones)`);
+    const tracebacks = flags.exceptions === true || flags.frame !== undefined;
+    for (const event of shown) {
+      console.log(`#${event.seq} ${formatTimelineEvent(event, REGISTRY, { clock: true })}`);
+      if (tracebacks) for (const line of event.traceback || []) console.log(`    ${line}`);
+    }
+    const what = flags.frame !== undefined ? `exceptions from ${flags.frame}` : flags.exceptions ? "exceptions" : "events";
+    if (!shown.length) console.log(`no client ${what}${since ? ` after #${since}` : ""}`);
+    if (hiddenNoise) console.log(`(${hiddenNoise} noise exception(s) hidden, such as the content host's gaierror; --noise shows them)`);
+    console.log(`(--since ${listed.seq}, or --since last, for newer ones)`);
     return;
   }
   if (sub === "console") {
@@ -826,7 +862,10 @@ async function cmdClient(positionals, flags) {
     if (!(maxWidth >= 0)) throw new CliError("--max-width takes pixels");
     const source = flags.source === undefined ? "auto" : String(flags.source);
     if (!SHOT_SOURCES.includes(source)) throw new CliError(`--source takes ${SHOT_SOURCES.join(", ")}`);
-    const shot = await shootClient(agent, { out, maxWidth, format, source });
+    if (flags.window !== undefined && flags.path !== undefined) throw new CliError("screenshot crops to --window or --path, not both");
+    const area = { fresh: flags.fresh === true || undefined, window: flags.window === undefined ? undefined : String(flags.window),
+      path: flags.path === undefined ? undefined : clientTools.repairNodePath(String(flags.path)) };
+    const shot = await shootClient(agent, { out, maxWidth, format, source, area });
     if (shot.error) throw new CliError(`screenshot of the ${agent.username} client: ${shot.error}`);
     if (flags.json) return json(shot);
     console.log(`saved ${relativePath(shot.file)} (${clientTools.scaleText(shot)}, ` +
@@ -835,8 +874,9 @@ async function cmdClient(positionals, flags) {
   }
   if (sub === "wait") return clientWait(rest, flags);
   if (sub === "rpc") return clientRpc(rest, flags);
+  if (sub === "inspect") return clientInspect(rest, flags);
   if (["find", "click", "menu", "type", "key", "cmd", "act"].includes(sub)) return clientDrive(handshake, sub, rest, flags);
-  throw new CliError("client needs status, launch, stop, ping, eval, wait, rpc, console, ui, ui-state, check-ui, screenshot, capture-frames, " +
+  throw new CliError("client needs status, launch, stop, ping, eval, wait, rpc, rpc-log, inspect, console, ui, ui-state, check-ui, screenshot, capture-frames, " +
     `compare-images, compare-frames, ballpark, diff, events, find, click, menu, type, key, cmd, pointer or act; got ${sub === undefined ? "nothing" : JSON.stringify(sub)}`);
 }
 
@@ -952,10 +992,11 @@ async function stopAllClients() {
   }
 }
 
-// --path, --class, --name, --text, --index, --hidden: one node, as `client ui` lists them.
+// --path, --class, --name, --text, --index, --hidden, --window: one node, as `client ui` lists them.
 function nodeSelector(flags) {
   const selector = { path: clientTools.repairNodePath(flags.path), cls: flags.class, name: flags.name, text: flags.text,
-    index: flags.index === undefined ? undefined : Number(flags.index), hidden: flags.hidden === true || undefined };
+    index: flags.index === undefined ? undefined : Number(flags.index), hidden: flags.hidden === true || undefined,
+    window: flags.window === undefined ? undefined : String(flags.window) };
   return Object.fromEntries(Object.entries(selector).filter(([, value]) => value !== undefined));
 }
 
@@ -1011,12 +1052,74 @@ async function clientRpc(rest, flags) {
     if (!Array.isArray(args.args)) throw new CliError("--args takes a JSON array, e.g. --args '[1, \"two\"]'");
   }
   const reply = await clientCommand("rpc", args, flags);
-  const value = reply.value || {};
+  printRpcReply(reply.value || {}, flags);
+}
+
+// An rpc's answer: the decoded reply, or with --shape its keys, types, array lengths and a sample;
+// --out also saves the reply (its JSON, else the repr) to a file.
+function printRpcReply(value, flags) {
+  const decoded = value.json !== null && value.json !== undefined;
+  if (flags.out) {
+    const file = path.resolve(String(flags.out));
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, decoded ? `${JSON.stringify(value.json, null, 2)}\n` : `${value.repr}\n`);
+    console.log(`saved the reply to ${relativePath(file)} (${fs.statSync(file).size} bytes)`);
+  }
   if (flags.json) {
     console.log(JSON.stringify(value, null, 2));
+  } else if (flags.shape) {
+    if (!decoded) throw new CliError(`--shape needs a reply that is plain data; this one is ${String(value.repr).slice(0, 200)}`);
+    console.log(describeShape(value.json).join("\n"));
+  } else if (!flags.out) {
+    console.log(decoded ? JSON.stringify(value.json, null, 2) : `${value.repr}${value.truncated ? "\n(truncated)" : ""}`);
+  }
+}
+
+// client rpc-log: the rpc calls made through gridcheck on this server, oldest first, so a test can put back what it changed.
+function clientRpcLog(flags) {
+  const handshake = readHandshake();
+  const rows = clientRecord.readRpcLog(E2E_DIR, { serverPid: flags.all ? null : (handshake && handshake.pid) || null, reads: flags.reads === true });
+  if (flags.json) {
+    console.log(JSON.stringify(rows, null, 2));
     return;
   }
-  console.log(value.json !== null && value.json !== undefined ? JSON.stringify(value.json, null, 2) : `${value.repr}${value.truncated ? "\n(truncated)" : ""}`);
+  for (const row of rows) {
+    const sent = row.payload !== undefined ? JSON.stringify(row.payload) : row.args !== undefined ? JSON.stringify(row.args) : "";
+    console.log(`${new Date(row.atMs).toLocaleTimeString()} ${row.user || "?"} ${row.service}.${row.method}` +
+      `${sent ? ` ${sent.length > 300 ? `${sent.slice(0, 300)}...` : sent}` : ""}${row.ok ? "" : `  REFUSED: ${row.error || "?"}`}`);
+  }
+  console.log(`${rows.length} call(s)${flags.all ? "" : " on this server"}${flags.reads ? "" : "; calls named like reads (Get..., List..., Status) left out, --reads shows them"}` +
+    `. Put back what a test changed with the opposite calls. Log: ${relativePath(clientRecord.rpcLogPath(E2E_DIR))}`);
+}
+
+// client inspect <Class>: where the class is in the client's loaded modules, its default_* and its methods.
+async function clientInspect(rest, flags) {
+  const [cls, ...extra] = rest;
+  if (!cls || extra.length) throw new CliError("client inspect takes one class name, e.g. gridcheck client inspect Slider");
+  const reply = await clientCommand("inspect", { cls, module: flags.module === undefined ? undefined : String(flags.module),
+    inherited: flags.inherited === true || undefined }, flags);
+  const value = reply.value;
+  if (flags.json) return console.log(JSON.stringify(value, null, 2));
+  if (!value.count) {
+    console.log(`no class ${cls} in the ${value.scanned} modules the client has loaded${flags.module ? ` whose name contains ${flags.module}` : ""}; ` +
+      "one it hasn't imported yet isn't there to find");
+    process.exitCode = 1;
+    return;
+  }
+  for (const match of value.matches) {
+    console.log(`${match.module}.${match.name}${match.importable.length > 1 || match.importable[0] !== match.module ? `  (also in ${match.importable.filter((name) => name !== match.module).join(", ")})` : ""}`);
+    console.log(`  bases: ${match.bases.join(" < ") || "none"}`);
+    if (match.defaults.length) {
+      console.log("  defaults:");
+      for (const row of match.defaults) console.log(`    ${row.name} = ${row.value}${row.from && row.from !== match.name ? `  (${row.from})` : ""}`);
+    }
+    if (match.properties.length) console.log(`  properties: ${match.properties.join(", ")}`);
+    console.log(`  methods: ${match.methods.join(", ") || "none of its own"}`);
+    for (const [owner, names] of Object.entries(match.inherited)) {
+      console.log(`  from ${owner}: ${Array.isArray(names) ? names.join(", ") : `${names} method(s)`}`);
+    }
+  }
+  if (value.count > value.matches.length) console.log(`${value.count} classes match; the first ${value.matches.length} shown (--module narrows)`);
 }
 
 // find, click, menu, type, key, cmd and act: drive the client from inside, through
@@ -1878,6 +1981,7 @@ function pluginIO() {
     bridge,
     callBridge,
     clientCommand,
+    printRpcReply,
     requestJSON,
     gateway,
     currentSystemID,
@@ -2150,35 +2254,45 @@ const SHOT_SOURCES = ["auto", "client", "window"];
 // A picture of one client. "client": its agent saves the back buffer, which
 // works while the window is covered or minimized; "window": PrintWindow from
 // outside, which works while the agent is busy or gone; "auto": the first,
-// else the second. -> { file, width, height, title, source } or { error }.
-async function shootClient(agent, { out, maxWidth = 0, format = "png", source = "auto" }) {
+// else the second. area: { fresh, window, path }: fresh waits for frames the client
+// draws after the call; window or path crops the picture to that node.
+// -> { file, width, height, title, source } or { error }.
+async function shootClient(agent, { out, maxWidth = 0, format = "png", source = "auto", area = null }) {
+  let crop = null;
+  if (area && (area.fresh || area.window || area.path)) {
+    const args = Object.fromEntries(Object.entries(area).filter(([, value]) => value !== undefined));
+    const { value } = await clientCommand("area", args, { user: agent.username, timeout: 15 });
+    if (value.rect) crop = { rect: value.rect, uiWidth: value.ui[0] };
+  }
+  const cropScale = (width) => clientTools.uiScale({ width, uiWidth: crop.rect[2], uiHeight: crop.rect[3], origin: crop.rect.slice(0, 2) });
   const failed = [];
   if (source !== "window") {
-    const shot = await shootInClient(agent, { out, maxWidth, format });
-    if (!shot.error) return { ...shot, title: null, source: "client" };
+    const shot = await shootInClient(agent, { out, maxWidth, format, crop });
+    if (!shot.error) return { ...shot, ...(crop ? cropScale(shot.width) : {}), title: null, source: "client" };
     if (source === "client") return shot;
     failed.push(`the client couldn't draw it (${shot.error})`);
   }
-  const shot = agent.pid ? await clientTools.captureScreenshot({ pid: agent.pid, out, maxWidth, format })
+  const shot = agent.pid ? await clientTools.captureScreenshot({ pid: agent.pid, out, maxWidth, format, crop })
     : { error: `the ${agent.username} client's agent didn't report its pid` };
   if (shot.error) return { error: [...failed, shot.error].join("; ") };
+  if (crop) return { ...shot, ...cropScale(shot.width), source: "window" };
   // The window's size is in pixels; its UI size is the client's to say, if it answers.
   const ui = await clientCommand("ping", {}, { user: agent.username, timeout: 2 }).then((reply) => reply.value.ui, () => null);
   const scale = ui ? clientTools.uiScale({ width: shot.width, uiWidth: ui[0], uiHeight: ui[1] }) : null;
   return { ...shot, ...scale, source: "window" };
 }
 
-// The agent saves a PNG where it is told; one that needs scaling or another
+// The agent saves a PNG where it is told; one that needs scaling, cropping or another
 // format goes through the screenshot script and is then removed.
-async function shootInClient(agent, { out, maxWidth, format }) {
-  const direct = format === "png" && !maxWidth;
+async function shootInClient(agent, { out, maxWidth, format, crop = null }) {
+  const direct = format === "png" && !maxWidth && !crop;
   const saved = direct ? out : `${out}.client.png`;
   fs.mkdirSync(path.dirname(out), { recursive: true });
   try {
     const { value } = await clientCommand("screenshot", { path: saved }, { user: agent.username, timeout: 10 });
     const scale = (width) => clientTools.uiScale({ width, uiWidth: value.uiWidth, uiHeight: value.uiHeight });
     if (direct) return { file: out, width: value.width, height: value.height, ...scale(value.width) };
-    const shot = await clientTools.captureScreenshot({ from: saved, out, maxWidth, format });
+    const shot = await clientTools.captureScreenshot({ from: saved, out, maxWidth, format, crop });
     return shot.error ? shot : { ...shot, ...scale(shot.width) };
   } catch (error) {
     return { error: String(error.message).trim().split("\n").pop() };
@@ -3912,15 +4026,17 @@ const CORE_COMMANDS = {
   client: {
     usage: ["client launch [--user e2eclient] [--name \"...\"] [--exe <exefile.exe>] [--resfiles <folder>] [--resfileserver <url>] [--wait 240]" +
       " [--settings-profile <name>] [--graphics dx11|dx12] [--no-console]",
-      "client status [--json] | client stop [--user] | client ping [--user] | client eval \"<python>\" | --file <py> [--assert] [--out <json>] [--user] [--timeout 15] [--json]",
+      "client status [--json] | client stop [--user] | client ping [--user] | client eval \"<python>\" | --file <py> [--vars <json>] [--assert] [--out <json>] [--user] [--timeout 15] [--json]",
       "client ui-state [--limit 10000] [--out <json>] | client check-ui --spec <json> | --file <json> [--wait 0] [--stable <ms>] [--out <json>] [--user]",
-      "client console [--lines 60] [--grep <regex>] [--pid N] | client ui [--class <text>] [--name <text>] [--text <text>] [--depth N] [--hidden] [--limit N] [--json]",
-      "client screenshot [--out <file.png|.jpg>] [--run <id>] [--max-width <px>] [--source auto|client|window] | client ballpark [--range <km>] [--json]",
-      "client diff [--tolerance 1000] [--json] | client events [--all] [--since <seq>] [--limit 50] [--notify OnA,OnB] [--json]",
-      "client find|click [--path <path> | --class <text> --name <text> --text <text>] [--index N] [--double] [--wait 3] [--user] [--json]",
-      "client menu [--path <path> | --class <text> --name <text> --text <text> | --item <itemID>] [--index N] [--wait 3] -- \"<entry>\" [\"<submenu entry>\" ...]",
-      "client wait \"<python>\" [--timeout 60] [--every 0.5] [--json] | client rpc <service> <method> [--payload <json> | --args <json array>] [--json]",
-      "client type \"<text>\" [--name <edit> ...] [--set] [--enter] | client key <enter|escape|tab|f1|a ...> [--name <edit> ...]",
+      "client console [--lines 60] [--grep <regex>] [--pid N] | client ui [--class <text>] [--name <text>] [--text <text>] [--window <window>] [--depth N] [--hidden] [--limit N] [--json]",
+      "client screenshot [--out <file.png|.jpg>] [--run <id>] [--max-width <px>] [--source auto|client|window] [--window <window> | --path <path>] [--fresh]",
+      "client ballpark [--range <km>] [--json] | client diff [--tolerance 1000] [--json]",
+      "client events [--all] [--since <seq>|last] [--limit 50] [--exceptions] [--frame <text>] [--noise] [--notify OnA,OnB] [--json]",
+      "client find|click [--path <path> | --class <text> --name <text> --text <text>] [--window <window>] [--index N] [--double] [--wait 3] [--user] [--json]",
+      "client menu [--path <path> | --class <text> --name <text> --text <text> | --item <itemID>] [--window <window>] [--index N] [--wait 3] -- \"<entry>\" [\"<submenu entry>\" ...]",
+      "client wait \"<python>\" [--timeout 60] [--every 0.5] [--json] | client rpc <service> <method> [--payload <json> | --args <json array>] [--out <file>] [--shape] [--json]",
+      "client rpc-log [--reads] [--all] [--json] | client inspect <Class> [--module <text>] [--inherited] [--json]",
+      "client type \"<text>\" [--name <edit> ... --window <window>] [--set] [--enter] | client key <enter|escape|tab|f1|a ...> [--name <edit> ...]",
       "client cmd [<name> [args...]] [--filter <text>] | client act <action> [<target>] [--range <m>] [--module high1] [--wait <s>]",
       "client pointer <move|click|drag|wheel> <x,y> [<x,y> ...] [--button 0|1|2] [--duration <ms>] [--delta <n>] [--user]",
       "client capture-frames --out <new folder> [--count 10] [--interval 100] [--user]",

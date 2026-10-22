@@ -8,9 +8,37 @@
 //   POST /warp/stop                   end a running warp at the next slice
 //   POST /trigger/<name>  { characterID, ... }  scout, hunt, fleet or materialize; see
 //                                     triggers.js. Answers the flight or hunt ID.
+//   GET  /client-module ?id=<module>  a client module's source as the next login gets it
+//                                     (its readSource), for `gridcheck lu-reload`
 
-function createLuRoutes({ warp = null, warpBridge = null, triggers = null, log = null } = {}) {
+// LU's client delivery (server/src/_secondary/clientDelivery/clientLoginDelivery.js) registers
+// itself under this key; its modules map holds { id, serviceName, version, readSource }.
+const DELIVERY_KEY = Symbol.for("lu.clientLoginDelivery.v1");
+
+function createLuRoutes({ warp = null, warpBridge = null, triggers = null, log = null, delivery = () => globalThis[DELIVERY_KEY] } = {}) {
   const logger = log || { debug() {} };
+
+  function clientModule(query) {
+    const found = delivery();
+    if (!found || !(found.modules instanceof Map)) {
+      return { statusCode: 503, body: { ok: false, error: "This server delivers no client modules at login (no LU client delivery is registered)." } };
+    }
+    const ids = [...found.modules.keys()];
+    const id = query && query.id ? String(query.id) : ids.length === 1 ? ids[0] : "";
+    const entry = found.modules.get(id);
+    if (!entry) {
+      // Not 404: the CLI reads that as a bridge without the route.
+      return { statusCode: 409, body: { ok: false, modules: ids,
+        error: `${id ? `no client module ${id}` : "name the module"}; this server delivers ${ids.join(", ") || "none"}` } };
+    }
+    let source;
+    try {
+      source = String(entry.readSource());
+    } catch (error) {
+      return { statusCode: 500, body: { ok: false, error: `${id}'s readSource failed: ${error.message}` } };
+    }
+    return { statusCode: 200, body: { ok: true, id, serviceName: entry.serviceName, version: entry.version, source, modules: ids } };
+  }
 
   function clock() {
     if (!warpBridge) return { statusCode: 503, body: { ok: false, error: "This server has no Living Universe clock." } };
@@ -69,6 +97,7 @@ function createLuRoutes({ warp = null, warpBridge = null, triggers = null, log =
     "POST /warp": ({ body }) => startWarp(body || {}),
     "POST /warp/stop": () => stopWarp(),
     "POST /trigger/*": ({ rest, body }) => trigger(rest, body),
+    "GET /client-module": ({ query }) => clientModule(query),
   };
 }
 

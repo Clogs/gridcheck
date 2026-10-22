@@ -85,7 +85,13 @@ test("the instructions are a brief clients won't cut off; the guide tool has the
   assert.match(topic("client"), /`client_launch`[\s\S]*`client_diff`[\s\S]*CLIENT_EXCEPTION/);
   assert.throws(() => topic("nope"), /no topic "nope"; the topics are start, scenarios, conditions, events, perf, client, plugins/);
   const whole = primer({ registry, surface: "mcp" });
-  assert.ok(whole.length < 23_000, `the whole guide fits one reply (${whole.length})`);
+  assert.ok(whole.length < mcp.GUIDE_LIMIT, `the whole guide fits one reply (${whole.length})`);
+  assert.match(topic("client"), /`client_type` \{ value, name \}[\s\S]*text finds the edit/);
+  assert.match(mcp.INSTRUCTIONS, /for X use Y:\n- wait for the client: `client_wait`[\s\S]*- reload client Python sent at login: `lu_reload`/);
+  assert.match(mcp.INSTRUCTIONS, /`client_rpc` or `lu_rpc` \(shape for a long reply\)/);
+  const bare = mcp.instructions(emptyRegistry());
+  assert.match(bare, /- did it throw: `client_events` \{ frame \}/);
+  assert.doesNotMatch(bare, /lu_reload|lu_rpc/, "a plugin's tools are named only while it is registered");
   for (const name of ["start", "scenarios", "events", "plugins"]) assert.ok(whole.includes(topic(name)), `${name} is in the whole guide`);
 });
 

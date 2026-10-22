@@ -37,7 +37,8 @@ def module(name, **attrs):
 clock = [0]
 def sleep_wallclock(ms):
     clock[0] += ms
-module('blue', pyos=types.SimpleNamespace(synchro=types.SimpleNamespace(SleepWallclock=sleep_wallclock)),
+frames = []
+module('blue', pyos=types.SimpleNamespace(synchro=types.SimpleNamespace(SleepWallclock=sleep_wallclock, Yield=lambda: frames.append(1))),
        os=types.SimpleNamespace(GetWallclockTime=lambda: 1, GetSimTime=lambda: clock[0] * 10000))
 module('uthread', new=lambda fn, *args: fn(*args))
 module('eveprefs', boot=types.SimpleNamespace(build=3396210))
@@ -171,10 +172,28 @@ row = RightClickable('memberRow', [Label('name', text='Some Member', state=1)])
 sizes = Node('sizes', [Button('Button', 'Draft', display=False), Button('Button', '1d'), Button('Button', 'Hauler'),
                        Button('Button', 'Hauler 2'), Button('Lonely', 'Solo')])
 main = Node('Container', [tabs, issue, sizes, scroll, disabled, row])
-desktop = Node('Desktop', [main])
+# Two windows, each with a search box; the console's labels carry markup, and its Members header takes no click.
+class Window(Node):
+    def __init__(self, name, windowID, caption, children, rect):
+        Node.__init__(self, name, children, rect=rect)
+        self.windowID, self.caption = windowID, caption
+class SingleLineEditText(Node):
+    pass
+class Clickable(Node):
+    def OnClick(self, *args):
+        did.append(['clickable', self.name])
+console = Window('LuCorpConsole', 'LuCorpConsole', 'Corp Console', [
+    SingleLineEditText('amount', rect=(110, 120, 80, 20)),
+    Clickable('pct', [Label('EveLabelSmall', text='<color=0xff00ff00>75</color>&nbsp;%', state=1)]),
+    Clickable('optionalBox', [Label('EveLabelSmall', text='Optional', state=1)]),
+    Node('header', text='Members'),
+    Tab('membersTab', [Label('EveLabelMedium', text='Members', state=1)]),
+], rect=(100, 100, 1180, 760))
+info = Window('InfoPanel', 'infoPanel', 'Info', [SingleLineEditText('search')], rect=(0, 0, 200, 300))
+desktop = Node('Desktop', [main, console, info])
 desktop.width, desktop.height = 1280, 720
 class Registry(object):
-    def GetWindows(self): return []
+    def GetWindows(self): return [console, info]
     def GetModalWindow(self): return None
     def GetFocus(self): return None
 registry = Registry()
@@ -318,6 +337,51 @@ out['rpcMissing'] = err(op('rpc', service='luCommand', method='Missing'))
 out['rpcBoth'] = err(op('rpc', service='luCommand', method='Plain', payload={}, args=[]))
 out['rpcErrorEvents'] = count('agent-error') - errors_before
 out['pingUi'] = op('ping')['value']['ui']
+# Windows scope the finders.
+out['editBoth'] = err(op('find', cls='SingleLineEditText'))
+out['editInConsole'] = op('find', cls='SingleLineEditText', window='LuCorpConsole')['value']['node']['path']
+out['editByCaption'] = op('find', cls='SingleLineEditText', window='info')['value']['node']['path']
+out['windowMissing'] = err(op('find', cls='SingleLineEditText', window='Nope'))
+out['uiInWindow'] = [m['path'] for m in op('ui', text='members', window='corp console')['value']['matches']]
+out['uiWindowTree'] = op('ui', window='infoPanel', depth=1)['value']['tree']['kids'][0]['name']
+# Clicks: markup and entities stripped, class on the target, a header with no handler skipped, a target's path.
+did[:] = []
+out['pctClick'] = op('click', text='75%')['value']['clicked']['path']
+out['optionalClick'] = op('click', text='Optional', cls='Clickable')['value']['clicked']['path']
+out['membersClick'] = op('click', text='Members', window='LuCorpConsole')['value']['clicked']['path']
+out['membersFind'] = op('find', text='Members', window='LuCorpConsole')['value']['target']['path']
+out['membersTargetPath'] = op('click', path='/Desktop/LuCorpConsole/membersTab', text='Members')['value']['clicked']['path']
+out['clickDid'] = list(did)
+out['membersUi'] = len(op('ui', text='Members', window='LuCorpConsole')['value']['matches'])
+# eval vars.
+out['vars'] = op('eval', code='page * 2', vars={'page': 21})['value']['json']
+out['varsKept'] = op('eval', code='page')['value']['json']
+out['varsReserved'] = err(op('eval', code='1', vars={'sm': 1}))
+# inspect.
+class Container(object):
+    default_align = 'toTop'
+    default_state = 0
+    def SetSize(self, width, height): pass
+class Slider(Container):
+    default_value = 0.5
+    def SetValue(self, value, animate=True): pass
+    @property
+    def value(self): return 1
+    @staticmethod
+    def Make(*args, **kwargs): pass
+module('carbonui.control.slider', Slider=Slider)
+module('carbonui.control.reexport', Slider=Slider)
+found = op('inspect', cls='Slider', module='carbonui')['value']
+out['inspect'] = found['matches'][0] if found['count'] == 1 else found
+out['inspectLoose'] = op('inspect', cls='slider', module='carbonui.control')['value']['count']
+out['inspectNone'] = op('inspect', cls='NoSuchClass', module='carbonui')['value']['count']
+out['inspectInherited'] = op('inspect', cls='Slider', module='carbonui.control.slider', inherited=True)['value']['matches'][0]['inherited']
+# area: fresh frames, and a rect to crop to.
+frames[:] = []
+area = op('area', fresh=True, window='LuCorpConsole')['value']
+out['area'] = [area['rect'], area['ui'], len(frames)]
+out['areaPath'] = op('area', path='/Desktop/InfoPanel')['value']['rect']
+out['areaBoth'] = err(op('area', path='/Desktop/InfoPanel', window='info'))
 print(json.dumps(out))
 `;
 
@@ -400,3 +464,44 @@ test("the agent's finding, clicking, menus, messages, eval truth and rpc (Python
   assert.equal(out.rpcErrorEvents, 0, "a refused call is its caller's alone");
   assert.deepEqual(out.pingUi, [1280, 720]);
 });
+
+test("v11: windows scope the finders; clicks strip markup, match the click target, skip what takes no click; vars, inspect, area (Python 3, stub client)",
+  { skip: !PYTHON && "no Python 3" }, () => {
+    const out = run();
+    const console_ = "/Desktop/LuCorpConsole";
+    // Windows.
+    assert.match(out.editBoth, /2 nodes match/, "two windows each have a search box");
+    assert.equal(out.editInConsole, `${console_}/amount`);
+    assert.equal(out.editByCaption, "/Desktop/InfoPanel/search", "a window by its caption, contains");
+    assert.match(out.windowMissing, /no window "Nope"; the open windows are: LuCorpConsole \(Window\), infoPanel \(Window\)/);
+    assert.deepEqual(out.uiInWindow, [`${console_}/header`, `${console_}/membersTab/EveLabelMedium`]);
+    assert.equal(out.uiWindowTree, "search", "a window's tree starts at the window");
+    // Clicks.
+    assert.equal(out.pctClick, `${console_}/pct`, "\"75%\" finds \"<color>75</color>&nbsp;%\"");
+    assert.equal(out.optionalClick, `${console_}/optionalBox`, "the class is the click target's, the text its label's");
+    assert.equal(out.membersClick, `${console_}/membersTab`, "the header with no click handler is skipped");
+    assert.equal(out.membersFind, `${console_}/membersTab`, "find and click agree");
+    assert.equal(out.membersTargetPath, `${console_}/membersTab`, "find's target path with the text");
+    assert.deepEqual(out.clickDid, [["clickable", "pct"], ["clickable", "optionalBox"], ["tab", "membersTab"], ["tab", "membersTab"]]);
+    assert.equal(out.membersUi, 2, "ui still lists both");
+    // eval vars.
+    assert.equal(out.vars, 42);
+    assert.equal(out.varsKept, 21, "a var stays in the namespace like any name");
+    assert.match(out.varsReserved, /vars: sm is not a name eval can be given/);
+    // inspect.
+    const slider = out.inspect;
+    assert.equal(slider.name, "Slider");
+    assert.deepEqual(slider.importable, ["carbonui.control.reexport", "carbonui.control.slider"]);
+    assert.deepEqual(slider.defaults.map((row) => [row.name, row.value, row.from]),
+      [["default_align", "'toTop'", "Container"], ["default_state", "0", "Container"], ["default_value", "0.5", "Slider"]]);
+    assert.deepEqual(slider.methods, ["Make(*args, **kwargs)", "SetValue(self, value, animate=True)"]);
+    assert.deepEqual(slider.properties, ["value"]);
+    assert.equal(Object.values(slider.inherited)[0], 1, "inherited methods are counted by class");
+    assert.deepEqual(Object.values(out.inspectInherited)[0], ["SetSize"]);
+    assert.equal(out.inspectLoose, 1, "a name in another case still finds it");
+    assert.equal(out.inspectNone, 0);
+    // area.
+    assert.deepEqual(out.area, [[100, 100, 1180, 620], [1280, 720], 3], "cut to the desktop, after three frames");
+    assert.deepEqual(out.areaPath, [0, 0, 200, 300]);
+    assert.match(out.areaBoth, /a window or a path, not both/);
+  });

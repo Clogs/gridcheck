@@ -258,7 +258,7 @@ test("the lu plugin's server half assembles with parts of the mod missing, and i
   assert.equal(typeof hooks.annotate, "function");
   assert.equal(typeof hooks.offGrid.watch, "function");
   assert.deepEqual(Object.keys(hooks.routes).sort(),
-    ["GET /clock", "GET /economy", "POST /trigger/*", "POST /warp", "POST /warp/stop"]);
+    ["GET /client-module", "GET /clock", "GET /economy", "POST /trigger/*", "POST /warp", "POST /warp/stop"]);
   assert.equal(hooks.routes["GET /clock"]().statusCode, 503);
   assert.equal(hooks.routes["POST /trigger/*"]({ rest: "hunt", body: {} }).statusCode, 503);
   assert.equal(hooks.annotate({ itemID: 5 }, { row: { isSelf: true }, nowMs: 0, characterID: 7 }), null,
