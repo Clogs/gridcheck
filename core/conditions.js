@@ -45,6 +45,14 @@ const EVENT_FIELDS = Object.freeze({
     sourceID: "id", sourceLabel: "str", targetID: "id", targetLabel: "str", locked: "bool", groupKey: "str",
   },
   DAMAGE: { itemID: "id", label: "str", layer: "str", fromPct: "num", toPct: "num", groupKey: "str" },
+  // A module on a ship on grid turned on, off, or began a new activation since the last sample.
+  // reason: the stop reason of the activation that ended (cycle, ammo, ...), when the tree says.
+  MODULE: {
+    itemID: "id", label: "str", moduleID: "id", moduleName: "str", effectName: "str", on: "bool", restarted: "bool",
+    targetID: "id", targetLabel: "str", reason: "str", capPct: "num", groupKey: "str",
+  },
+  // A ship's capacitor: state is down (a quarter band lower), empty (5% or less) or full (refilled).
+  CAPACITOR: { itemID: "id", label: "str", state: "str", fromPct: "num", toPct: "num", groupKey: "str" },
   DESTROYED: {
     itemID: "id", label: "str", typeName: "str", typeID: "id", corporationID: "id", characterID: "id", self: "bool",
     who: "str", wreckID: "id", wreckLabel: "str", distanceMeters: "m", groupKey: "str",
@@ -72,7 +80,7 @@ const EVENT_FIELDS = Object.freeze({
   },
   CLIENT_EVENT: {
     username: "str", characterID: "id", event: "str", args: "str", op: "str", error: "str", count: "num",
-    clientSeq: "num", clientAtMs: "ms",
+    clientSeq: "num", clientAtMs: "ms", key: "str", text: "str", messageType: "str",
   },
   // The client's ballpark against the server's grid for its character: a
   // scenario's clientDiff step, the whole diff in one line.
@@ -116,7 +124,7 @@ const EVENT_FIELDS = Object.freeze({
 const KINDS = Object.freeze(Object.keys(EVENT_FIELDS));
 
 // The core kinds that carry the plugins' data about a ball, at ext.<plugin>.
-const EXT_KINDS = Object.freeze(["PRESENT", "ARRIVE", "LEAVE", "MODE", "DECISION", "TARGET", "DAMAGE", "DESTROYED", "KILLMAIL"]);
+const EXT_KINDS = Object.freeze(["PRESENT", "ARRIVE", "LEAVE", "MODE", "DECISION", "TARGET", "DAMAGE", "MODULE", "CAPACITOR", "DESTROYED", "KILLMAIL"]);
 
 // Per registry: every kind's fields, plugin kinds and plugin data included.
 const TABLES = new WeakMap();

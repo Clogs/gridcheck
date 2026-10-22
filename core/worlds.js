@@ -14,6 +14,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 
 const { loadTreeConfig } = require("./treeConfig");
+const { runQuery: runItemsQuery } = require("./worldItems");
 
 const NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 // A scenario's "world": "fresh" boots a new game store, so no saved world may take the name.
@@ -266,6 +267,53 @@ function dirBytes(dir) {
   return fs.readdirSync(dir).reduce((sum, file) => sum + fs.statSync(path.join(dir, file)).size, 0);
 }
 
+// `world items` from the game store file, opened read-only. The store keeps
+// each item as a row of the `items` table: key (the itemID) and json. A server
+// that is running keeps recent changes in memory, so this can lag behind it.
+// query: core/worldItems.js parseQuery's; typeName(typeID) -> name or null.
+function readItems(file, query, { typeName = () => null } = {}) {
+  if (!fs.existsSync(file)) return { ok: false, error: `no game store at ${file}` };
+  const db = openDatabase(file, { readOnly: true });
+  try {
+    if (!db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'items'").get()) {
+      return { ok: false, error: `${file} has no items table; is it a game store?` };
+    }
+    const parse = (row) => {
+      try {
+        return JSON.parse(row.json);
+      } catch (_error) {
+        return null;
+      }
+    };
+    const inLocation = db.prepare("SELECT json FROM items WHERE json_extract(json, '$.locationID') = ?");
+    const byKey = db.prepare("SELECT json FROM items WHERE key = ?");
+    const byField = db.prepare("SELECT json FROM items WHERE json_extract(json, '$.itemID') = ?");
+    return runItemsQuery({
+      item: (id) => {
+        const row = byKey.get(String(id)) || byField.get(id);
+        return row ? parse(row) : null;
+      },
+      inLocation: (id) => inLocation.all(id).map(parse).filter(Boolean),
+      // One scan per 500 containers, however many rows are listed.
+      contentsCounts: (ids) => {
+        const counts = new Map();
+        for (let start = 0; start < ids.length; start += 500) {
+          const chunk = ids.slice(start, start + 500);
+          const rows = db.prepare(
+            "SELECT json_extract(json, '$.locationID') AS location, COUNT(*) AS n FROM items " +
+            `WHERE json_extract(json, '$.locationID') IN (${chunk.map(() => "?").join(",")}) GROUP BY location`,
+          ).all(...chunk);
+          for (const row of rows) counts.set(Number(row.location), Number(row.n));
+        }
+        return counts;
+      },
+      typeName,
+    }, query);
+  } finally {
+    db.close();
+  }
+}
+
 module.exports = {
   FRESH,
   clearOwnerLeases,
@@ -273,6 +321,7 @@ module.exports = {
   freshWorld,
   listWorlds,
   liveLeases,
+  readItems,
   restoreWorld,
   retryLocked,
   runHook,

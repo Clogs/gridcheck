@@ -137,7 +137,7 @@ function eventBody(event, registry) {
   const tags = () => pluginTags(event, registry);
   switch (event.kind) {
     case "START":
-      return [`character ${event.characterID}, ${Math.round(event.forMs / 1000)}s, sample every ` +
+      return [`${event.at ? `around ${event.at}` : `character ${event.characterID}`}, ${Math.round(event.forMs / 1000)}s, sample every ` +
         `${event.everyMs / 1000}s, off grid every ${event.offGridEveryMs / 1000}s`,
       [event.clientOff ? `client=off (${event.clientOff})` : event.clientMode ? `client=${event.clientMode}` : "",
         event.warpOff ? `warp-landing check off (${event.warpOff})` : "",
@@ -153,6 +153,9 @@ function eventBody(event, registry) {
       return [`${event.noise ? `(noise: ${event.noise}) ` : ""}${event.username || "client"}: ${event.type || "?"}: ${event.message || ""}`.slice(0, 200),
         [event.where, event.extra].filter(Boolean).join("; ").slice(0, 200)];
     case "CLIENT_EVENT":
+      if (event.event === "message") {
+        return [`${event.username || "client"}: message${event.key ? ` ${event.key}` : ""}: ${event.text || ""}`.slice(0, 200), event.messageType ? String(event.messageType) : ""];
+      }
       return [`${event.username || "client"}: ${event.event || "?"}` +
         `${event.op ? ` (${event.op})` : ""}${event.count ? ` ${event.count}` : ""}`,
       String(event.error || event.args || "").slice(0, 200)];
@@ -179,6 +182,15 @@ function eventBody(event, registry) {
     case "DIVERGE":
       return divergeBody(event);
     case "GRID": {
+      if (event.anchor) {
+        const anchor = event.anchor;
+        const place = event.systemName || event.systemID;
+        const security = Number.isFinite(Number(event.security)) && event.security !== null
+          ? ` (${Number(event.security).toFixed(1)})` : "";
+        return [`${place}${security}  anchor: ${anchor.name || anchor.typeName || `#${anchor.itemID}`} ` +
+          `(${anchor.mode || "?"}), ${event.tracked} ball(s)`,
+        anchor.rangeMeters ? `within ${distanceText(anchor.rangeMeters)}` : ""];
+      }
       const self = event.self || {};
       const protection = self.protection && self.protection.active
         ? (self.protection.remainingMs > 0 ? `, protected ${Math.ceil(self.protection.remainingMs / 1000)}s` : ", protected")
@@ -209,13 +221,23 @@ function eventBody(event, registry) {
       return [`${event.sourceLabel} -> ${event.targetLabel} (${event.locked ? "locked" : "unlocked"})`, tags()];
     case "DAMAGE":
       return [`${event.label} ${event.layer} ${event.fromPct} -> ${event.toPct}`, tags()];
+    case "MODULE": {
+      const what = event.moduleName || event.effectName || `module #${event.moduleID}`;
+      const target = event.targetLabel ? ` on ${event.targetLabel}` : "";
+      const verb = event.restarted ? "restarted" : event.on ? "on" : "off";
+      const cap = event.capPct !== null && event.capPct !== undefined ? `  cap ${Math.round(event.capPct)}%` : "";
+      return [`${event.label}  ${what} ${verb}${target}${event.reason ? ` (${event.reason})` : ""}${cap}`, tags()];
+    }
+    case "CAPACITOR":
+      return [`${event.label} cap ${event.state === "full" ? "full" : event.state === "empty" ? "empty" : "down"} ` +
+        `${event.fromPct} -> ${event.toPct}`, tags()];
     case "DESTROYED":
       return [`${event.label}${event.typeName && event.label !== event.typeName ? ` (${event.typeName})` : ""} ` +
         `wreck #${event.wreckID}`, tags()];
     case "KILLMAIL":
       return [`${event.label} killmail ${event.killID}`, tags()];
     case "MOVED":
-      return [`self moved ${distanceText(event.distanceMeters)} to a new grid`, ""];
+      return [`${event.anchor ? "anchor" : "self"} moved ${distanceText(event.distanceMeters)} to a new grid`, ""];
     case "SYSTEM":
       return [`self now in ${event.toSystemName || event.toSystemID}`, ""];
     case "SELF":
@@ -246,7 +268,7 @@ function eventBody(event, registry) {
           return null;
         }
       }).filter(Boolean).map((text) => `${text} `).join("");
-      return [`${event.reason}: ${event.samples} samples, ${event.events} events`,
+      return [`${event.reason}${event.detail ? ` (${event.detail})` : ""}: ${event.samples} samples, ${event.events} events`,
         `sample ${costs.sampleMsAvg}/${costs.sampleMsMax} ms, off grid ${costs.offGridMsAvg}/${costs.offGridMsMax} ms ` +
         `${extra}(avg/max)${client}`];
     }

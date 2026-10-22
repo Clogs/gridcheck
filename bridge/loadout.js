@@ -6,7 +6,9 @@
 // built from the stock helpers the /ship-style dev commands use
 // (services/ship/devCommandShipRuntime and the modules it reads), the same
 // way stock stages a preset hull: made in a station hangar, the modules fitted
-// from there, then boarded. The format is core/loadout.js.
+// from there, then boarded. With `into` it isn't boarded: it is moved, fitted,
+// to a station hangar or a corporation office division. The format is
+// core/loadout.js.
 
 const { normalizeLoadout } = require("../core/loadout");
 const { slotOf } = require("../core/actions");
@@ -29,6 +31,23 @@ const LOADOUT_EXPORTS = Object.freeze({
   location: ["services/structure/structureLocation", ["getDockedLocationID", "isDockedSession"]],
 });
 
+// What only `into` reads: where a ship can be left, the move, and who is told.
+// A tree without these refuses `into` and still builds and boards a loadout.
+// Every export is in stock EveJS 0.12.9 and the LU fork; the probe checks this
+// table too, and reports it apart from LOADOUT_EXPORTS.
+const LOADOUT_INTO_EXPORTS = Object.freeze({
+  intoItemStore: ["services/inventory/itemStore", ["transferItemToOwnerLocation"]],
+  stations: ["space/worldData", ["getStationByID"]],
+  structures: ["services/structure/structureState", ["getStructureByID"]],
+  corporations: ["services/corporation/corporationRuntimeState", ["ensureRuntimeInitialized"]],
+  officeObservers: ["services/inventory/corporationOfficeInventoryObservers", ["fanCorporationOfficeInventoryChanges"]],
+  sessions: ["services/chat/sessionRegistry", ["findSessionByCharacterID"]],
+});
+
+// Hangar divisions of a corporation office: flagCorpSAG1 through flagCorpSAG7.
+const FIRST_DIVISION_FLAG = 115;
+const LAST_DIVISION_FLAG = 121;
+
 // Inventory categories a loadout list may name.
 const CATEGORY = Object.freeze({ ship: 6, module: 7, charge: 8, drone: 18, subsystem: 32 });
 const LIST_CATEGORIES = Object.freeze({
@@ -40,11 +59,12 @@ const LIST_CATEGORIES = Object.freeze({
 
 const toInt = (value) => Math.trunc(Number(value) || 0);
 
-// load(relativePath) -> the module; the bridge passes serverRequire.
-function loadLoadoutModules(load) {
+// load(relativePath) -> the module; the bridge passes serverRequire. table is
+// { key: [path, [export names]] }, as LOADOUT_EXPORTS.
+function loadModuleTable(table, load) {
   const modules = {};
   const missing = [];
-  for (const [key, [relativePath, names]] of Object.entries(LOADOUT_EXPORTS)) {
+  for (const [key, [relativePath, names]] of Object.entries(table)) {
     let loaded = null;
     try {
       loaded = load(relativePath);
@@ -59,12 +79,16 @@ function loadLoadoutModules(load) {
   return { modules, missing };
 }
 
+const loadLoadoutModules = (load) => loadModuleTable(LOADOUT_EXPORTS, load);
+const loadIntoModules = (load) => loadModuleTable(LOADOUT_INTO_EXPORTS, load);
+
 function failure(statusCode, error, extra = {}) {
   return { statusCode, body: { ok: false, error, ...extra } };
 }
 
-// m: the modules above, loaded. -> (session, body) -> { statusCode, body }
-function createLoadout(m) {
+// m: the modules of both tables, loaded. intoMissing: what LOADOUT_INTO_EXPORTS
+// couldn't load, which refuses `into` alone. -> (session, body) -> { statusCode, body }
+function createLoadout(m, { intoMissing = [] } = {}) {
   const sameName = (query, entry) => String(entry && entry.name || "").toLowerCase() === String(query).toLowerCase();
 
   // Only an exact name or a type ID counts; a near miss is reported with what
@@ -167,9 +191,63 @@ function createLoadout(m) {
     return toInt(record.homeStationID || record.cloneStationID || session.stationid || session.stationID);
   }
 
+  // Every office whose itemID (the ID the client opens it by), officeID or
+  // folder ID is this one. The three are separate counters, so two offices can
+  // share a number.
+  function officesNamed(locationID) {
+    const table = m.corporations.ensureRuntimeInitialized();
+    const found = [];
+    for (const runtime of Object.values((table && table.corporations) || {})) {
+      for (const office of Object.values((runtime && runtime.offices) || {})) {
+        if (office && [office.itemID, office.officeID, office.officeFolderID].some((id) => toInt(id) === locationID)) found.push(office);
+      }
+    }
+    return found;
+  }
+
+  // Where `into` leaves the ship, or why it can't be left there. Reads only.
+  // A station or structure hangar holds a character's ships, any character's;
+  // an office holds its corporation's, in division 1 (flag 115) unless a flag
+  // names another. The character needn't be in that corporation or docked there.
+  function placementFor(characterID, spec) {
+    const locationID = spec.into;
+    const hangarFlag = toInt(m.itemStore.ITEM_FLAGS.HANGAR);
+    if (m.stations.getStationByID(locationID) || m.structures.getStructureByID(locationID, { refresh: false })) {
+      const ownerID = spec.owner || characterID;
+      if (!m.character.getCharacterRecord(ownerID)) {
+        return { problem: `owner ${ownerID} is not a character; a station hangar holds a character's ships ` +
+          "(a corporation's are in its office: pass the office's ID as into)" };
+      }
+      if (spec.flag && spec.flag !== hangarFlag) return { problem: `flag ${spec.flag}: a ship in a station hangar is at flag ${hangarFlag}` };
+      return { placement: { kind: "hangar", locationID, ownerID, flagID: hangarFlag, stationID: locationID,
+        description: `character ${ownerID}'s hangar in station ${locationID}` } };
+    }
+    const offices = officesNamed(locationID);
+    if (!offices.length) {
+      return { problem: `${locationID} is not a station, a structure or a corporation office (an office is named by the ID the client opens it by)` };
+    }
+    if (offices.length > 1) return { problem: `${locationID} names more than one corporation office` };
+    const office = offices[0];
+    const corporationID = toInt(office.corporationID);
+    if (office.impounded) return { problem: `corporation ${corporationID}'s office ${locationID} is impounded` };
+    if (spec.owner && spec.owner !== corporationID) {
+      return { problem: `owner ${spec.owner}: office ${locationID} is corporation ${corporationID}'s, and a ship in it is the corporation's; leave owner out` };
+    }
+    const flagID = spec.flag || FIRST_DIVISION_FLAG;
+    if (flagID < FIRST_DIVISION_FLAG || flagID > LAST_DIVISION_FLAG) {
+      return { problem: `flag ${flagID}: an office's hangar divisions are flags ${FIRST_DIVISION_FLAG} through ${LAST_DIVISION_FLAG}, division 1 first` };
+    }
+    const stationID = toInt(office.stationID);
+    return { placement: { kind: "office", locationID, ownerID: corporationID, flagID, stationID, corporationID,
+      description: `corporation ${corporationID}'s office ${locationID} in station ${stationID}, hangar division ${flagID - FIRST_DIVISION_FLAG + 1} (flag ${flagID})` } };
+  }
+
   return function loadout(session, raw) {
     const { loadout: spec, problems } = normalizeLoadout(raw);
     if (!spec) return failure(400, problems.join("; "));
+    if (spec.into && intoMissing.length) {
+      return failure(503, `into isn't available in this tree: ${intoMissing.join("; ")}; nothing was changed`, { intoMissing });
+    }
     const characterID = toInt(session.characterID);
 
     const unknown = [];
@@ -203,9 +281,16 @@ function createLoadout(m) {
     const plan = planFit(characterID, ship.type, resolved.modules);
     if (plan.problem) return failure(409, `the fit can't be built on a ${ship.type.name}; nothing was changed`, { fit: plan.problem });
 
+    let placement = null;
+    if (spec.into) {
+      const found = placementFor(characterID, spec);
+      if (found.problem) return failure(409, `the ship can't be left there: ${found.problem}; nothing was changed`, { into: found.problem });
+      placement = found.placement;
+    }
+
     const docked = Boolean(m.location.isDockedSession(session)) || toInt(m.location.getDockedLocationID(session)) > 0;
     const systemID = toInt(session._space && session._space.systemID);
-    if (!docked && !systemID) return failure(409, "the character is neither docked nor in space; nothing was changed");
+    if (!placement && !docked && !systemID) return failure(409, "the character is neither docked nor in space; nothing was changed");
     const locationID = stagingLocation(session, docked);
     if (!locationID) return failure(409, "no station to build the ship in (not docked, and no home or clone station)");
 
@@ -278,7 +363,32 @@ function createLoadout(m) {
     }
 
     let replacedShipID = null;
-    if (docked) {
+    if (placement) {
+      // Built in the character's hangar, where stock's fitting helpers work,
+      // then moved whole. reownContents hands the fitted modules, charges,
+      // drones and cargo to the new owner with the hull, as stock's own
+      // inventory broker does for a hand-off between owners.
+      const inPlace = placement.locationID === locationID && placement.ownerID === characterID
+        && placement.flagID === toInt(ITEM_FLAGS.HANGAR);
+      if (!inPlace) {
+        const moved = m.intoItemStore.transferItemToOwnerLocation(shipItem.itemID, placement.ownerID, placement.locationID,
+          placement.flagID, null, { reownContents: true });
+        if (!moved || !moved.success) {
+          return stopped(`made it, but moving it to ${placement.description} failed: ${(moved && moved.errorMsg) || "MOVE_FAILED"}; ` +
+            `it is in the character's hangar in ${locationID}`);
+        }
+        const changes = moved.data && moved.data.changes;
+        if (sync) syncChanges(session, changes);
+        if (placement.kind === "office") {
+          // The corporation's other members with that office open; this session was synced above.
+          m.officeObservers.fanCorporationOfficeInventoryChanges(changes, { excludeSessions: sync ? [session] : [] });
+        } else if (placement.ownerID !== characterID) {
+          const owner = m.sessions.findSessionByCharacterID(placement.ownerID);
+          if (owner && toInt(m.location.getDockedLocationID(owner)) === placement.stationID) syncChanges(owner, changes);
+        }
+        done.push(`moved to ${placement.description}`);
+      }
+    } else if (docked) {
       const boarded = m.character.activateShipForSession(session, shipItem.itemID, { emitNotifications: true, logSelection: false });
       if (!boarded || boarded.success !== true) return stopped(`made it, but boarding failed: ${(boarded && boarded.errorMsg) || "BOARD_FAILED"}`);
     } else {
@@ -298,10 +408,15 @@ function createLoadout(m) {
         ok: true,
         ship: { itemID: toInt(shipItem.itemID), typeID: toInt(ship.type.typeID), name: String(ship.type.name) },
         docked,
-        locationID: docked ? locationID : null,
-        systemID: docked ? null : systemID,
+        locationID: !placement && docked ? locationID : null,
+        systemID: !placement && !docked ? systemID : null,
         stagedIn: locationID,
         replacedShipID,
+        ...(placement ? { placed: {
+          kind: placement.kind, locationID: placement.locationID, ownerID: placement.ownerID, flagID: placement.flagID,
+          stationID: placement.stationID, description: placement.description,
+          ...(placement.corporationID ? { corporationID: placement.corporationID } : {}),
+        } } : {}),
         modules: fittedModules.map((module) => {
           const load = loads.find((entry) => entry.module === module);
           return {
@@ -326,6 +441,9 @@ function createLoadout(m) {
 module.exports = {
   CATEGORY,
   LOADOUT_EXPORTS,
+  LOADOUT_INTO_EXPORTS,
   createLoadout,
+  loadIntoModules,
   loadLoadoutModules,
+  loadModuleTable,
 };

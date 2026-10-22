@@ -603,7 +603,7 @@ print(json.dumps({'replies': replies, 'hellos': hellos, 'batches': batches, 'log
     [36, true], [37, true]], JSON.stringify(replies.filter((reply) => !reply.ok).map((reply) => [reply.id, reply.error.trim().split("\n").pop()])));
 
   assert.deepEqual([hellos.length, hellos[0].agent, hellos[0].build, hellos[0].checkedBuild, typeof hellos[0].pid],
-    [1, 9, 3396210, 3396210, "number"]);
+    [1, 10, 3396210, 3396210, "number"]);
   assert.match(byID[28].error, /ui uses client code checked against build 3396210; this client is build 3400000/,
     "another build: ops that use client names refuse, eval and anyBuild still run");
   assert.equal(byID[1].value.session.charid, 90000001);

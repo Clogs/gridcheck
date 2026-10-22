@@ -7,8 +7,13 @@
 //   GET  /health                     liveness, no token
 //   POST /slash    { characterID, command }  -> { handled, success, message }
 //   GET  /grid     ?characterID=      what that character's session can see
-//   POST /watch    { characterID, forSeconds, everySeconds, offGridEverySeconds, client, divergeMeters, positions,
-//                    perfEverySeconds }
+//   GET  /grid     ?at=<itemID>       the same rows around any entity, no character needed; &range=<km> sets the reach
+//   GET  /inspect  ?itemID=           one entity: capacitor, running modules, locks, NPC controller, plugin data;
+//                                     no character needed
+//   POST /watch    { characterID | at, forSeconds, everySeconds, offGridEverySeconds, client, divergeMeters, positions,
+//                    perfEverySeconds, modules }
+//                                     at: an itemID to watch around instead of a character (no session, no client
+//                                     view). modules: false leaves out MODULE and CAPACITOR events.
 //                                     NDJSON stream of grid changes and plugin events; one call per watch.
 //                                     client: "all" (default), "diverge" or "off". perfEverySeconds adds a PERF
 //                                     window that often, and the tick profiler's PROFILE windows (perf.js)
@@ -16,8 +21,12 @@
 //   POST /perf     { seconds }        sample that long, then the ticks, CPU, loop delay and profiler windows
 //   POST /tee      { characterID }    start keeping the client's view of that gateway session
 //   POST /loadout  { characterID, ship, modules, drones, cargo, charges }
-//                                     a new ship by item name, fitted and boarded (loadout.js)
-//   POST /shutdown                    graceful stop, as if the process got SIGTERM
+//                                     a new ship by item name, fitted and boarded (loadout.js); with
+//                                     into [, owner, flag] it is left in a station or corp office instead
+//   GET  /items    ?location= | ?item= [&owner=&flag=&type=&limit=]
+//                                     read-only: what sits in a place, or one item and what's in it,
+//                                     from the live item store (items.js); no character needed
+//   POST /shutdown                   graceful stop, as if the process got SIGTERM
 //   GET  /capabilities ?characterID=  what this tree can do for the tool (core/capabilities.js);
 //                                     with characterID, also that session's shape
 //
@@ -26,6 +35,7 @@
 
 const { LIMITS } = require("./watch");
 const { LIMITS: PERF_LIMITS } = require("./perf");
+const { parseQuery: parseItemsQuery } = require("../core/worldItems");
 
 function toPositiveInt(value) {
   const numeric = Math.trunc(Number(value) || 0);
@@ -87,7 +97,10 @@ function createRouteTable(log) {
 
 function createAgentBridgeRoutes({
   findSession, executeChatCommand, readGrid, watcher, requestShutdown, log, destinyTee = null, gridAnnotate = null,
-  viewer = null, extraRoutes = [], capabilities = null, loadout = null, perf = null,
+  viewer = null, extraRoutes = [], capabilities = null, loadout = null, perf = null, items = null,
+  // Without a session: readGridAt(itemID, options) -> grid | null, inspector.inspect(itemID) -> { statusCode, body }
+  // and explainAnchor(itemID) -> why there is no such entity.
+  readGridAt = null, inspector = null, explainAnchor = null,
 }) {
   const logger = log || { debug() {} };
 
@@ -134,7 +147,36 @@ function createAgentBridgeRoutes({
 
   // ?ext=1 runs the plugins' annotate hooks on each row, so a player action
   // can pick its target by a plugin's data or a group a step bound.
+  function gridAt(query) {
+    const at = toPositiveInt(query.at);
+    if (!at) return { statusCode: 400, body: { ok: false, error: "at must be a positive itemID." } };
+    if (typeof readGridAt !== "function") {
+      return { statusCode: 503, body: { ok: false, error: "This server cannot read a grid around an entity." } };
+    }
+    const rangeKm = query.range === undefined || query.range === "" ? null : Number(query.range);
+    if (rangeKm !== null && !(rangeKm > 0)) {
+      return { statusCode: 400, body: { ok: false, error: "range must be a positive number of km." } };
+    }
+    const options = {
+      ...(rangeKm ? { rangeMeters: rangeKm * 1000 } : {}),
+      ...(query.ext === "1" && typeof gridAnnotate === "function" ? { annotate: (row, entity) => gridAnnotate(row, entity, null) } : {}),
+    };
+    const grid = readGridAt(at, options);
+    if (!grid) return { statusCode: 404, body: { ok: false, error: explain(at) } };
+    return { statusCode: 200, body: { ok: true, grid } };
+  }
+
+  function explain(itemID) {
+    return (typeof explainAnchor === "function" ? explainAnchor(itemID) : null) || `No entity ${itemID} in a loaded scene.`;
+  }
+
+  function inspect(query) {
+    if (!inspector) return { statusCode: 503, body: { ok: false, error: "This server has no inspector loaded." } };
+    return inspector.inspect(query.itemID);
+  }
+
   function grid(query) {
+    if (query && query.at !== undefined && query.at !== "") return gridAt(query);
     const found = sessionFor(query && query.characterID);
     if (found.error) return found.error;
     const wantsExt = query && query.ext === "1";
@@ -146,10 +188,24 @@ function createAgentBridgeRoutes({
   // Answers { statusCode, stream(sink) }: the HTTP layer writes each event as
   // one JSON line until the watch ends or the caller hangs up.
   function watch(body) {
-    const found = sessionFor(body && body.characterID);
-    if (found.error) return found.error;
+    const hasAt = body && body.at !== undefined && body.at !== null && body.at !== "";
+    const at = hasAt ? toPositiveInt(body.at) : 0;
+    if (hasAt && !at) return { statusCode: 400, body: { ok: false, error: "at must be a positive itemID." } };
+    if (at && toPositiveInt(body.characterID)) {
+      return { statusCode: 400, body: { ok: false, error: "Give characterID or at, not both." } };
+    }
+    if (!at) {
+      const found = sessionFor(body && body.characterID);
+      if (found.error) return found.error;
+    }
     if (!watcher) {
       return { statusCode: 503, body: { ok: false, error: "This server has no grid watcher loaded." } };
+    }
+    if (at && typeof readGridAt !== "function") {
+      return { statusCode: 503, body: { ok: false, error: "This server cannot read a grid around an entity." } };
+    }
+    if (body.modules !== undefined && typeof body.modules !== "boolean") {
+      return { statusCode: 400, body: { ok: false, error: "modules must be true or false." } };
     }
     const forSeconds = secondsIn(body.forSeconds, 600, 1, LIMITS.maxForSeconds);
     const everySeconds = secondsIn(body.everySeconds, 2, LIMITS.minEverySeconds, LIMITS.maxEverySeconds);
@@ -187,11 +243,15 @@ function createAgentBridgeRoutes({
       return { statusCode: 429, body: { ok: false, error: `${LIMITS.maxConcurrent} watches are already running.` } };
     }
     const characterID = toPositiveInt(body.characterID);
-    logger.debug(`[AgentBridge] watch ${characterID} for ${forSeconds}s every ${everySeconds}s client=${clientMode}`);
+    // Fail now, with the reason, rather than as an END line after a 200.
+    if (at && !readGridAt(at, { rangeMeters: 1 })) return { statusCode: 404, body: { ok: false, error: explain(at) } };
+    logger.debug(`[AgentBridge] watch ${at ? `around ${at}` : characterID} for ${forSeconds}s every ${everySeconds}s client=${clientMode}`);
     return {
       statusCode: 200,
       stream: (sink) => watcher.run({
-        characterID,
+        characterID: at ? null : characterID,
+        ...(at ? { at } : {}),
+        ...(body.modules === false ? { modules: false } : {}),
         forMs: forSeconds * 1000,
         everyMs: everySeconds * 1000,
         offGridEveryMs: offGridEverySeconds * 1000,
@@ -232,6 +292,21 @@ function createAgentBridgeRoutes({
     }
   }
 
+  // items: () -> the reader, or { error } when this tree lacks what it needs.
+  function readItems(query) {
+    const reader = typeof items === "function" ? items() : null;
+    if (!reader || typeof reader.run !== "function") {
+      return { statusCode: 503, body: { ok: false, error: `This tree can't read items: ${(reader && reader.error) || "not loaded"}.` } };
+    }
+    const { query: parsed, problems } = parseItemsQuery(query);
+    if (problems.length) return { statusCode: 400, body: { ok: false, error: problems.join("; ") } };
+    try {
+      return reader.run(parsed);
+    } catch (error) {
+      return { statusCode: 500, body: { ok: false, error: `items failed: ${error.message}` } };
+    }
+  }
+
   // GET answers at once from the runtime's ring; POST samples for `seconds`.
   function perfRoute(method, body) {
     if (!perf) return { statusCode: 503, body: { ok: false, error: "This server has no perf monitor loaded." } };
@@ -256,9 +331,11 @@ function createAgentBridgeRoutes({
   const table = createRouteTable({ warn: (message) => typeof logger.warn === "function" && logger.warn(message) });
   table.add("POST /slash", ({ body }) => slash(body), "core");
   table.add("GET /grid", ({ query }) => grid(query), "core");
+  table.add("GET /inspect", ({ query }) => inspect(query), "core");
   table.add("POST /watch", ({ body }) => watch(body), "core");
   table.add("POST /tee", ({ body }) => tee(body), "core");
   table.add("POST /loadout", ({ body }) => buildLoadout(body), "core");
+  table.add("GET /items", ({ query }) => readItems(query), "core");
   table.add("POST /shutdown", () => shutdown(), "core");
   table.add("GET /perf", () => perfRoute("GET", {}), "core");
   table.add("POST /perf", ({ body }) => perfRoute("POST", body), "core");

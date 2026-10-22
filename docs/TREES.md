@@ -52,6 +52,7 @@ node tools/gridcheck/bin/gridcheck.js init --force          # replace an existin
 | --- | --- | --- |
 | `mode` | `auto`, `attach` or `managed` | `auto` |
 | `serverDir`, `start` | where the server is, and its `npm start` command as argv | `server`, read from `server/package.json` |
+| `node` | the node executable `gridcheck up` runs the server with, relative to the tree or absolute; `GRIDCHECK_NODE` overrides it | the CLI's own node, or the first on `PATH` when that is an Electron app's |
 | `dataDir` | the generated reference data | `_local/gameStore/data` |
 | `gameStore`, `manifest` | the world and its manifest, beside the data dir | `_local/gameStore/` |
 | `dataRoot`, `logFile` | the server's data root and its log | `_local`, `_local/logs/server.log` |

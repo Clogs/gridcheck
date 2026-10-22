@@ -6,6 +6,14 @@
 //
 // Read-only. It calls the scene's visibility query the gateway's snapshot
 // calls and never steps or mutates the scene.
+//
+// readGridAt reads the same rows around any entity instead, with no session:
+// nobody has to be logged in to the system, so reading it adds no player to it.
+
+const { activeModulesOf, capacitorPctOf, createEntityLocator, simTimeOf } = require("./entities");
+
+// How far from the anchor readGridAt looks: the stock public-grid box.
+const AT_RANGE_METERS = 7_864_320;
 
 function toPositiveInt(value) {
   const numeric = Math.trunc(Number(value) || 0);
@@ -49,13 +57,15 @@ function describeProtection(entity, simNowMs) {
 
 // npcDecision(entity): the branch an NPC's last think took, where the tree
 // records one (the last-decision patch), else null.
-function createGridReader({ space, projectEntity, describeType, describeSystem, npcDecision = null }) {
+// locate: the entity locator readGridAt finds its anchor with (entities.js).
+function createGridReader({ space, projectEntity, describeType, describeSystem, npcDecision = null, locate = null }) {
   if (!space || typeof space.getSceneForSession !== "function") {
     throw new TypeError("createGridReader needs a space runtime with getSceneForSession");
   }
   if (typeof projectEntity !== "function") {
     throw new TypeError("createGridReader needs projectEntity");
   }
+  const locator = locate || createEntityLocator({ space, describeSystem });
   const typeName = (typeID) => {
     if (!typeID || typeof describeType !== "function") return null;
     try {
@@ -72,6 +82,15 @@ function createGridReader({ space, projectEntity, describeType, describeSystem, 
       return { name: null, security: null };
     }
   };
+
+  // What the gateway projection leaves out and a ship's state turns on: the
+  // capacitor and the modules running. Other entities get neither key.
+  function addRuntimeFields(row, entity) {
+    const capacitorPct = capacitorPctOf(entity);
+    if (capacitorPct === null && entity.kind !== "ship" && !(entity.activeModuleEffects instanceof Map)) return;
+    row.capacitorPct = capacitorPct;
+    row.activeModules = activeModulesOf(entity, describeType);
+  }
 
   // options.annotate(row, entity) lets a caller add fields from the live
   // entity, which the gateway projection leaves out. `gridcheck watch` uses it.
@@ -125,6 +144,7 @@ function createGridReader({ space, projectEntity, describeType, describeSystem, 
         const decision = npcDecision(entity);
         if (decision) row.decision = decision;
       }
+      addRuntimeFields(row, entity);
       if (annotate) annotate(row, entity);
       rows.push(row);
     }
@@ -133,6 +153,7 @@ function createGridReader({ space, projectEntity, describeType, describeSystem, 
       if (row) {
         row.typeName = typeName(row.typeID);
         row.distanceMeters = 0;
+        addRuntimeFields(row, ego);
         if (annotate) annotate(row, ego);
         rows.push(row);
       }
@@ -158,10 +179,86 @@ function createGridReader({ space, projectEntity, describeType, describeSystem, 
     return grid;
   }
 
-  return { readGrid };
+  // The grid around one entity, read from its scene with no session. Stock
+  // decides what a session sees from its public grid, bubbles and dungeon
+  // scopes; this takes what lies within options.rangeMeters of the anchor,
+  // dynamic and static entities alike, cloaked ones too. The anchor takes the
+  // "self" part for distances but is marked anchor: true, with isSelf false on
+  // every row, so nothing reads it as a player's ship. null: no such entity.
+  function readGridAt(anchorItemID, options = {}) {
+    const annotate = typeof options.annotate === "function" ? options.annotate : null;
+    const found = locator.find(anchorItemID);
+    if (!found) return null;
+    const { scene, entity: anchor } = found;
+    const rangeMeters = Number(options.rangeMeters) > 0 ? Number(options.rangeMeters) : AT_RANGE_METERS;
+    const solarSystemID = toPositiveInt(scene.systemID) || toPositiveInt(anchor.systemID);
+    const system = systemInfo(solarSystemID);
+    const simNowMs = simTimeOf(scene);
+    const anchorID = toPositiveInt(anchor.itemID);
+
+    const candidates = [];
+    if (Array.isArray(scene.staticEntities)) candidates.push(...scene.staticEntities);
+    if (scene.dynamicEntities && typeof scene.dynamicEntities.values === "function") {
+      candidates.push(...scene.dynamicEntities.values());
+    }
+    const rows = [];
+    const seen = new Set();
+    for (const entity of candidates) {
+      if (!entity || typeof entity !== "object") continue;
+      const isAnchor = toPositiveInt(entity.itemID) === anchorID;
+      const distance = isAnchor ? 0 : surfaceDistanceMeters(anchor, entity);
+      if (!isAnchor && (distance === null || distance > rangeMeters)) continue;
+      const row = projectEntity(entity, 0);
+      if (!row || seen.has(row.itemID)) continue;
+      seen.add(row.itemID);
+      row.isSelf = false;
+      if (isAnchor) row.anchor = true;
+      row.typeName = typeName(row.typeID);
+      row.distanceMeters = distance;
+      if (npcDecision && row.isNpc) {
+        const decision = npcDecision(entity);
+        if (decision) row.decision = decision;
+      }
+      addRuntimeFields(row, entity);
+      if (annotate) annotate(row, entity);
+      rows.push(row);
+    }
+    rows.sort((left, right) => {
+      const l = left.distanceMeters === null ? Infinity : left.distanceMeters;
+      const r = right.distanceMeters === null ? Infinity : right.distanceMeters;
+      return l - r || left.itemID - right.itemID;
+    });
+    const anchorRow = rows.find((row) => row.anchor) || null;
+    return {
+      characterID: null,
+      characterName: null,
+      solarSystemID: solarSystemID || null,
+      systemName: system.name,
+      security: system.security,
+      stationID: null,
+      structureID: null,
+      inSpace: true,
+      sampledAtMs: simNowMs,
+      rangeMeters,
+      anchor: {
+        itemID: anchorID || null,
+        kind: anchorRow ? anchorRow.kind : null,
+        typeID: anchorRow ? anchorRow.typeID : null,
+        typeName: anchorRow ? anchorRow.typeName : null,
+        name: anchorRow ? anchorRow.name : null,
+        mode: typeof anchor.mode === "string" ? anchor.mode : null,
+        protection: describeProtection(anchor, simNowMs),
+      },
+      self: null,
+      entities: rows,
+    };
+  }
+
+  return { readGrid, readGridAt };
 }
 
 module.exports = {
+  AT_RANGE_METERS,
   createGridReader,
   describeProtection,
   surfaceDistanceMeters,

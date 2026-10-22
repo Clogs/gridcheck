@@ -48,6 +48,8 @@ const net = require("node:net");
 const path = require("node:path");
 
 const { formatClock, formatGrid } = require("../core/format");
+const gridFilter = require("../core/gridFilter");
+const { formatInspect } = require("../core/inspect");
 const { collectIDs, createReorderBuffer, formatTimelineEvent, mentionsAny, parseLogLine } = require("../core/timeline");
 const { busyPorts, marketConfig, portsForTree, serverEnvironment, usableListeners } = require("../core/ports");
 const { DEFAULT_TREE_ROOT, defaultRegistry } = require("../core/plugins");
@@ -59,6 +61,7 @@ const frameTools = require("../core/frames");
 const perfTools = require("../core/perf");
 const actionTools = require("../core/actions");
 const loadoutTools = require("../core/loadout");
+const worldItemsTools = require("../core/worldItems");
 const recipeTools = require("../core/recipes");
 const vendor = require("../core/vendor");
 const patchEngine = require("../core/patches");
@@ -66,6 +69,9 @@ const agentTools = require("../core/agents");
 const clientTools = require("../core/client");
 const clientUiTools = require("../core/clientUi");
 const clientVisualTools = require("../core/clientVisual");
+const { nodeExecutable } = require("../core/node");
+const clientRecord = require("../core/clientRecord");
+const clientWaitTools = require("../core/clientWait");
 
 const REPO_ROOT = DEFAULT_TREE_ROOT;
 const REGISTRY = defaultRegistry();
@@ -95,7 +101,7 @@ const AUTO = MODE === "auto";
 
 const BOOLEAN_FLAGS = new Set(["all", "json", "any-pid", "force", "fresh", "no-market", "no-log", "help",
   "check", "keep-up", "reuse", "positions", "once", "serve", "offline", "dry-run", "profile", "perf", "now", "detach", "mcp", "save", "hidden",
-  "double", "set", "enter", "list", "any-build", "assert", "no-console",
+  "double", "set", "enter", "list", "any-build", "assert", "no-console", "keep-clients", "clients", "npc", "no-modules",
   ...REGISTRY.booleanFlags]);
 
 class CliError extends Error {}
@@ -622,6 +628,8 @@ async function cmdClient(positionals, flags) {
     if (!result.ok) process.exitCode = 1;
     return;
   }
+  // Before the bridge check: a client outlives a server stopped under it.
+  if (sub === "stop") return cmdClientStop(flags);
   const handshake = requireHandshake();
   if (sub === "status") {
     const { status, json: listed } = await requestJSON(`http://${handshake.host}:${handshake.port}/client/agents`, {
@@ -644,7 +652,6 @@ async function cmdClient(positionals, flags) {
     return;
   }
   if (sub === "launch") return clientLaunch(handshake, flags);
-  if (sub === "stop") return stopClient(handshake, await clientAgentRow(handshake, flags));
   if (sub === "ping") {
     const reply = await clientCommand("ping", {}, flags);
     json(reply.value);
@@ -822,13 +829,15 @@ async function cmdClient(positionals, flags) {
     const shot = await shootClient(agent, { out, maxWidth, format, source });
     if (shot.error) throw new CliError(`screenshot of the ${agent.username} client: ${shot.error}`);
     if (flags.json) return json(shot);
-    console.log(`saved ${relativePath(shot.file)} (${shot.width}x${shot.height}, ` +
+    console.log(`saved ${relativePath(shot.file)} (${clientTools.scaleText(shot)}, ` +
       `${shot.source === "client" ? "drawn by the client" : `its window${shot.title ? ` "${shot.title}"` : ""}`})`);
     return;
   }
-  if (["find", "click", "type", "key", "cmd", "act"].includes(sub)) return clientDrive(handshake, sub, rest, flags);
-  throw new CliError("client needs status, launch, stop, ping, eval, console, ui, ui-state, check-ui, screenshot, capture-frames, " +
-    `compare-images, compare-frames, ballpark, diff, events, find, click, type, key, cmd, pointer or act; got ${sub === undefined ? "nothing" : JSON.stringify(sub)}`);
+  if (sub === "wait") return clientWait(rest, flags);
+  if (sub === "rpc") return clientRpc(rest, flags);
+  if (["find", "click", "menu", "type", "key", "cmd", "act"].includes(sub)) return clientDrive(handshake, sub, rest, flags);
+  throw new CliError("client needs status, launch, stop, ping, eval, wait, rpc, console, ui, ui-state, check-ui, screenshot, capture-frames, " +
+    `compare-images, compare-frames, ballpark, diff, events, find, click, menu, type, key, cmd, pointer or act; got ${sub === undefined ? "nothing" : JSON.stringify(sub)}`);
 }
 
 // The agent names the build its client calls were checked against (bridge/client/agent.py CHECKED_BUILD).
@@ -854,6 +863,7 @@ async function stopClient(handshake, agent) {
   } catch (error) {
     throw new CliError(`couldn't end pid ${agent.pid}: ${error.message}`);
   }
+  clientRecord.forgetLaunched(E2E_DIR, agent.username);
   const startedAtMs = Date.now();
   while (Date.now() - startedAtMs < 30000) {
     await sleep(1000);
@@ -867,6 +877,81 @@ async function stopClient(handshake, agent) {
   throw new CliError(`pid ${agent.pid} was ended, but the server still holds the ${agent.username} session after 30 s`);
 }
 
+// Ends a client `client launch` recorded, by its pid alone: for when the
+// server, and so the agent, is gone. Only a pid that is still an EVE client
+// (exefile.exe) is ended. -> true when it ended one.
+async function stopRecordedClient(username, entry) {
+  const pid = entry && entry.pid;
+  if (!pid || !pidAlive(pid) || !clientRecord.isClientProcess(pid)) {
+    clientRecord.forgetLaunched(E2E_DIR, username);
+    return false;
+  }
+  try {
+    process.kill(pid);
+  } catch (error) {
+    throw new CliError(`couldn't end the ${username} client's pid ${pid}: ${error.message}`);
+  }
+  clientRecord.forgetLaunched(E2E_DIR, username);
+  await waitForExit(pid, 15_000);
+  console.log(`stopped the ${username} client (pid ${pid}, from ${relativePath(clientRecord.recordPath(E2E_DIR))})`);
+  return true;
+}
+
+// `client stop`: through the bridge when the client's agent is online, else by
+// the pid `client launch` recorded, so a client left after `down` still stops.
+async function cmdClientStop(flags) {
+  const handshake = readHandshake();
+  if (handshake) {
+    let online = [];
+    try {
+      online = ((await callBridge(handshake, "GET", "/client/agents")).agents || [])
+        .filter((row) => row.online && (!flags.user || row.username === String(flags.user)));
+    } catch (_error) {
+      // no client agent in this server, or it stopped answering: the record below
+    }
+    if (online.length > 1) throw new CliError(`${online.length} client agents are online; name one with --user`);
+    if (online.length) return stopClient(handshake, online[0]);
+  }
+  const launched = clientRecord.readLaunched(E2E_DIR);
+  const users = flags.user ? [String(flags.user)].filter((user) => launched[user]) : Object.keys(launched);
+  if (!users.length) {
+    throw new CliError(flags.user ? `no client is online for ${flags.user}, and none was launched as ${flags.user}`
+      : `no client is online${handshake ? "" : " (no server is up)"}, and none launched is on record`);
+  }
+  if (users.length > 1 && !flags.user) throw new CliError(`${users.length} launched clients are on record (${users.join(", ")}); name one with --user`);
+  if (!await stopRecordedClient(users[0], launched[users[0]])) {
+    console.log(`the ${users[0]} client (pid ${launched[users[0]].pid || "?"}) had already exited`);
+  }
+}
+
+// `down` ends the clients first: a client whose server stops sits at a
+// connection-lost dialog. Through the bridge while it's up, then by recorded pid.
+async function stopAllClients() {
+  const handshake = readHandshake();
+  if (handshake) {
+    let agents = [];
+    try {
+      agents = ((await callBridge(handshake, "GET", "/client/agents")).agents || []).filter((row) => row.online && row.pid);
+    } catch (_error) {
+      // a bridge without the client agent has no clients
+    }
+    for (const agent of agents) {
+      try {
+        await stopClient(handshake, agent);
+      } catch (error) {
+        console.log(`couldn't stop the ${agent.username} client through the server: ${error.message}`);
+      }
+    }
+  }
+  for (const [username, entry] of Object.entries(clientRecord.readLaunched(E2E_DIR))) {
+    try {
+      await stopRecordedClient(username, entry);
+    } catch (error) {
+      console.log(error.message);
+    }
+  }
+}
+
 // --path, --class, --name, --text, --index, --hidden: one node, as `client ui` lists them.
 function nodeSelector(flags) {
   const selector = { path: clientTools.repairNodePath(flags.path), cls: flags.class, name: flags.name, text: flags.text,
@@ -875,7 +960,66 @@ function nodeSelector(flags) {
 }
 
 
-// find, click, type, key, cmd and act: drive the client from inside, through
+// client wait "<python>": evaluates it in the client until it is true in Python's sense.
+async function clientWait(rest, flags) {
+  const code = rest.join(" ");
+  if (!code.trim()) throw new CliError("client wait needs Python, e.g. gridcheck client wait \"uicore.registry.GetModalWindow() is None\" --timeout 30");
+  if (Buffer.byteLength(code) > MAX_EVAL_BYTES) throw new CliError(`client wait takes at most ${MAX_EVAL_BYTES / 1024} KiB of Python`);
+  const seconds = flags.timeout === undefined ? 60 : Number(flags.timeout);
+  const everySeconds = flags.every === undefined ? 0.5 : Number(flags.every);
+  const tryFlags = { ...flags, timeout: 15 };
+  let result;
+  try {
+    result = await clientWaitTools.waitForClient({ seconds, everySeconds, sleep,
+      evaluate: async () => {
+        const value = (await clientCommand("eval", { code, truth: true, soft: true }, tryFlags)).value || {};
+        return { ...value, truth: clientTools.evalTruth(value) };
+      } });
+  } catch (error) {
+    if (error instanceof CliError) throw error;
+    throw new CliError(`client wait: ${error.message}`);
+  }
+  const took = `${(result.elapsedMs / 1000).toFixed(1)} s, ${result.tries} ${result.tries === 1 ? "try" : "tries"}`;
+  if (flags.json) {
+    console.log(JSON.stringify({ ok: result.ok, elapsedMs: result.elapsedMs, tries: result.tries, value: result.last, error: result.error }, null, 2));
+  } else if (result.ok) {
+    console.log(`${result.last.repr} after ${took}`);
+  }
+  if (!result.ok) {
+    if (flags.json) process.exitCode = 1;
+    else {
+      throw new CliError(`client wait: still not true after ${took}; the last value was ${result.last && result.last.repr !== null && result.last.repr !== undefined
+        ? String(result.last.repr).slice(0, 200) : "none"}${result.error ? ` (error: ${String(result.error).slice(0, 200)})` : ""}`);
+    }
+  }
+}
+
+// client rpc <service> <method>: sm.RemoteSvc(service).method(...) in the client, as its character.
+async function clientRpc(rest, flags) {
+  const [service, method, ...extra] = rest;
+  if (!service || !method || extra.length) {
+    throw new CliError("client rpc takes the service and the method, e.g. gridcheck client rpc <service> <method> --payload '{}'");
+  }
+  if (flags.payload !== undefined && flags.args !== undefined) throw new CliError("client rpc takes --payload or --args, not both");
+  const args = { service, method };
+  if (flags.payload !== undefined) {
+    args.payload = parseJsonFlag(String(flags.payload), "--payload");
+    if (args.payload === null) throw new CliError("--payload null isn't sent; give a JSON object, or leave the flag out");
+  }
+  if (flags.args !== undefined) {
+    args.args = parseJsonFlag(String(flags.args), "--args");
+    if (!Array.isArray(args.args)) throw new CliError("--args takes a JSON array, e.g. --args '[1, \"two\"]'");
+  }
+  const reply = await clientCommand("rpc", args, flags);
+  const value = reply.value || {};
+  if (flags.json) {
+    console.log(JSON.stringify(value, null, 2));
+    return;
+  }
+  console.log(value.json !== null && value.json !== undefined ? JSON.stringify(value.json, null, 2) : `${value.repr}${value.truncated ? "\n(truncated)" : ""}`);
+}
+
+// find, click, menu, type, key, cmd and act: drive the client from inside, through
 // its own handlers and services, so its window can stay in the background.
 async function clientDrive(handshake, sub, rest, flags) {
   const json = (value) => console.log(JSON.stringify(value, null, 2));
@@ -897,6 +1041,7 @@ async function clientDrive(handshake, sub, rest, flags) {
     const lines = [value.finished ? "  finished" : "  still running: it may be waiting on a dialog"];
     if (value.modal) lines.push(`  a dialog is open: ${value.modal.name || value.modal.cls}${value.modal.text ? ` "${value.modal.text}"` : ""}`);
     if (value.result !== null && value.result !== undefined) lines.push(`  returned ${JSON.stringify(value.result)}`);
+    for (const message of value.messages || []) lines.push(`  the client told the player: ${message.text}${message.key ? ` (${message.key})` : ""}`);
     return lines.join("\n");
   };
   const into = nodeSelector(flags);
@@ -909,12 +1054,26 @@ async function clientDrive(handshake, sub, rest, flags) {
     const value = reply.value;
     console.log(`${describe(value.node)}${value.node.rect ? ` [${value.node.rect.join(",")}]` : ""}`);
     console.log(value.target ? `  clicks go to ${describe(value.target)}` : "  nothing from here up takes a click");
+    if (value.node.scrolledOut) console.log("  scrolled out of view: a click scrolls it in first");
     return;
   }
   if (sub === "click") {
     const reply = await call("click", { ...into, double: flags.double === true || undefined });
     if (flags.json) return json(reply.value);
-    console.log(`clicked ${describe(reply.value.clicked)}\n${outcome(reply.value)}`);
+    console.log(`clicked ${describe(reply.value.clicked)}${reply.value.scrolled ? " (scrolled into view first)" : ""}\n${outcome(reply.value)}`);
+    return;
+  }
+  if (sub === "menu") {
+    const entries = rest.map(String).filter((entry) => entry.trim());
+    if (!entries.length) {
+      throw new CliError("client menu needs the entries to pick, outermost first: gridcheck client menu --text Roster -- \"Expel Member\" \"Confirm Expel Member\"");
+    }
+    const hasNode = Object.keys(into).length > 0;
+    if (flags.item !== undefined && hasNode) throw new CliError("client menu takes a node (--path, --class, --name, --text) or --item, not both");
+    if (flags.item === undefined && !hasNode) throw new CliError("client menu needs the node to right-click (--path, --class, --name or --text) or --item <itemID>");
+    const reply = await call("menu", { ...into, itemID: flags.item === undefined ? undefined : String(flags.item), entries });
+    if (flags.json) return json(reply.value);
+    console.log(`picked ${reply.value.picked.join(" > ")} from the menu of ${reply.value.menu}\n${outcome(reply.value)}`);
     return;
   }
   if (sub === "type") {
@@ -1019,6 +1178,9 @@ async function clientLaunch(handshake, flags) {
   if (running && running.characterID) {
     console.log(`the ${username} client is already in game as character ${running.characterID}, pid ${running.pid || "?"}; ` +
       `using it (\`gridcheck client stop${flags.user ? ` --user ${username}` : ""}\` first for a new one)`);
+    if (running.pid && !clientRecord.readLaunched(E2E_DIR)[username]) {
+      clientRecord.recordLaunched(E2E_DIR, username, { pid: running.pid, characterID: running.characterID, accountID: running.accountID, flags });
+    }
     return { username, accountID: running.accountID, characterID: running.characterID, pid: running.pid || null,
       build: running.build || null, seconds: 0, already: true };
   }
@@ -1087,6 +1249,8 @@ async function clientLaunch(handshake, flags) {
       const seconds = Math.round((Date.now() - startedAtMs) / 1000);
       console.log(`in game as character ${characterID} after ${seconds} s` +
         `${where ? `, ${where.docked ? `docked at ${where.docked}` : "in space"} in ${where.solarSystemID}` : ""}`);
+      // So `client stop`, `down` and `restart --client` find it once the bridge is gone.
+      clientRecord.recordLaunched(E2E_DIR, username, { pid: agent.pid || null, characterID, accountID, launchedAtMs: startedAtMs, flags });
       return { username, accountID, characterID, pid: agent.pid || null, build: agent.build || null, seconds };
     }
   }
@@ -1189,39 +1353,94 @@ async function cmdUndock() {
   return text;
 }
 
-async function runSlash(command) {
-  const state = requireLogin(readState());
-  const before = await currentSystemID(state);
-  const reply = await bridge("POST", "/slash", { characterID: state.characterID, command });
+// --as: whose session a slash command runs on. headless (default) is the
+// logged-in headless character; client is a real EVE client's character, as
+// if that player typed it, so a command that needs the player (their corp,
+// their ship) works without client eval.
+function slashSubject(flags) {
+  const as = flags.as === undefined ? "headless" : String(flags.as);
+  if (!["headless", "client"].includes(as)) throw new CliError("--as takes headless (the default) or client");
+  if (flags.user !== undefined && as !== "client") throw new CliError("--user picks a client; add --as client");
+  return { as, user: flags.user === undefined ? undefined : String(flags.user) };
+}
+
+async function runSlash(command, { as = "headless", user } = {}) {
+  let characterID;
+  let state = null;
+  let who = "";
+  if (as === "client") {
+    const handshake = requireHandshake();
+    const agent = await clientAgentRow(handshake, { user });
+    if (!agent.characterID) throw new CliError(`the ${agent.username} client hasn't entered the game yet`);
+    characterID = agent.characterID;
+    who = ` (as the ${agent.username} client's character ${characterID})`;
+  } else {
+    state = requireLogin(readState());
+    characterID = state.characterID;
+  }
+  const before = state ? await currentSystemID(state) : null;
+  const reply = await bridge("POST", "/slash", { characterID, command });
   // success null: the tree's command doesn't say whether it refused (stock
   // EveJS; gridcheck patch apply slash-success makes the commands this tool drives say).
   const verdict = !reply.handled ? "not a command" : reply.success === null || reply.success === undefined
     ? "done (unconfirmed)" : reply.success ? "ok" : "refused";
-  const text = `${command} -> ${verdict}${reply.message ? `\n${reply.message}` : ""}`;
+  const text = `${command} -> ${verdict}${who}${reply.message ? `\n${reply.message}` : ""}`;
   console.log(text);
   const refused = reply.handled && reply.success === false;
   if (refused) process.exitCode = 2;
-  if (reply.handled && !refused) await bindRemotePark(state, { unlessIn: before });
+  // A real client binds its own park after a system change; only the headless session needs it done.
+  if (state && reply.handled && !refused) await bindRemotePark(state, { unlessIn: before });
   return { ok: Boolean(reply.handled && !refused), text };
 }
 
+// --at <itemID>: read around that entity, no logged-in character needed.
+function atFromFlags(flags) {
+  if (flags.at === undefined) return null;
+  const at = Math.trunc(Number(flags.at));
+  if (!(at > 0)) throw new CliError("--at takes the itemID of an entity, e.g. --at 140000123");
+  return at;
+}
+
 async function cmdGrid(flags) {
-  const state = requireLogin(readState());
-  await keepAlive(state);
-  const reply = await bridge("GET", `/grid?characterID=${state.characterID}`);
-  if (flags.json) {
-    console.log(JSON.stringify(reply.grid, null, 2));
-    return;
-  }
+  const at = atFromFlags(flags);
   const rangeKm = flags.range === undefined ? undefined : Number(flags.range);
   if (rangeKm !== undefined && !(rangeKm > 0)) throw new CliError("--range takes a positive number of km");
   if (flags.kind === true || flags.kind === "") throw new CliError("--kind takes a kind from the grid's type column, e.g. --kind planet");
+  let fields;
+  if (flags.fields !== undefined) {
+    try {
+      fields = gridFilter.parseFields(flags.fields === true ? "" : flags.fields);
+    } catch (error) {
+      throw new CliError(error.message);
+    }
+  }
+  const state = at ? null : requireLogin(readState());
+  if (state) await keepAlive(state);
+  const reply = await bridge("GET", at
+    ? `/grid?at=${at}${rangeKm ? `&range=${rangeKm}` : ""}`
+    : `/grid?characterID=${state.characterID}`);
+  // --fields is for reading JSON, so it prints JSON.
+  if (flags.json || fields) {
+    console.log(JSON.stringify(gridFilter.filterGrid(reply.grid, {
+      rangeKm, kind: flags.kind, npc: Boolean(flags.npc), fields, all: Boolean(flags.all),
+    }), null, 2));
+    return;
+  }
   console.log(formatGrid(reply.grid, {
     all: Boolean(flags.all),
     kind: flags.kind,
+    npc: Boolean(flags.npc),
     rangeKm,
-    sinceMs: state.loggedInAtMs ? Date.now() - state.loggedInAtMs : undefined,
+    sinceMs: state && state.loggedInAtMs ? Date.now() - state.loggedInAtMs : undefined,
   }));
+}
+
+// One entity by itemID, from whichever scene holds it. No character needed.
+async function cmdInspect(positionals, flags) {
+  const itemID = Math.trunc(Number(positionals[0]));
+  if (!(itemID > 0)) throw new CliError("usage: gridcheck inspect <itemID> [--json]");
+  const reply = await bridge("GET", `/inspect?itemID=${itemID}`);
+  console.log(flags.json ? JSON.stringify(reply.entity, null, 2) : formatInspect(reply.entity));
 }
 
 // By default only NPC lines and the plugins' own tags (registry.logTags), and
@@ -1276,14 +1495,16 @@ function createLogTailer({ file, pid, pattern, keep, onEvent }) {
 // writing timeline.jsonl in runDir. `push` adds an event of the caller's own
 // (a scenario step) to the same timeline. Resolves once the bridge has
 // accepted the watch; `ended` resolves with { reason, error } when it stops.
+// state null with `at`: a watch around an entity, with no session to keep alive.
 async function openWatch(state, handshake, { forSeconds, everySeconds, offGridEverySeconds, client, divergeMeters,
-  positions = false, perfEverySeconds = 0, log = true, grep, runDir, print = (line) => console.log(line), onEvent = () => {} }) {
+  positions = false, perfEverySeconds = 0, at = null, modules = true, log = true, grep, runDir,
+  print = (line) => console.log(line), onEvent = () => {} }) {
   fs.mkdirSync(runDir, { recursive: true });
   const timelinePath = path.join(runDir, "timeline.jsonl");
   const out = fs.openSync(timelinePath, "a");
 
   let startedAtMs = null;
-  const knownIDs = new Set([String(state.characterID)]);
+  const knownIDs = new Set([String(at || state.characterID)]);
   const buffer = createReorderBuffer(1500, (event) => {
     const line = startedAtMs === null || event.t !== undefined ? event : { ...event, t: event.atMs - startedAtMs };
     fs.writeSync(out, `${JSON.stringify(line)}\n`);
@@ -1293,7 +1514,7 @@ async function openWatch(state, handshake, { forSeconds, everySeconds, offGridEv
     onEvent(line);
   });
   const flushTimer = setInterval(() => buffer.flush(Date.now()), 500);
-  const aliveTimer = setInterval(() => { keepAlive(state).catch(() => {}); }, 60_000);
+  const aliveTimer = state ? setInterval(() => { keepAlive(state).catch(() => {}); }, 60_000) : null;
   let tailer = null;
   if (log) {
     const explicit = grep !== undefined && grep !== null;
@@ -1310,7 +1531,7 @@ async function openWatch(state, handshake, { forSeconds, everySeconds, offGridEv
     if (closed) return;
     closed = true;
     clearInterval(flushTimer);
-    clearInterval(aliveTimer);
+    if (aliveTimer) clearInterval(aliveTimer);
     if (tailer) tailer.stop();
     buffer.flush(Date.now(), true);
     fs.closeSync(out);
@@ -1322,8 +1543,9 @@ async function openWatch(state, handshake, { forSeconds, everySeconds, offGridEv
     response = await fetch(`http://${handshake.host}:${handshake.port}/watch`, {
       method: "POST",
       headers: { authorization: `Bearer ${handshake.token}`, "content-type": "application/json" },
-      body: JSON.stringify({ characterID: state.characterID, forSeconds, everySeconds, offGridEverySeconds, client,
-        divergeMeters, positions: positions === true, ...(perfEverySeconds ? { perfEverySeconds } : {}) }),
+      body: JSON.stringify({ ...(at ? { at } : { characterID: state.characterID }), forSeconds, everySeconds,
+        offGridEverySeconds, client, divergeMeters, positions: positions === true,
+        ...(modules === false ? { modules: false } : {}), ...(perfEverySeconds ? { perfEverySeconds } : {}) }),
       signal: AbortSignal.any([controller.signal, AbortSignal.timeout((forSeconds + 120) * 1000)]),
     });
     if (!response.ok) {
@@ -1387,9 +1609,10 @@ function perfEveryFrom(flags) {
 }
 
 async function cmdWatch(flags) {
-  const state = requireLogin(readState());
+  const at = atFromFlags(flags);
+  const state = at ? null : requireLogin(readState());
   const handshake = requireHandshake();
-  await keepAlive(state);
+  if (state) await keepAlive(state);
   const forSeconds = flags.for === undefined ? 600 : Number(flags.for);
   const everySeconds = flags.every === undefined ? 2 : Number(flags.every);
   const offGridEverySeconds = flags["offgrid-every"] === undefined ? undefined : Number(flags["offgrid-every"]);
@@ -1404,7 +1627,8 @@ async function cmdWatch(flags) {
   const perfEverySeconds = perfEveryFrom(flags);
 
   const watch = await openWatch(state, handshake, {
-    forSeconds, everySeconds, offGridEverySeconds, client, divergeMeters, perfEverySeconds,
+    forSeconds, everySeconds, offGridEverySeconds, client, divergeMeters, perfEverySeconds, at,
+    modules: !flags["no-modules"],
     // Positions feed the viewer (gridcheck view); a run always records them.
     positions: Boolean(flags.positions),
     log: !flags["no-log"],
@@ -1454,14 +1678,16 @@ function pluginHandler(command, flags) {
   return (REGISTRY.handlers[command] || []).find((handler) => handler.flags.some((flag) => flags[flag] !== undefined)) || null;
 }
 
-// Stock /tr takes a system ID and lands on the system's first stargate.
+// Stock /tr takes a system ID and lands on the system's first stargate; a
+// name it can fail to find, so this resolves the name first.
 // A plugin may take the command over for its own flags (registry.handlers).
 async function cmdTeleport(positionals, flags) {
-  if (!positionals[0]) throw new CliError("usage: gridcheck teleport <system name|ID>");
-  const handler = pluginHandler("teleport", flags);
+  if (!positionals[0]) throw new CliError("usage: gridcheck teleport <system name|ID> [--as client [--user <account>]]");
+  const subject = slashSubject(flags);
+  const handler = subject.as === "headless" ? pluginHandler("teleport", flags) : null;
   if (handler) return handler.run(positionals, flags, pluginIO());
   const systemID = resolveSystemID(positionals.join(" "));
-  return runSlash(`/tr me ${systemID}`);
+  return runSlash(`/tr me ${systemID}`, subject);
 }
 
 // ---------- loadout ----------
@@ -1489,6 +1715,10 @@ function loadoutFromArgs(positionals, flags) {
     for (const key of loadoutTools.LISTS) {
       if (flags[key] !== undefined) raw[key] = loadoutTools.splitList(flags[key]);
     }
+  }
+  // --into, --owner and --flag win over the same keys in a file or spec.
+  if (loadoutTools.isObject(raw)) {
+    for (const key of loadoutTools.PLACEMENT) if (flags[key] !== undefined) raw[key] = flags[key];
   }
   const { loadout, problems } = loadoutTools.normalizeLoadout(raw);
   if (!loadout) throw new CliError(`${problems.join("\n")}\nusage: ${CORE_COMMANDS.loadout.usage.join("\n       ")}`);
@@ -1647,6 +1877,7 @@ function pluginIO() {
     requireHandshake,
     bridge,
     callBridge,
+    clientCommand,
     requestJSON,
     gateway,
     currentSystemID,
@@ -1931,7 +2162,10 @@ async function shootClient(agent, { out, maxWidth = 0, format = "png", source = 
   const shot = agent.pid ? await clientTools.captureScreenshot({ pid: agent.pid, out, maxWidth, format })
     : { error: `the ${agent.username} client's agent didn't report its pid` };
   if (shot.error) return { error: [...failed, shot.error].join("; ") };
-  return { ...shot, source: "window" };
+  // The window's size is in pixels; its UI size is the client's to say, if it answers.
+  const ui = await clientCommand("ping", {}, { user: agent.username, timeout: 2 }).then((reply) => reply.value.ui, () => null);
+  const scale = ui ? clientTools.uiScale({ width: shot.width, uiWidth: ui[0], uiHeight: ui[1] }) : null;
+  return { ...shot, ...scale, source: "window" };
 }
 
 // The agent saves a PNG where it is told; one that needs scaling or another
@@ -1942,8 +2176,10 @@ async function shootInClient(agent, { out, maxWidth, format }) {
   fs.mkdirSync(path.dirname(out), { recursive: true });
   try {
     const { value } = await clientCommand("screenshot", { path: saved }, { user: agent.username, timeout: 10 });
-    if (direct) return { file: out, width: value.width, height: value.height };
-    return await clientTools.captureScreenshot({ from: saved, out, maxWidth, format });
+    const scale = (width) => clientTools.uiScale({ width, uiWidth: value.uiWidth, uiHeight: value.uiHeight });
+    if (direct) return { file: out, width: value.width, height: value.height, ...scale(value.width) };
+    const shot = await clientTools.captureScreenshot({ from: saved, out, maxWidth, format });
+    return shot.error ? shot : { ...shot, ...scale(shot.width) };
   } catch (error) {
     return { error: String(error.message).trim().split("\n").pop() };
   } finally {
@@ -2364,6 +2600,7 @@ async function cmdRun(positionals, flags) {
         divergeMeters: scenario.watch.divergeMeters || undefined,
         positions: true,
         perfEverySeconds: scenario.watch.perf || 0,
+        modules: scenario.watch.modules !== false,
         log: scenario.watch.log,
         grep: scenario.watch.grep === null ? undefined : scenario.watch.grep,
         runDir,
@@ -2577,7 +2814,7 @@ async function waitForExit(pid, timeoutMs) {
   return !pidAlive(pid);
 }
 
-// gridcheck.config.json start, run with this CLI's node.
+// gridcheck.config.json start, run with serverNode()'s node.
 function serverStartArgs() {
   if (CONFIG.start[0] !== "node") throw new CliError(`the server start command is not a node command: ${CONFIG.start.join(" ")}`);
   return CONFIG.start.slice(1);
@@ -2844,8 +3081,11 @@ async function cmdUp(flags) {
   const market = flags["no-market"] || !CONFIG.market.enabled ? null : await startMarket(ports, 120_000);
   if (market) console.log(`market daemon pid ${market.pid} ready in ${market.seconds.toFixed(1)}s`);
 
+  // This CLI's node, unless it is Electron's (an MCP client's): core/node.js.
+  const node = nodeExecutable({ configured: CONFIG.node });
+  if (node.warning) console.log(`note: ${node.warning}`);
   const out = fs.openSync(SERVER_OUT_PATH, "w");
-  const child = spawn(process.execPath, serverStartArgs(), {
+  const child = spawn(node.path, serverStartArgs(), {
     cwd: CONFIG.serverDir,
     env: serverSpawnEnv(options, { profile, ports }),
     detached: true,
@@ -2869,6 +3109,7 @@ async function cmdUp(flags) {
   };
   writeRun(run);
   console.log(`starting server pid ${child.pid}; console in ${relativePath(SERVER_OUT_PATH)}` +
+    `${node.path === process.execPath ? "" : `; node ${node.path} (${node.source})`}` +
     `${run.env ? `; its environment also sets ${Object.entries(run.env).map(([name, value]) => `${name}=${value}`).join(" ")}` : ""}`);
 
   const timeoutMs = Math.max(10, Number(flags.timeout) || 600) * 1000;
@@ -2928,6 +3169,7 @@ async function cmdDown(flags) {
     throw new CliError(`the server up (pid ${handshake.pid}) wasn't started by \`gridcheck up\`, so auto mode leaves it running; ` +
       "stop it where you started it");
   }
+  if (!flags["keep-clients"]) await stopAllClients();
   const serverPid = handshake ? handshake.pid : runLive(run) ? run.pid : null;
   if (serverPid) {
     const timeoutMs = Math.max(5, Number(flags.timeout) || 120) * 1000;
@@ -2968,8 +3210,63 @@ async function cmdDown(flags) {
   if (run.pid && !run.stoppedAtMs) writeRun({ ...run, stoppedAtMs: Date.now() });
 }
 
+// The up flags a restart boots with: the ones given, else the last up's
+// --env, --profile and the plugins' number flags. The world is kept unless
+// --world or --fresh says otherwise; a plugin's restore flag needs --world anyway.
+function restartUpFlags(previous, flags) {
+  const given = Object.keys(flags).some((key) => !["timeout", "help"].includes(key));
+  if (given || !previous) return flags;
+  const reused = { ...flags };
+  if (previous.env) reused.env = Object.entries(previous.env).map(([name, value]) => `${name}=${value}`);
+  if (previous.profile) {
+    reused.profile = true;
+    reused["profile-every"] = previous.profile.everyTicks;
+  }
+  for (const [key, value] of Object.entries(previous.options || {})) {
+    const upFlag = REGISTRY.upFlags.find((flag) => flag.key === key && flag.type !== "bool");
+    if (upFlag) reused[upFlag.flag] = value;
+  }
+  return reused;
+}
+
+// down, up, and with --clients the same EVE clients launched again: one call
+// to load changed server code.
+async function cmdRestart(flags) {
+  requireManaged("restart");
+  const previous = readRun();
+  const relaunch = [];
+  if (flags.clients) {
+    const launched = clientRecord.readLaunched(E2E_DIR);
+    const handshake = readHandshake();
+    let online = [];
+    if (handshake) {
+      try {
+        online = ((await callBridge(handshake, "GET", "/client/agents")).agents || []).filter((row) => row.online);
+      } catch (_error) {
+        // no client agent in this server
+      }
+    }
+    for (const username of new Set([...online.map((row) => row.username), ...Object.keys(launched)])) {
+      relaunch.push({ user: username, ...(launched[username] ? launched[username].flags : {}) });
+    }
+  }
+  const upFlags = restartUpFlags(previous, Object.fromEntries(Object.entries(flags).filter(([key]) => key !== "clients")));
+  await cmdDown({});
+  await cmdUp(upFlags);
+  if (!flags.clients) return;
+  if (!relaunch.length) {
+    console.log("--clients: no EVE client was attached or on record, so none was launched");
+    return;
+  }
+  const handshake = requireHandshake();
+  for (const launchFlags of relaunch) {
+    console.log(`launching the ${launchFlags.user} client again`);
+    await clientLaunch(handshake, launchFlags);
+  }
+}
+
 const WORLD_USAGE = "usage: gridcheck world copy --from <tree> [--force] | world save <name> [--note text] [--force] | world list | " +
-  "world build <recipe> [--force] | world recipes";
+  "world build <recipe> [--force] | world recipes | world items --location <id> | --item <id> [--owner <id>] [--flag <id>] [--type <typeID|name>]";
 
 // ---------- world recipes ----------
 
@@ -3073,6 +3370,39 @@ function listRecipeWorlds({ json = false } = {}) {
   if (!rows.length) console.log(`no recipes in ${relativePath(recipeTools.RECIPE_DIR)}`);
 }
 
+// world items: read-only. A live server answers from its item store (GET /items),
+// which includes what it hasn't flushed; with none up, the tree's gamestore.sqlite does.
+async function cmdWorldItems(flags) {
+  const { query, problems } = worldItemsTools.parseQuery({ location: flags.location, owner: flags.owner, flag: flags.flag,
+    type: flags.type, item: flags.item, limit: flags.limit });
+  if (problems.length) throw new CliError(`${problems.join("\n")}\nusage: ${CORE_COMMANDS.world.usage[3]}`);
+  let reply = null;
+  const handshake = readHandshake();
+  if (handshake) {
+    const params = Object.entries({ ...query, type: query.type && (query.type.typeID || query.type.name) })
+      .filter(([, value]) => value !== undefined).map(([key, value]) => `${key}=${encodeURIComponent(value)}`);
+    const { status, json } = await requestJSON(`http://${handshake.host}:${handshake.port}/items?${params.join("&")}`, {
+      headers: { authorization: `Bearer ${handshake.token}` },
+    });
+    // A bridge that predates /items has no such route; the file is the fallback.
+    if (status === 404 && /no such route/.test(String(json.error))) {
+      console.error("note: the running server's bridge has no /items (restart it to load this copy); reading the game store file, which can lag the server");
+    } else if (status >= 400 || json.ok === false) {
+      throw new CliError(`bridge /items: ${json.error || `HTTP ${status}`}`);
+    } else {
+      reply = { ...json, origin: "live" };
+    }
+  }
+  if (!reply) {
+    reply = { ...worlds.readItems(WORLD_PATH, query, { typeName: (typeID) => typeInfo(typeID).name }), origin: "file" };
+    if (!reply.ok) throw new CliError(reply.error);
+  }
+  const sourceText = reply.origin === "live" ? "the running server's item store (live, includes changes not yet saved to the game store)"
+    : `${relativePath(WORLD_PATH)}, read only; ${handshake ? "recent changes in the running server may be missing" : "no server is up"}`;
+  const { origin, ...answer } = reply;
+  console.log(flags.json ? JSON.stringify({ ...answer, source: origin }, null, 2) : worldItemsTools.formatItemsReply(answer, sourceText));
+}
+
 async function cmdWorld(positionals, flags) {
   const action = positionals[0];
   const megabytes = (bytes) => Math.round(bytes / 1e6);
@@ -3081,6 +3411,8 @@ async function cmdWorld(positionals, flags) {
       await buildRecipeWorld(loadRecipeOrFail(positionals[1]), { force: Boolean(flags.force) });
     } else if (action === "recipes") {
       listRecipeWorlds({ json: Boolean(flags.json) });
+    } else if (action === "items") {
+      await cmdWorldItems(flags);
     } else if (action === "copy" && flags.from) {
       requireManaged("world copy");
       requireWorldIdle();
@@ -3342,6 +3674,10 @@ function formatDoctor(report) {
   if (report.loadout) {
     lines.push(report.loadout.ok ? "loadout    the stock ship helpers are there; gridcheck loadout can build a ship"
       : `loadout    OFF: ${report.loadout.missing.join("; ")}`);
+    if (report.loadout.into) {
+      lines.push(report.loadout.into.ok ? "           --into can leave a ship in a station hangar or corporation office"
+        : `           --into OFF: ${report.loadout.into.missing.join("; ")}`);
+    }
   }
   const client = report.client;
   if (client) {
@@ -3551,7 +3887,8 @@ const CORE_COMMANDS = {
   },
   world: {
     usage: ["world copy --from ../dev [--force]", "world save <name> [--note \"...\"] [--force] | world list",
-      "world build <recipe> [--force] | world recipes [--json]"],
+      "world build <recipe> [--force] | world recipes [--json]",
+      "world items --location <id> | --item <id> [--owner <id>] [--flag <id>] [--type <typeID|name>] [--limit 200] [--json]"],
     run: cmdWorld,
   },
   vendor: {
@@ -3563,7 +3900,8 @@ const CORE_COMMANDS = {
     run: cmdPatch,
   },
   up: { usage: upUsage(), run: (_positionals, flags) => cmdUp(flags) },
-  down: { usage: ["down [--force]"], run: (_positionals, flags) => cmdDown(flags) },
+  down: { usage: ["down [--force] [--keep-clients]"], run: (_positionals, flags) => cmdDown(flags) },
+  restart: { usage: ["restart [--clients] [--world <name> | --fresh] [--timeout 600] [up flags]"], run: (_positionals, flags) => cmdRestart(flags) },
   status: { usage: ["status"], run: () => cmdStatus() },
   ports: {
     usage: ["ports"],
@@ -3580,6 +3918,8 @@ const CORE_COMMANDS = {
       "client screenshot [--out <file.png|.jpg>] [--run <id>] [--max-width <px>] [--source auto|client|window] | client ballpark [--range <km>] [--json]",
       "client diff [--tolerance 1000] [--json] | client events [--all] [--since <seq>] [--limit 50] [--notify OnA,OnB] [--json]",
       "client find|click [--path <path> | --class <text> --name <text> --text <text>] [--index N] [--double] [--wait 3] [--user] [--json]",
+      "client menu [--path <path> | --class <text> --name <text> --text <text> | --item <itemID>] [--index N] [--wait 3] -- \"<entry>\" [\"<submenu entry>\" ...]",
+      "client wait \"<python>\" [--timeout 60] [--every 0.5] [--json] | client rpc <service> <method> [--payload <json> | --args <json array>] [--json]",
       "client type \"<text>\" [--name <edit> ...] [--set] [--enter] | client key <enter|escape|tab|f1|a ...> [--name <edit> ...]",
       "client cmd [<name> [args...]] [--filter <text>] | client act <action> [<target>] [--range <m>] [--module high1] [--wait <s>]",
       "client pointer <move|click|drag|wheel> <x,y> [<x,y> ...] [--button 0|1|2] [--duration <ms>] [--delta <n>] [--user]",
@@ -3591,23 +3931,29 @@ const CORE_COMMANDS = {
   undock: { usage: ["undock"], run: () => cmdUndock() },
   dock: { usage: ["dock"], run: () => runSlash("/dock") },
   slash: {
-    usage: ["slash \"/tr me 30002537\""],
-    run: (positionals) => {
+    usage: ["slash \"/tr me 30002537\" [--as client [--user <account>]]"],
+    run: (positionals, flags) => {
       const line = positionals.join(" ").trim();
       if (!line) throw new CliError('slash needs a command, e.g. gridcheck slash "/where"');
-      return runSlash(line);
+      return runSlash(line, slashSubject(flags));
     },
   },
-  teleport: { usage: ["teleport <system name|ID>"], run: cmdTeleport },
+  teleport: { usage: ["teleport <system name|ID> [--as client [--user <account>]]"], run: cmdTeleport },
   loadout: {
     usage: ["loadout <ship> [--modules \"Name xN, ...\"] [--drones ...] [--cargo ...] [--charges ...] [--json]",
-      "loadout --file <loadout.json> | --spec '<json>'"],
+      "loadout --file <loadout.json> | --spec '<json>'",
+      "loadout ... --into <stationID|officeID> [--owner <id>] [--flag <id>]"],
     run: cmdLoadout,
   },
-  grid: { usage: ["grid [--range 10000] [--all] [--kind <kind>] [--json]"], run: (_positionals, flags) => cmdGrid(flags) },
+  grid: {
+    usage: ["grid [--range 10000] [--all] [--kind <kind>] [--npc] [--json] [--fields a,b,c] [--at <itemID>]"],
+    run: (_positionals, flags) => cmdGrid(flags),
+  },
+  inspect: { usage: ["inspect <itemID> [--json]"], run: cmdInspect },
   watch: {
     usage: ["watch [--for 600] [--every 2] [--offgrid-every 5] [--grep <regex>] [--no-log] [--json] [--run <id>]",
-      "      [--client all|fx|diverge|off] [--diverge-meters 5000] [--positions] [--perf [--perf-every 5]]"],
+      "      [--client all|fx|diverge|off] [--diverge-meters 5000] [--positions] [--perf [--perf-every 5]]",
+      "      [--no-modules] [--at <itemID>]"],
     run: (_positionals, flags) => cmdWatch(flags),
   },
   act: {
@@ -3711,9 +4057,13 @@ module.exports = {
   CORE_COMMANDS,
   CliError,
   clientEventScope,
+  cmdWorldItems,
   helpText,
+  loadoutFromArgs,
   parseArgs,
+  restartUpFlags,
   selectLogLines,
+  slashSubject,
   serverSpawnEnv,
   systemsSeen,
   upFlagsFor,

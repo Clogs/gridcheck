@@ -16,6 +16,7 @@ node tools/gridcheck/bin/gridcheck.js up --world starter         # boot it
 node tools/gridcheck/bin/gridcheck.js login                      # account e2eagent, character Agent Observer
 node tools/gridcheck/bin/gridcheck.js undock
 node tools/gridcheck/bin/gridcheck.js slash "/npc 2"             # any slash command, on the character's session
+node tools/gridcheck/bin/gridcheck.js slash "/where" --as client # the same, as a real EVE client's character
 node tools/gridcheck/bin/gridcheck.js grid
 node tools/gridcheck/bin/gridcheck.js act lock nearest npc       # fly, lock, fire, drones; see "Player actions"
 node tools/gridcheck/bin/gridcheck.js watch --for 120            # what changed and where the client's view disagrees
@@ -61,18 +62,20 @@ by hand. When an entry already runs this tree's `mcp.js`, setup leaves it as it 
 | `status` | `status`, `world list`, `run` | Start here: server, character, saved worlds and recipes, scenarios, active plugins, recent runs and background runs. |
 | `guide` | `primer [<topic>]` | How to drive the tool, by `topic`: `start`, `scenarios`, `conditions`, `events` (every kind's fields), `perf`, `client`, `plugins`. No topic returns them all. |
 | `doctor` | `doctor` | What the tree supports: gateway calls, the client view, patches, plugins, ports, loadouts, the real client. |
-| `up`, `down` | `up`, `down` | Auto and managed mode. In auto mode `down` stops only a server `up` started. |
-| `login`, `undock`, `teleport` | `login`, `undock`, `teleport` | `teleport` is stock `/tr`. |
-| `loadout` | `loadout` | A ship and its fit by item name, skills checked first. |
-| `grid` | `grid` | `json: true` prints the field names conditions use. More than 10 rows of one kind that isn't a ship (a belt's asteroids) collapse to the nearest 3 and a count; `kind` lists only that kind, `all` everything. |
-| `slash` | `slash` | The command goes after `--`, so it is never read as flags. A refused command is a tool error. |
+| `up`, `down`, `restart` | `up`, `down`, `restart` | Auto and managed mode. In auto mode `down` stops only a server `up` started. `restart { clients: true }` reloads the server's code and launches the EVE clients again. |
+| `login`, `undock`, `teleport` | `login`, `undock`, `teleport` | `teleport` is stock `/tr`, with a system name looked up first. `as: "client"` moves a real EVE client's character. |
+| `loadout` | `loadout` | A ship and its fit by item name, skills checked first. `into` (with `owner`, `flag`) leaves it in a station hangar or corporation office instead of boarding it. |
+| `world_items` | `world items` | Read-only item listing: what sits in a hangar, office, ship or container, or one item and what's in it. A running server's live store answers, else the game store file. |
+| `grid` | `grid` | `json: true` prints the field names conditions use; `range`, `kind`, `npc` and `fields` cut it down; `at` reads around any entity with no character ([Reading the grid](#reading-the-grid)). More than 10 rows of one kind that isn't a ship (a belt's asteroids) collapse to the nearest 3 and a count; `kind` lists only that kind, `all` everything. |
+| `inspect` | `inspect` | One entity by `itemID`: capacitor, running modules, locks, NPC controller, plugin data. No character needed. |
+| `slash` | `slash` | The command goes after `--`, so it is never read as flags. A refused command is a tool error. `as: "client"` runs it on a real EVE client's session, as that player (`--as client` in the CLI). |
 | `watch` | `watch` | `seconds` defaults to 60, not the CLI's 600, because the call blocks for the whole watch. Call `act` in the same turn to watch its effect. |
 | `act` | `act` | A player action, with the names a scenario's action step uses: `action`, `target`, `modules`, `drones`, `range`, `once`, `charge`, `count`, `timeout`. |
 | `log` | `log` | |
 | `perf` | `perf` | `seconds` (default 10) to sample, or `now`. See [Performance testing](#performance-testing). `up` takes `profile` and `profileEvery`, and `watch` takes `perf` and `perfEvery`. |
 | `run_scenario` | `run` | Writes a scenario it is handed, checks it, runs it. See below. |
 | `report` | none | Reads a run's `report.md` and `result.json`; waits for a background run. |
-| `client_launch`, `client_status`, `client_stop`, `client_eval`, `client_console`, `client_ui`, `client_ballpark`, `client_diff`, `client_events`, `client_find`, `client_click`, `client_type`, `client_key`, `client_cmd`, `client_act` | `client <subcommand>` | A real EVE client; see [A real EVE client](#a-real-eve-client). `client_events` takes `notify` as a list; `[]` records none. In `client_type`, `text` is what to type and `intoText` finds the edit by its text. |
+| `client_launch`, `client_status`, `client_stop`, `client_eval`, `client_console`, `client_ui`, `client_ballpark`, `client_diff`, `client_events`, `client_find`, `client_click`, `client_menu`, `client_wait`, `client_rpc`, `client_type`, `client_key`, `client_cmd`, `client_act` | `client <subcommand>` | A real EVE client; see [A real EVE client](#a-real-eve-client). `client_events` takes `notify` as a list; `[]` records none. In `client_type`, `text` is what to type and `intoText` finds the edit by its text. |
 | `client_screenshot` | `client screenshot --json` | Returns the picture itself, as a JPEG 1,600 pixels wide unless `format` or `maxWidth` say otherwise. |
 
 A plugin's tools are named `<plugin>_<tool>`. The server's MCP instructions are a brief of under
@@ -116,7 +119,7 @@ Every tool has a CLI form, for agents that don't use MCP. `gridcheck run <scenar
 | Piece | Where | What it does |
 | --- | --- | --- |
 | Web gateway | the tree's `server/src/_secondary/express/` | Account, character, session select, `ship.Undock`, and the player calls. Stock EveJS. |
-| Agent bridge | `tools/gridcheck/bridge/`, loaded by the shim `server/src/_secondary/agentBridge/server.js` | `/slash`, `/grid`, `/watch`, `/tee`, `/loadout`, `/capabilities`, `/shutdown`, the [viewer](#viewer) at `/viewer`, and the plugins' routes. On when the tree has a `gridcheck.config.json` or `EVEJS_AGENT_BRIDGE=1`; off with `EVEJS_AGENT_BRIDGE=0` ([TREES.md](TREES.md#which-servers-gridcheck-touches)). |
+| Agent bridge | `tools/gridcheck/bridge/`, loaded by the shim `server/src/_secondary/agentBridge/server.js` | `/slash`, `/grid`, `/inspect`, `/watch`, `/tee`, `/loadout`, `/items`, `/capabilities`, `/shutdown`, the [viewer](#viewer) at `/viewer`, and the plugins' routes. On when the tree has a `gridcheck.config.json` or `EVEJS_AGENT_BRIDGE=1`; off with `EVEJS_AGENT_BRIDGE=0` ([TREES.md](TREES.md#which-servers-gridcheck-touches)). |
 | CLI | `tools/gridcheck/bin/gridcheck.js`, with `core/` | Calls the gateway and the bridge, and runs the plugins' commands and steps. Writes `_local/gridcheck/`. |
 | MCP server | `tools/gridcheck/bin/mcp.js` | The CLI as MCP tools over stdio. |
 | GUI | `tools/gridcheck/gui/`, `core/gui.js` | `gridcheck gui`: runs, install and patches in a browser ([GUI.md](GUI.md)). |
@@ -240,10 +243,23 @@ records them in `_local/gridcheck/run.json`.
 - **Boot failure.** If the server dies during boot, `up` stops the daemons it started and prints
   the last 40 console lines, plus any live lease another process holds. After `--timeout`
   (600 s) it leaves the server running and says so.
+- **Which node.** The server runs under the node running the CLI. An MCP client built on Electron
+  (Questline, VS Code and its forks) can start the MCP server under its own Electron binary, whose
+  native ABI the tree's `better-sqlite3` doesn't load. Then the MCP server runs the CLI, and `up`
+  runs the server, under the first other `node` on `PATH` that isn't Electron's. `GRIDCHECK_NODE`,
+  or `"node": "<path>"` in `gridcheck.config.json`, names one instead. `up` prints which it used
+  when it isn't its own.
 - `gridcheck down` asks the bridge to stop. The bridge emits `SIGTERM` inside the server, which runs the
   shutdown hooks, flushes the store and releases the world lease. Windows has no other graceful
   stop for a detached process. `down` waits for the pid to exit, then stops the daemons.
-  `down --force` kills a server that has no bridge yet, leaving its lease live for 30 s.
+  `down --force` kills a server that has no bridge yet, leaving its lease live for 30 s. Before
+  the server, `down` stops the EVE clients `client launch` started, since a client whose server
+  stops sits at a connection-lost dialog; `--keep-clients` leaves them.
+- `gridcheck restart` is `down`, then `up` with the world kept: one command to load changed server
+  code. With no up flags of its own it boots with the last `up`'s `--env`, `--profile` and the
+  plugins' number flags. `--clients` launches the EVE clients that were attached again, with the
+  same account and launch options, and waits until they're in game. The headless character's
+  session doesn't survive it: `gridcheck login` again.
 - `gridcheck status` shows the ports, server pid and boot time, gateway, bridge, daemons and the held
   character.
 
@@ -294,10 +310,64 @@ dist        name                    type                who     mode     target 
 - `protected Ns` is the ship's undock or timed invulnerability, measured in scene time.
 - `--range <km>` changes the cut-off (default 10,000 km), `--all` lists everything the session
   can see, `--json` prints the bridge's full reply.
+- `cap` and `mods` appear when a row has them: the ship's capacitor in percent and how many
+  modules it has running. The same data is on each JSON row as `capacitorPct` (0-100, or null) and
+  `activeModules` (`moduleID`, `name`, `effectName`, `targetID`).
 
 Each `grid` also makes one gateway call on the held session. That refreshes the gateway's
 30-minute idle timer and drains the session's notification backlog. A session that only reads the
 grid stays alive.
+
+**Smaller JSON.** `grid --json` is the whole grid and can run past 100 KB. `--range <km>`, `--kind
+<kind>` and `--npc` (only NPC rows) cut the rows; `--fields a,b,c` keeps only those keys of each
+row and prints JSON (a name no row can have is an error that lists the valid ones; a row without
+the key gets null). The ship's own row always stays, and `filtered` says how many rows were kept.
+With none of them the output is unchanged.
+
+```
+gridcheck grid --npc --json --fields itemID,name,mode,capacitorPct,activeModules
+```
+
+**Without a character: `grid --at`.** `gridcheck grid --at <itemID>` reads the grid around any
+entity, with no logged-in character. Reading a grid through the headless character puts a player in
+that system, and the server skips idle NPC activity in a system with a player in it, so the observer
+changes what you meant to look at. `--at` reads the scene directly and puts nobody there. The server
+takes everything within 7,864 km of the entity (`--range <km>` changes it), ships, drones, wrecks,
+containers, structures, stations, gates and asteroids alike, cloaked ones too: stock's per-session
+visibility rules (public grid, bubbles, dungeon scope) are not applied. The entity's own row is
+marked `anchor: true`, distances are from it, and no row is `isSelf`. The grid has no `self`; it
+has `anchor` and `rangeMeters`. An itemID that isn't in a loaded scene is an error: if the item
+store knows it, the message says which system's scene isn't loaded. MCP: `grid { at }`.
+
+### Inspecting one entity
+
+`gridcheck inspect <itemID>` prints one entity from whichever loaded scene holds it. It needs no
+character. MCP: `inspect { itemID, json }`.
+
+```
+#140000123 Mining Frigate 4  ship  mode MINING  in Yulai (30001389)
+type Venture (32880), group 25, NPC npc
+owner 1, corp 2, character -
+position 12000, 0, 5400 m  speed 0 m/s (max 320)
+S/A/H 100/100/100
+capacitor 4% (12 of 300), recharge 250 s
+locks: #900001
+modules running: 1  [scene time 91000]
+  #5001 Miner I (miningLaser) on #900001
+      cycle 1000 ms, next in 400 ms, running 8000 ms, cap 0
+controller: nativeCombat npc  decision mine  target #900001  next think in 250 ms
+```
+
+It shows the entity's IDs and name, kind, mode, position, velocity and speed, shield, armour and
+hull, owner, corporation and character, the capacitor (ratio, capacity, amount, full recharge time
+in ms), every running module effect (`moduleID`, type, `effectName`, `targetID`, cycle length, next
+cycle in ms, repeat, cycles left, cap need, `deactivateAtMs`, `stopReason`), fitted modules where
+the entity lists them, locks (locked, pending with time left, locked by), the NPC controller and the
+active plugins' data. The controller summary names the decision, target IDs, paused state and
+`nextThinkInMs`, lists scalar fields, and gives nested objects a one-line note. Times that are scene
+clock readings come both raw and as "in N ms" from the scene's clock (`simTimeMs`), which is not
+the wall clock. A field the tree does not have is null. A missing entity is a 404 that says whether
+its system's scene is not loaded.
 
 ## Watching a grid over time
 
@@ -326,10 +396,29 @@ From the ships, drones, wrecks, containers and structures the session can see:
 | `DECISION` | An NPC controller's last think took another branch. Needs the `last-decision` patch, or a tree that records it. |
 | `TARGET` | A lock gained or lost, from the entity's own `lockedTargets`. |
 | `DAMAGE` | Shield, armour or hull drops across a quarter band (100, 75, 50, 25), or returns to full after a repair or `/heal`. Regeneration climbing through the bands is not printed. |
+| `MODULE` | A module on a ship on grid turned on, off, or began a new activation. Fields: `moduleID`, `moduleName`, `effectName`, `on`, `restarted`, `targetID`, `targetLabel`, `reason` (the stop reason of the activation that ended, such as `cycle` or `ammo`, when the tree records one) and `capPct`. A weapon cycling inside one activation prints nothing after its first `on`. |
+| `CAPACITOR` | A ship's capacitor fell a quarter band (75, 50, 25), reached 5% or less (`state` `empty`), or filled again after a reported drop (`state` `full`). `fromPct`, `toPct`. A band only counts as climbed back 5 points past its lower edge, so a ship hovering at 25% reports once. |
 | `DESTROYED`, `KILLMAIL` | A ship replaced by a wreck within 20 km. The killmail ID follows when the killmail worker writes it, within 20 s. |
 | `SELF`, `DOCKED`, `SYSTEM`, `MOVED` | Your own ship, dock state or system changed, or you jumped more than 1,000 km inside a system (warp, `/tr me <celestial>`). The last two start a new baseline. |
 | `LOG` | A server log line tagged `NpcController`, or with a tag a plugin lists, that names a ball the watch has seen. `--grep <regex>` keeps every line matching it instead; `--no-log` drops them. |
 | `PERF`, `PROFILE` | With `--perf`: the server's ticks every 5 s, and each tick profiler window. See [Performance testing](#performance-testing). |
+
+**Modules and capacitor.** `MODULE` and `CAPACITOR` come from each ship's own `activeModuleEffects`
+and capacitor, compared sample to sample, for every ship on grid, not only yours. A ship that
+arrives, or is on grid at the first sample, has no `MODULE` line for what it was already running;
+`grid` and `inspect` show that. The grid is sampled every 2 s (`--every`), so a module that goes off
+and on again inside one interval is seen as one `MODULE` with `restarted: true` (its activation
+changed), not as an off and an on. `--no-modules` leaves both kinds out (MCP `modules: false`, a
+scenario's `"watch": { "modules": false }`).
+
+**Without a character: `watch --at`.** `gridcheck watch --at <itemID>` samples the grid around that
+entity, as `grid --at` does, instead of a character's. Nobody is logged in to the system, so the
+watch does not change what it watches. There is no session, so no client view (`--client` is off:
+no `CLIENT`, `FX` or `DIVERGE` lines), `self` does not exist (the entity is the `anchor`; a `GRID`
+line says `anchor:` and distances are from it) and no killmail is matched to you. The log tailer
+and the plugins' hooks run with `characterID` null. The watch follows the entity into another
+system; if it is destroyed or its scene unloads, the watch ends with `anchor-gone` and says why.
+MCP: `watch { at }`.
 
 Plugins add kinds of their own, often from an off-grid scan of the system you are in. In
 `timeline.jsonl` each core event about a ball carries its `groupKey` and the plugins' data at
@@ -441,6 +530,9 @@ gridcheck client eval "cfg.evelocations.Get(session.solarsystemid2).name"
 gridcheck client check-ui --spec '{"selector":{"name":"undockButton"}}' --wait 30   # exits 1 unless it holds
 gridcheck client act warpTo 40491241  # a player's action, through the client's own services
 gridcheck client click --text undock  # the Undock button's own click handler
+gridcheck client menu --text Roster -- "Expel Member" "Confirm Expel Member"   # a context menu, in one call
+gridcheck client wait "session.stationid" --timeout 30   # until the expression is true in the client
+gridcheck client rpc luCommand Status --payload '{}'     # sm.RemoteSvc(...).Status(...) as the client's character
 gridcheck client type "rifter" --name quickFilterInputBox
 gridcheck client cmd OpenInventory    # a client command, as its key binding runs it
 gridcheck client stop
@@ -476,7 +568,11 @@ A relogin is another `launch`, whose new agent replaces the old one. If a client
 the same token, the bridge would carry its agent over to the new session.
 
 `exefile.exe` hands off to a second process, so the pid `launch` and `status` print is the one the
-agent reports from inside the client, and `stop` ends that one. A client that closes is listed as
+agent reports from inside the client, and `stop` ends that one. `launch` also writes that pid and
+its launch options to `_local/gridcheck/client/launched.json`. When no agent answers (the server is
+down, or the client never attached), `stop` ends the recorded pid instead, if that process is still
+`exefile.exe`. `down` stops clients the same way, and `restart --clients` uses the record to
+launch them again. A client that closes is listed as
 gone for ten minutes, then dropped. The client writes its log to its own console window, not to
 stdout, which is why Play.bat's stdio logs stay empty. `client console` reads that window's buffer.
 `--grep` filters it, and `--pid` works before an agent attaches.
@@ -489,14 +585,21 @@ the client, as any client code would.
   `--class`, `--name` or `--text` it prints every node at any depth whose class, name or label text
   contains the value, case-insensitively, with its path. Each node has its absolute rect in UI
   pixels and its state (`normal`, `disabled`, `hidden` or `pickChildren`). Hidden subtrees are skipped
-  unless you pass `--hidden`.
+  unless you pass `--hidden`. A button counts its label as its text. A path names one node: siblings
+  that share a label are `Button[0]`, `Button[1]` ..., counted among all of them, hidden ones too, so
+  the same node keeps its path. A path without the `[n]` still matches, and names every sibling with
+  that label.
 - `screenshot` has the client save what it last drew (its back buffer, as its own Print Screen
   does). The client keeps drawing while its window is covered or minimized, so this works then too.
   It takes about 130 ms of the client's time. When the agent can't answer, it draws the window from
   outside with `PrintWindow` instead, which works when the window is covered but not when it's
   minimized. `--source client` or `--source window` uses only one. A picture taken just after an
   action can still show the frame before it, while a window fades in or out. `--run <id>` saves it
-  in the run's `client/` folder. Use `--out x.jpg` or `--max-width` for a smaller file.
+  in the run's `client/` folder. Use `--out x.jpg` or `--max-width` for a smaller file. Pointer
+  coordinates are UI pixels (the desktop's size), not the picture's pixels, so the answer says how
+  they relate: `1600x900; pointer coordinates are pixels x 1.2` (`uiWidth`, `uiHeight` and `uiPerPixel`
+  in `--json`). `uiPerPixel` is for the saved picture, after `--max-width`. A picture drawn by the
+  `PrintWindow` fallback has it only when the client answers a ping.
 - `ballpark` lists every ball with a slim item: position, velocity, mode, radius and distance from
   your ship. Docked, there's no ballpark.
 - `diff` reads the client's ballpark and the bridge's grid for the client's character at the same
@@ -506,8 +609,13 @@ the client, as any client code would.
   and the server's grid lists only those near you. It exits 1 when the two disagree.
 - `events`: the agent wraps the client's `logmodule._LogException`, which every `LogException`
   passes through, unhandled tasklet errors included. It keeps those exceptions, the notify events
-  it's told to record (`--notify OnA,OnB`, default `OnSessionChanged`) and its own failed commands
-  in a ring, and sends them to the bridge in batches.
+  it's told to record (`--notify OnA,OnB`, default `OnSessionChanged`), every message the client
+  shows the player, and its own failed commands in a ring, and sends them to the bridge in batches.
+  A message is `{ key, text }`: a server `UserError` and the other keyed messages (`CustomNotify` ...)
+  are taken at `dialog_handler._handle_player_fsd_dialog`, the fading notice at
+  `QuickMessage.show_message`, and the mining and bounty notices at `Logger.SayMessage`. The
+  per-hit combat text isn't recorded: it fires on every shot. This is how a refusal that only
+  flashes on screen ("That system has no asteroid belt") is kept.
 - `eval` runs Python and prints the value: an expression's, else the last statement's if it's an
   expression, else what the code leaves in `result`. `--file probe.py` reads the code from a file
   (at most 256 KiB), `--out x.json` saves the answer, and `--assert` exits 1 unless the value is
@@ -580,10 +688,38 @@ the decompiled client (build 3396210); `agent.py` lists them.
   station too close to warp to answers "You cannot warp there right now". A refused lock is the
   exception: the client only shows the player a notice. So `lock` prints where the locks stand,
   and a dropped one says so.
-- `click` runs the click handler of the node `--path`, `--class`, `--name` and `--text` name, or of
-  the nearest node above it with one; a button's `press` checks it's enabled. `find` says which
-  node that is without clicking. When a button and its own label both match, the button counts.
-  More than one match is an error that lists them; pass `--index` or `--path`.
+- `click` runs the click handler of the node `--path`, `--class`, `--name` and `--text` name (all
+  that are given must match), or of the nearest node above it with one that takes mouse input; a
+  button's `press` checks it's enabled. A label has a click handler of its own (for links) but takes
+  no mouse input, so a click on its text goes through to what is under it: `--text Roster` clicks the
+  tab, not the label. A node that does take input and is disabled (a disabled button) is the error,
+  and it names that node. `find` says which node a click goes to without clicking. When a button and
+  its own label both match, the button counts. More than one match is an error that lists them with
+  unique paths; pass `--index` or `--path`.
+  A node inside a scroll container (`ScrollContainer`) that sits outside what it shows is scrolled
+  into view first, with the container's own `ScrollToVerticalPixels` (and the horizontal one); `find`
+  says `scrolledOut`. A `ScrollContainer` keeps scrolled-out nodes displayed, so they can be found.
+  The older list control (`Scroll`) draws only the rows near the view, and a lazily loaded entry
+  isn't built until it is near; those aren't in the tree to find, and aren't scrolled.
+- `menu "<entry>" ...` picks from a context menu in one call. It opens the menu as a right click does
+  (`ShowMenu` on the node, or the nearest node above it with a `GetMenu`; or with `--item <itemID>`
+  the menu service's menu for a space item), then takes each entry by its label (an exact match
+  first, else one that contains it, case-insensitively), opening a submenu for each but the last,
+  and runs the last as a click on it would. The answer lists what it picked and, as `click` does,
+  whether what it started finished and any dialog it opened. An entry that isn't there is an error
+  listing the entries that are; so is a disabled one. Example: `client menu --text Roster --
+  "Expel Member" "Confirm Expel Member"`. It's an action on the timeline, like `click`.
+- `wait "<python>"` evaluates the code in the client every `--every` seconds (default 0.5) until its
+  value is true in Python's sense (the agent answers `bool(value)`; an agent older than 10 is guessed
+  from the value's JSON), then prints the value and how long it took. It exits 1 after `--timeout`
+  seconds (default 60) with the last value. An error the code raises counts as "not yet", and its
+  text comes with the last value; a syntax error stops at once.
+- `rpc <service> <method>` calls `sm.RemoteSvc(service).method(...)` in the client, as its
+  character. `--payload '<json>'` passes the one argument JSON-encoded, the way the Living Universe
+  commands take it, and decodes a reply that is a JSON string; `--args '[1, "two"]'` passes the
+  values as they are. A server `UserError` comes back as the error, with the text the player would
+  have read. The Living Universe plugin's `lu-rpc <Method> --payload '<json>'` is this for the
+  `luCommand` service.
 - `type "<text>"` sends each character through the client's key input (`uilib._OnChar`), as the
   window would; `--set` sets the edit's value at once, `--enter` presses enter after. `key <name>`
   presses one key (enter, escape, tab, backspace, arrows, a-z, 0-9, f1-f12), so the edit and the
@@ -606,7 +742,8 @@ the decompiled client (build 3396210); `agent.py` lists them.
 
 What a click or command starts runs on its own tasklet. The command waits `--wait` seconds
 (default 3) for it. If it hasn't finished by then, it reports "still running": usually it opened a
-dialog and is waiting for an answer. The dialog is named in the reply, and `click` answers it.
+dialog and is waiting for an answer. The dialog is named in the reply, and `click` answers it. The messages the client showed the player
+meanwhile are in the reply too.
 
 `act` waits until the action is done, so there's nothing to poll: in space after `undock`, docked
 after `dock`, in the new system after `jump` (from out of range it approaches the gate first),
@@ -624,7 +761,7 @@ While a client is attached, every watch and every run carries its events beside 
 | Kind | When |
 | --- | --- |
 | `CLIENT_EXCEPTION` | The client logged an exception: `type`, `message`, `where` (the last frame), `traceback`, `extra` (the text it was logged with), `noise` (which known retail noise it is, if it is; see "A real EVE client"). |
-| `CLIENT_EVENT` | A recorded notify event (`event`, `args`), an action the agent took (`event: "action"`, `op` such as `act warpTo 40491241`, `args`: finished, still running, done in N s, why it isn't done, or the error), an agent command other than `eval` that failed (`event: "agent-error"`, `op`, `error`), or `dropped` with a `count` when the client produced events faster than they were sent. |
+| `CLIENT_EVENT` | A message the client showed the player (`event: "message"`, `key` when it has one, `text`, `messageType`: a refusal that fades from the screen, a `UserError`'s text; a condition can say `CLIENT_EVENT event=message text~asteroid`, text being a regex), a recorded notify event (`event`, `args`), an action the agent took (`event: "action"`, `op` such as `act warpTo 40491241`, `args`: finished, still running, done in N s, why it isn't done, or the error), an agent command other than `eval` that failed (`event: "agent-error"`, `op`, `error`), or `dropped` with a `count` when the client produced events faster than they were sent. |
 
 Each line is stamped when the bridge got it; `clientAtMs` is when the client recorded it. So
 `"no CLIENT_EXCEPTION"` is an expectation a scenario can hold while a client is attached.
@@ -720,7 +857,7 @@ node tools/gridcheck/bin/gridcheck.js run loadout-npc-fight --reuse     # again:
 | `up` | `market` (default `true`), `timeout` (boot, seconds), `profile` (boot with the tick profiler; turns `watch.perf` on), `profileEvery` (ticks per profiler window, default 50), `env` (`{ "NAME": "value" }`, variables for the server's environment, as `up --env` sets them; not the ones gridcheck sets itself), and the plugins' `up` flags. A restore flag such as the lu plugin's `realClock` applies to a saved world or recipe only: its default is off in a `fresh` world, and setting it there is an error. |
 | `setup` | Steps, in order. A login runs first if the list doesn't start with one. |
 | `during` | Steps that run after setup, beside the stop conditions; see [During](#during). Optional. |
-| `watch` | `every` (2 s), `offgridEvery` (5 s), `client` (`diverge` by default; `FX` lines need `"fx"` or `"all"`, `CLIENT` lines `"all"`), `divergeMeters`, `log` (`true`), `grep`, `perf` (`true` for a `PERF` window every 5 s, or seconds), `ballpark` (`true`: each real client's ballpark against the server's grid every 2 s, or seconds; see [A real client in a scenario](#a-real-client-in-a-scenario)), `screenshots` (conditions, and `"stop"`, at which to take a picture of each real client). |
+| `watch` | `every` (2 s), `offgridEvery` (5 s), `client` (`diverge` by default; `FX` lines need `"fx"` or `"all"`, `CLIENT` lines `"all"`), `divergeMeters`, `log` (`true`), `grep`, `perf` (`true` for a `PERF` window every 5 s, or seconds), `modules` (`true`; `false` leaves out `MODULE` and `CAPACITOR`), `ballpark` (`true`: each real client's ballpark against the server's grid every 2 s, or seconds; see [A real client in a scenario](#a-real-client-in-a-scenario)), `screenshots` (conditions, and `"stop"`, at which to take a picture of each real client). |
 | `until` | `any`: stop conditions; the first one met stops the run. `timeout`: seconds after setup, required. `grace`: at most this many seconds more after a stop condition, e.g. for the `KILLMAIL` after a `DESTROYED`. Grace ends early once every expectation that isn't a `no` is met, but not before `graceMin` (default 5 s, or all of a shorter grace), which gives a `no DIVERGE` time to open: the watch delivers lines 1.5 s late and a divergence settles over 3 s. Set `graceMin` to `grace` when a `no` expectation needs the whole window. The report says how long grace ran and why it ended. `from`: `"setup"` (default) matches only events after setup ends; `"start"` matches every event since the watch began, for a stop condition that setup itself causes, such as the `GRID` after an undock. |
 | `expect` | Expected observations, as conditions. `"no <condition>"` or `{ "match": ..., "absent": true }` expects none. `{ "match": ..., "note": ... }` adds a note to the report. |
 | `name`, `description` | Default name: the file name. |
@@ -733,7 +870,7 @@ Steps:
 | `"undock"`, `"dock"` | `gridcheck undock`, `gridcheck dock`. |
 | `{ "slash": "/heal" }` | `gridcheck slash`. A refused command fails setup; in a tree that doesn't report refusals (stock without `slash-success`) every command counts as done. |
 | `{ "teleport": "Amamake" }` | `gridcheck teleport`, stock `/tr`. |
-| `{ "loadout": { "ship": "Tristan", "modules": [...], "drones": [...], "cargo": [...], "charges": [...] } }` | `gridcheck loadout` ([WORLDS.md](WORLDS.md)). |
+| `{ "loadout": { "ship": "Tristan", "modules": [...], "drones": [...], "cargo": [...], "charges": [...] } }` | `gridcheck loadout` ([WORLDS.md](WORLDS.md)). Add `"into"`, `"owner"` and `"flag"` to leave the ship in a station or corporation office instead of boarding it. |
 | `{ "wait": 30 }` | Waits that many seconds. Prefer `waitFor` on the event you are waiting for: a `GRID` with the new `systemName` after a teleport, or the first `GRID` after an undock. |
 | `{ "waitFor": "<condition>", "timeout": 300 }` | Waits for an event, seen after the step starts, that matches the condition. Setup fails if none comes before the timeout (default 300 s). |
 | `{ "repeat": [<steps>], "every": 5, "times": 12 }` | Runs its steps a round every `every` seconds, start to start, for `times` rounds; the report shows one step, "12 round(s)". A step that fails in a round fails the repeat, naming the round. In `during`, leave `times` out and it repeats until the run stops. It can't hold another `repeat` or `login`, and in setup its rounds count toward the run's budget. |

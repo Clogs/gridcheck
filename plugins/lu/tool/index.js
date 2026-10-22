@@ -86,12 +86,40 @@ const TRIGGER_TOOL = {
   args: triggers.triggerCliArgs,
 };
 
+const RPC_TOOL = {
+  name: "rpc",
+  cli: "lu-rpc",
+  description: "Call a Living Universe command (the luCommand service) from the attached EVE client, as its character: " +
+    "json.loads(sm.RemoteSvc('luCommand').<Method>(json.dumps(payload))), done for you. Answers the decoded reply; a refusal " +
+    "(UserError) comes back as the error. What the client flashes at the player after a click is in client_events.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      method: str("The luCommand method, e.g. Status."),
+      payload: { type: "object", description: "What the method takes, as an object (default {})." },
+      user: str("The client's account, when more than one is online."),
+      json: bool("The whole answer as JSON."),
+    },
+    required: ["method"],
+    additionalProperties: false,
+  },
+  args(p) {
+    const args = ["lu-rpc"];
+    if (p.payload !== undefined) args.push(`--payload=${JSON.stringify(p.payload)}`);
+    if (p.user) args.push(`--user=${p.user}`);
+    if (p.json) args.push("--json");
+    args.push("--", String(p.method));
+    return args;
+  },
+};
+
 const PRIMER = `Living Universe (plugin lu). The saved world lowsec-docked is a docked Rifter in Amamake with the Living Universe running.
 - up: realClock (default true, except in a fresh world: the clock runs at real time, which grid checks need), offgridTravel/offgridActivity (1-100, smoke tests only).
 - The trigger step and lu_trigger: { "trigger": "scout|hunt|fleet|materialize|skirmish", <args>, "as": "name", "retry": { "every": 15, "for": 480 } }. Args: system, flight, phase (stalking|committed), family, doctrine, to (self|system), count, anchor, go, shipClass, gap. "as" binds the flight or hunt IDs the reply names.
 - Kinds: SIGHTING HUNT HERE INCOMING ENTER EXIT ENGAGEMENT LOSS, from the off-grid tracker and hunter reports. Core grid events carry each NPC's flight, family, hunt phase and controller decision at ext.lu, and name them plainly in conditions (family on ARRIVE is ext.lu.family); groupKey is "flight:<flightID>". "self" on HUNT means the hunt targets you.
 - Example: "setup": ["undock", { "trigger": "fleet", "family": "pirate", "to": "self", "as": "fleet" }, { "waitFor": "INCOMING flightID=$fleet", "timeout": 300 }], "until": { "any": ["ARRIVE flightID=$fleet"], "timeout": 600 }, "expect": ["ARRIVE flightID=$fleet warpIn distanceMeters<=30km"].
 - A target can name a flight: "flight=$fleet", "family=police". The saved world's Rifter has no ammo, so give and load it in setup ({ "slash": "/giveitem EMP S 1000" }, { "loadAmmo": "weapons", "charge": "EMP S" }).
+- lu_rpc { method, payload } (CLI \`gridcheck lu-rpc\`): a luCommand call from the attached EVE client, JSON handled; a refusal is the error. The LU Command window opens from its Neocom button: client_click { name: "LuCommand" }.
 - By hand: lu_trigger, then watch in the same turn to see its effect. teleport has no flight pin; trigger materialize with go does that.`;
 
 module.exports = {
@@ -121,7 +149,7 @@ module.exports = {
   },
   commands: COMMANDS,
   handles: HANDLES,
-  mcpTools: [TRIGGER_TOOL],
+  mcpTools: [TRIGGER_TOOL, RPC_TOOL],
   primer: PRIMER,
   colours: [
     { match: { family: "pirate" }, colour: "#d1242f", label: "red pirate" },

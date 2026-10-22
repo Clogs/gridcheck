@@ -11,7 +11,8 @@
 //   patches    which optional stock edits are applied, detected or absent
 //   plugins    active, and skipped with the reason
 //   listeners  which ports `gridcheck up` can move (gridcheck.config.json)
-//   loadout    whether the stock exports POST /loadout builds a ship from are there
+//   loadout    whether the stock exports POST /loadout builds a ship from are there;
+//              loadout.into, apart, whether the ones `--into` also needs are
 //   client     what `gridcheck client` needs: the client-agent patch, the
 //              bridge's gridcheckClient service, an EVE client to start
 
@@ -21,7 +22,7 @@ const { spawnSync } = require("node:child_process");
 
 const patchEngine = require("./patches");
 const { findClientExe } = require("./client");
-const { LOADOUT_EXPORTS } = require("../bridge/loadout");
+const { LOADOUT_EXPORTS, LOADOUT_INTO_EXPORTS } = require("../bridge/loadout");
 
 const COPY_ROOT = path.join(__dirname, "..");
 const { PATCHES_DIR, PATCH_MARKER } = patchEngine;
@@ -115,9 +116,9 @@ function probeTreeOffline(serverRoot, { timeoutMs = 60_000 } = {}) {
 // The loadout's stock exports, read from the files without loading them: the
 // ship runtime pulls in the whole space runtime. A name counts when it appears
 // in the file's last `module.exports =` block (not `module.exports._testing`).
-function probeLoadoutExports(serverRoot) {
+function probeLoadoutExports(serverRoot, table = LOADOUT_EXPORTS) {
   const missing = [];
-  for (const [relativePath, names] of Object.values(LOADOUT_EXPORTS)) {
+  for (const [relativePath, names] of Object.values(table)) {
     let text;
     try {
       text = fs.readFileSync(path.join(serverRoot, "src", `${relativePath}.js`), "utf8");
@@ -176,6 +177,7 @@ function buildReport({ treeRoot, serverRoot, config = null, registry = null, pro
   const gateway = checkGatewayCalls(probe ? probe.allowlist : null, probe ? probe.allowlistError : null);
   const destiny = probe && probe.destiny ? probe.destiny : { ok: false, error: "not probed", balls: 0 };
   const loadout = probe && probe.loadout ? probe.loadout : probeLoadoutExports(serverRoot);
+  const intoMissing = probe && probe.loadout ? probe.loadout.intoMissing || [] : probeLoadoutExports(serverRoot, LOADOUT_INTO_EXPORTS).missing;
   return {
     tool: copyInfo(),
     tree: { root: treeRoot, serverRoot, config: config ? { file: config.file, exists: config.exists, mode: config.mode,
@@ -185,7 +187,7 @@ function buildReport({ treeRoot, serverRoot, config = null, registry = null, pro
     patches,
     plugins: pluginReport(registry),
     listeners: config ? config.listeners : {},
-    loadout: { ok: !loadout.missing.length, missing: loadout.missing },
+    loadout: { ok: !loadout.missing.length, missing: loadout.missing, into: { ok: !intoMissing.length, missing: intoMissing } },
     client: clientReport({ treeRoot, patches, service: probe && probe.client ? probe.client : null, env }),
     ...(live ? { live } : {}),
   };

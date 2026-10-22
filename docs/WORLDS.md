@@ -45,6 +45,68 @@ The bridge builds the ship with stock's own helpers, the ones the `/ship`-style 
 tree has them. The bridge loads its own charges, because stock's preload fills only the first
 module of a type.
 
+### Leaving the ship somewhere
+
+`--into <id>` builds the ship as above but doesn't board it. It stays, assembled and fitted with
+its drones, cargo and loaded charges, in a station hangar or a corporation office:
+
+```
+gridcheck loadout Tristan --modules "Light Neutron Blaster II" --into 285 --flag 116
+gridcheck loadout Tristan --into 60003760 --owner 90000002
+```
+
+```json
+{ "loadout": { "ship": "Tristan", "into": 285, "flag": 116 } }
+```
+
+The MCP tool takes `into`, `owner` and `flag`; a scenario step and a recipe take the same three keys.
+
+| `into` | `owner` | `flag` |
+| --- | --- | --- |
+| a station or structure ID | any character; default the pilot | 4, the hangar |
+| a corporation office, by the ID the client opens it by (its `itemID`; the office's `officeID` and folder ID work too) | only the office's corporation, which is the default | 115 to 121, hangar divisions 1 to 7; default 115 |
+
+- The pilot needn't be docked there, or in that corporation. It builds in the pilot's docked station,
+  or its home station when in space, as before, then moves whole to the place. The pilot's own ship
+  isn't changed.
+- Before anything is made, the bridge refuses an `into` that isn't a station, structure or
+  unimpounded office, an owner that isn't a character for a hangar or isn't the corporation for an
+  office, and a flag that isn't one of the place's. It changes nothing.
+- A tree that lacks the stock exports `--into` reads refuses only `--into`, naming what's missing; a
+  plain loadout still works. `gridcheck doctor` reports the two on separate lines.
+- The ship moves with stock's `transferItemToOwnerLocation` and `reownContents`, the option the
+  inventory broker uses for a hand-off between owners. The fitted modules, charges, drones and cargo
+  keep the hull as their location and take its new owner.
+- Notified: the pilot's session when docked, the corporation members who have that office open
+  (stock's `fanCorporationOfficeInventoryChanges`), and another owner's session when docked in that
+  station. Any other client sees the ship once it reopens the hangar.
+- The reply's `placed` says where it ended up. If the move fails, the ship is left in the pilot's
+  hangar and the reply says so. Check with `gridcheck world items --item <shipID>`.
+
+The corporation divisions are flags 115 to 121 (`flagCorpSAG1` to `flagCorpSAG7`). Stock writes an
+office's items under its `officeID`; the client opens it by `itemID`; stock reads all three.
+
+## Reading items
+
+`gridcheck world items` is a read-only listing of items, so you don't need your own SQLite script:
+
+```
+gridcheck world items --location 60004603 --flag 4         # a station hangar
+gridcheck world items --location 285 --owner 98000001      # a corporation office
+gridcheck world items --item 1001                          # a ship, and what's directly inside it
+gridcheck world items --location 60004603 --type Tristan --limit 20 --json
+```
+
+Give `--location` (items directly in a station, office, ship or container) or `--item` (that item
+and what's directly inside it). `--owner`, `--flag` and `--type` (a type ID or exact name) narrow
+what's listed; `--limit` defaults to 200. Each row has the itemID, type, owner, location, flag,
+quantity, whether it's assembled, a custom name, and for a ship or container how many items it
+holds.
+
+A running server answers from its live item store (`GET /items`), so changes it hasn't saved yet
+show. With no server up, the tree's `gamestore.sqlite` is read, opened read-only. The first line of
+the output says which answered. The MCP tool is `world_items`.
+
 ## World recipes
 
 A recipe is a file in `worlds/`, `<name>.recipe.json`. It holds the steps that build a world from

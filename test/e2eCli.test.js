@@ -268,7 +268,7 @@ test("help --json: every core command has a summary, and every docs entry names 
   const groups = new Set(GROUPS.map((group) => group.id));
   for (const command of catalog.commands) assert.ok(groups.has(command.group), `${command.name}: group ${command.group}`);
   const names = (prefix) => catalog.commands.filter((command) => command.name.split(" ")[0] === prefix).map((command) => command.name);
-  assert.deepStrictEqual(names("world").sort(), ["world build", "world copy", "world list", "world recipes", "world save"]);
+  assert.deepStrictEqual(names("world").sort(), ["world build", "world copy", "world items", "world list", "world recipes", "world save"]);
   assert.deepStrictEqual(names("patch"), ["patch"], "patch's parts have no entries of their own, so they stay one command");
   assert.deepStrictEqual(usageParts("loadout", ["loadout <ship> [--json]", "loadout --file <x> | --spec '<json>'"]),
     ["loadout <ship> [--json]", "loadout --file <x> | --spec '<json>'"], "a part that doesn't start with the name stays with the one before");
@@ -317,7 +317,7 @@ test("--help prints the command's docs and never runs it; with a part, only that
   const path = require("node:path");
   const cli = path.join(__dirname, "..", "bin", "gridcheck.js");
   const down = spawnSync(process.execPath, [cli, "down", "--help"], { encoding: "utf8" });
-  assert.deepStrictEqual([down.status, down.stdout.split("\n")[0]], [0, "gridcheck down [--force]"]);
+  assert.deepStrictEqual([down.status, down.stdout.split("\n")[0]], [0, "gridcheck down [--force] [--keep-clients]"]);
   const sub = spawnSync(process.execPath, [cli, "help", "client", "stop"], { encoding: "utf8" });
   assert.match(sub.stdout, /^gridcheck client stop \[--user\]/);
 });

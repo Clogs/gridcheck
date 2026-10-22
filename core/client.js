@@ -589,6 +589,32 @@ function clientErrorText(error) {
   return out.join("\n");
 }
 
+// Pointer coordinates are UI units (uicore.desktop's size); a picture is in pixels, scaled or not.
+// uiWidth is the desktop's width the picture shows, width the saved picture's: a pointer
+// coordinate is the pixel times uiPerPixel. Null when the UI size is unknown.
+function uiScale({ width, uiWidth, uiHeight }) {
+  if (!(Number(width) > 0) || !(Number(uiWidth) > 0)) return null;
+  return { uiWidth: Number(uiWidth), uiHeight: Number(uiHeight) || null, uiPerPixel: Math.round((Number(uiWidth) / Number(width)) * 10000) / 10000 };
+}
+
+// "1600x900; pointer coordinates are pixels x 1.2", for a picture that has a scale.
+function scaleText(shot) {
+  const size = `${shot.width}x${shot.height}`;
+  if (!shot.uiPerPixel) return `${size}; pointer coordinates are in UI pixels, which this picture's size doesn't tell`;
+  return `${size}; pointer coordinates are pixels x ${shot.uiPerPixel}`;
+}
+
+// Whether an eval's value is true in Python's sense: the agent's own answer (truth, from version 10),
+// else a guess from what an older agent sent: its JSON, or the repr of what isn't plain data.
+function evalTruth(value) {
+  if (value && typeof value.truth === "boolean") return value.truth;
+  const plain = value ? value.json : null;
+  if (plain === null || plain === undefined) return value && value.repr !== "None" && value.repr !== undefined && value.repr !== null;
+  if (Array.isArray(plain)) return plain.length > 0;
+  if (typeof plain === "object") return Object.keys(plain).length > 0;
+  return Boolean(plain);
+}
+
 // The lines `client act` prints after the action's name: whether it is done,
 // where the client is now, and what it logged meanwhile.
 function actSummary(value) {
@@ -611,7 +637,9 @@ function actSummary(value) {
   }
   const counts = new Map();
   for (const event of value.events || []) {
-    const label = event.kind === "notify" ? event.event : `${event.type}: ${String(event.message || "").slice(0, 80)}`;
+    const label = event.kind === "notify" ? event.event
+      : event.kind === "message" ? `message: ${String(event.text || "").slice(0, 120)}`
+        : `${event.type}: ${String(event.message || "").slice(0, 80)}`;
     counts.set(label, (counts.get(label) || 0) + 1);
   }
   if (counts.size) {
@@ -644,5 +672,8 @@ module.exports = {
   readTail,
   redactSwitches,
   repairNodePath,
+  evalTruth,
+  scaleText,
   startClient,
+  uiScale,
 };

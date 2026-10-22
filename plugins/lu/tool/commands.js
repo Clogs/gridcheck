@@ -270,6 +270,31 @@ function cmdEconomy(positionals, _flags, io) {
   if (!result.ok) io.setExitCode(1);
 }
 
+// `gridcheck lu-rpc <Method> [--payload <json>]`: sm.RemoteSvc('luCommand').<Method>(json.dumps(payload))
+// in the attached EVE client, as its character, with the reply decoded. The client's op rpc does the
+// call; every luCommand method takes and answers one JSON string.
+async function cmdLuRpc(positionals, flags, io) {
+  const [method, ...extra] = positionals;
+  if (!method || extra.length) throw new io.CliError("usage: gridcheck lu-rpc <Method> [--payload <json object>], e.g. lu-rpc Status");
+  let payload = {};
+  if (flags.payload !== undefined) {
+    try {
+      payload = JSON.parse(String(flags.payload));
+    } catch (error) {
+      throw new io.CliError(`--payload isn't JSON: ${error.message}`);
+    }
+    if (payload === null) throw new io.CliError("--payload takes a JSON value, not null");
+  }
+  const reply = await io.clientCommand("rpc", { service: "luCommand", method, payload }, {
+    ...(flags.user ? { user: flags.user } : {}),
+    ...(flags.timeout === undefined ? {} : { timeout: flags.timeout }),
+  });
+  const value = reply.value || {};
+  const decoded = value.json !== null && value.json !== undefined;
+  io.print(flags.json ? JSON.stringify(value, null, 2) : decoded ? JSON.stringify(value.json, null, 2) : String(value.repr));
+  return value;
+}
+
 // summary and needs feed `gridcheck help --json` and the GUI's Commands tab.
 const COMMANDS = {
   scouts: { usage: ["scouts [--all]"], summary: "Lists the scout flights, with their phase and where each one is.", needs: "up", run: cmdScouts },
@@ -283,6 +308,12 @@ const COMMANDS = {
     ],
     booleanFlags: ["go"],
     run: cmdTrigger,
+  },
+  "lu-rpc": {
+    usage: ["lu-rpc <Method> [--payload <json object>] [--user <account>]"],
+    summary: "Calls a Living Universe command (luCommand) from the attached EVE client, as its character, and prints the decoded reply.",
+    needs: "up",
+    run: cmdLuRpc,
   },
   clock: { usage: ["clock [--stages] [--json]"], summary: "The Living Universe clock and its offset; --stages adds its stages.", needs: "up",
     booleanFlags: ["stages"], run: cmdClock },

@@ -85,7 +85,7 @@ test("the instructions are a brief clients won't cut off; the guide tool has the
   assert.match(topic("client"), /`client_launch`[\s\S]*`client_diff`[\s\S]*CLIENT_EXCEPTION/);
   assert.throws(() => topic("nope"), /no topic "nope"; the topics are start, scenarios, conditions, events, perf, client, plugins/);
   const whole = primer({ registry, surface: "mcp" });
-  assert.ok(whole.length < 22_000, `the whole guide fits one reply (${whole.length})`);
+  assert.ok(whole.length < 23_000, `the whole guide fits one reply (${whole.length})`);
   for (const name of ["start", "scenarios", "events", "plugins"]) assert.ok(whole.includes(topic(name)), `${name} is in the whole guide`);
 });
 
@@ -116,7 +116,7 @@ test("arguments are checked against each tool's schema before the CLI runs", LU,
   const tool = (name) => mcp.TOOLS.find((row) => row.name === name);
   assert.deepStrictEqual(mcp.checkParams(tool("slash"), {}), ["command is required"]);
   assert.match(mcp.checkParams(tool("grid"), { range: "far" })[0], /range must be a number/);
-  assert.match(mcp.checkParams(tool("grid"), { radius: 5 })[0], /unknown argument radius; grid takes range, all, kind, json/);
+  assert.match(mcp.checkParams(tool("grid"), { radius: 5 })[0], /unknown argument radius; grid takes range, all, kind, npc, fields, at, json/);
   assert.match(mcp.checkParams(tool("lu_trigger"), { name: "nuke" })[0], /name must be one of scout, hunt/);
   assert.match(mcp.checkParams(tool("watch"), { seconds: 1.5 })[0], /seconds must be an integer/);
   assert.match(mcp.checkParams(tool("watch"), { seconds: 4000 })[0], /at most 3000/);

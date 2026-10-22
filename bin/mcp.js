@@ -19,7 +19,9 @@ const { kindsOf } = require("../core/conditions");
 const { DRAFT_SCENARIO_DIR, TREE_SCENARIO_DIR, scenarioPath } = require("../core/scenario");
 const { defaultTreeConfig } = require("../core/treeConfig");
 const { TOPICS, brief } = require("../core/primer");
+const { scaleText } = require("../core/client");
 const { createRuns, clip, compactSummary, consoleSummary, readText, reportSections, runStamp, safeRunID, sleep, tailLines } = require("../core/runs");
+const { nodeExecutable } = require("../core/node");
 
 const REPO_ROOT = DEFAULT_TREE_ROOT;
 const REGISTRY = defaultRegistry();
@@ -83,11 +85,18 @@ class ToolError extends Error {}
 
 // ---------- the CLI ----------
 
+// The node the CLI runs under: not this server's own when an Electron-based
+// client started it as `node`, since the server it boots needs real Node's
+// native ABI (core/node.js). Looked up once, on the first call.
+function cliNode() {
+  return nodeExecutable({ configured: CONFIG.node }).path;
+}
+
 // Runs one CLI command to its end. stdout and stderr are kept in the order
 // they came, as a person running it in a shell would see them.
 function runCli(args, { signal, onLine } = {}) {
   return new Promise((resolve) => {
-    const child = spawn(process.execPath, [CLI_PATH, ...args], {
+    const child = spawn(cliNode(), [CLI_PATH, ...args], {
       cwd: REPO_ROOT,
       stdio: ["ignore", "pipe", "pipe"],
       windowsHide: true,
@@ -170,6 +179,13 @@ const CLI_ARGS = {
   down(p) {
     const { args, flag } = argList("down");
     flag("force", p.force);
+    flag("keep-clients", p.keepClients);
+    return args;
+  },
+  restart(p) {
+    const args = CLI_ARGS.up(p);
+    args[0] = "restart";
+    if (p.clients) args.push("--clients");
     return args;
   },
   login(p) {
@@ -180,21 +196,49 @@ const CLI_ARGS = {
   },
   guide: (p) => ["primer", "--mcp", ...(p.topic ? ["--", p.topic] : [])],
   undock: () => ["undock"],
-  teleport: (p) => ["teleport", "--", String(p.system)],
+  teleport(p) {
+    const { args, flag } = argList("teleport");
+    flag("as", p.as);
+    flag("user", p.user);
+    args.push("--", String(p.system));
+    return args;
+  },
   grid(p) {
     const { args, flag } = argList("grid");
     flag("range", p.range);
     flag("all", p.all);
     flag("kind", p.kind);
+    flag("npc", p.npc);
+    flag("fields", Array.isArray(p.fields) ? p.fields.join(",") : p.fields);
+    flag("at", p.at);
     flag("json", p.json);
     return args;
   },
-  slash: (p) => ["slash", "--", String(p.command)],
+  inspect(p) {
+    const { args, flag } = argList("inspect");
+    flag("json", p.json);
+    args.push("--", String(p.itemID));
+    return args;
+  },
+  slash(p) {
+    const { args, flag } = argList("slash");
+    flag("as", p.as);
+    flag("user", p.user);
+    args.push("--", String(p.command));
+    return args;
+  },
   loadout(p) {
     const { args, flag } = argList("loadout");
     const spec = { ship: p.ship };
-    for (const key of ["modules", "drones", "cargo", "charges"]) if (p[key] !== undefined) spec[key] = p[key];
+    for (const key of ["modules", "drones", "cargo", "charges", "into", "owner", "flag"]) if (p[key] !== undefined) spec[key] = p[key];
     flag("spec", JSON.stringify(spec));
+    flag("json", p.json);
+    return args;
+  },
+  world_items(p) {
+    const { args, flag } = argList("world");
+    args.push("items");
+    for (const key of ["location", "item", "owner", "flag", "type", "limit"]) flag(key, p[key]);
     flag("json", p.json);
     return args;
   },
@@ -208,6 +252,8 @@ const CLI_ARGS = {
     flag("client", p.client);
     flag("diverge-meters", p.divergeMeters);
     flag("positions", p.positions);
+    flag("at", p.at);
+    flag("no-modules", p.modules === false);
     flag("perf", p.perf && p.perfEvery === undefined);
     flag("perf-every", p.perfEvery);
     flag("run", p.run);
@@ -383,6 +429,32 @@ const CLI_ARGS = {
   },
   client_find: (p) => clientDriveArgs("find", p),
   client_click: (p) => clientDriveArgs("click", p, (flag) => flag("double", p.double)),
+  client_menu(p) {
+    if (!Array.isArray(p.entries) || !p.entries.length) throw new Error("client_menu needs entries: the labels to pick, outermost first");
+    if (p.itemID !== undefined && ["path", "cls", "name", "text"].some((key) => p[key] !== undefined)) {
+      throw new Error("client_menu takes a node (path, cls, name, text) or itemID, not both");
+    }
+    return clientDriveArgs("menu", p, (flag) => flag("item", p.itemID), p.entries.map(String));
+  },
+  client_wait(p) {
+    const { args, flag } = argList("client");
+    flag("user", p.user);
+    flag("timeout", p.timeout);
+    flag("every", p.every);
+    flag("json", p.json);
+    args.push("--", "wait", String(p.code));
+    return args;
+  },
+  client_rpc(p) {
+    if (p.payload !== undefined && p.args !== undefined) throw new Error("client_rpc takes payload or args, not both");
+    const { args, flag } = argList("client");
+    flag("user", p.user);
+    flag("payload", p.payload === undefined ? undefined : JSON.stringify(p.payload));
+    flag("args", p.args === undefined ? undefined : JSON.stringify(p.args));
+    flag("json", p.json);
+    args.push("--", "rpc", String(p.service), String(p.method));
+    return args;
+  },
   // text is what to type here; intoText finds the edit by its text.
   client_type: (p) => clientDriveArgs("type", { ...p, text: p.intoText }, (flag) => {
     flag("set", p.set);
@@ -414,10 +486,10 @@ const CLI_ARGS = {
 // How the client_ drive tools name a node, as client_ui lists them.
 function clientNodeProps() {
   return {
-    path: str("The node's path exactly as client_ui prints it."),
+    path: str("The node's path as client_ui prints it. Siblings with one label are Button[0], Button[1] ...; Button alone matches all of them."),
     cls: str("Class name contains this, e.g. Button."),
     name: str("Node name contains this."),
-    text: str("Label or caption contains this, e.g. Undock."),
+    text: str("Label or caption contains this, e.g. Undock (a button's own label counts). With path, cls and name: all must match."),
     index: { type: "integer", minimum: 0, description: "Which of several matches, from 0." },
     hidden: bool("Also look in hidden nodes."),
   };
@@ -506,6 +578,28 @@ const COMPARE_PARAMS = {
   out: str("Also save the result to this JSON file."),
 };
 
+// What up and restart take.
+function upProperties() {
+  return {
+    world: str("Saved world to restore before boot (status lists them)."),
+    fresh: bool("Drop the game store; the boot seeds a new world from the reference data."),
+    market: bool("Start the market daemon (default true)."),
+    ...Object.fromEntries(REGISTRY.upFlags.map((flag) => [flag.key, flag.type === "bool"
+      ? bool(flag.description || `--${flag.flag}`)
+      : num(flag.description || `--${flag.flag}`, { minimum: flag.min, maximum: flag.max })])),
+    profile: bool("Boot with the tree's tick profiler (EVEJS_TICK_PROFILE=1), so perf and a watch with perf " +
+      "break each window of ticks down by subsystem. Tick durations need no profiler."),
+    profileEvery: int("With profile: ticks per profiler window (default 50, 5 s at 10 Hz).", { minimum: 1, maximum: 10000 }),
+    timeout: int("Seconds to wait for boot (default 600).", { minimum: 10 }),
+    env: {
+      type: "object",
+      description: "Variables to set in the server's environment, such as a feature switch: { \"EVEJS_SOME_SWITCH\": true }. " +
+        "Not the ones gridcheck sets itself (ports, data dir, agent bridge, profiler, the plugins' up flags); those are refused.",
+      additionalProperties: { type: ["string", "number", "boolean"] },
+    },
+  };
+}
+
 const TOOLS = [
   {
     name: "status",
@@ -541,33 +635,32 @@ const TOOLS = [
     description: "Managed and auto mode. Start this tree's server (and market daemon) in the background and wait until a character can log in, " +
       "about 25 s warm. For grid checks pass world (a saved world status lists). Without world or fresh it keeps " +
       "the current world. Refuses if the server is already up. run_scenario does its own up and down, so don't " +
-      "call this before a run.",
-    inputSchema: schema({
-      world: str("Saved world to restore before boot (status lists them)."),
-      fresh: bool("Drop the game store; the boot seeds a new world from the reference data."),
-      market: bool("Start the market daemon (default true)."),
-      ...Object.fromEntries(REGISTRY.upFlags.map((flag) => [flag.key, flag.type === "bool"
-        ? bool(flag.description || `--${flag.flag}`)
-        : num(flag.description || `--${flag.flag}`, { minimum: flag.min, maximum: flag.max })])),
-      profile: bool("Boot with the tree's tick profiler (EVEJS_TICK_PROFILE=1), so perf and a watch with perf " +
-        "break each window of ticks down by subsystem. Tick durations need no profiler."),
-      profileEvery: int("With profile: ticks per profiler window (default 50, 5 s at 10 Hz).", { minimum: 1, maximum: 10000 }),
-      timeout: int("Seconds to wait for boot (default 600).", { minimum: 10 }),
-      env: {
-        type: "object",
-        description: "Variables to set in the server's environment, such as a feature switch: { \"EVEJS_SOME_SWITCH\": true }. " +
-          "Not the ones gridcheck sets itself (ports, data dir, agent bridge, profiler, the plugins' up flags); those are refused.",
-        additionalProperties: { type: ["string", "number", "boolean"] },
-      },
-    }),
+      "call this before a run. The server runs under real Node even when this MCP server runs under an Electron " +
+      "app's node (the first node on PATH, or GRIDCHECK_NODE). To reload changed server code, restart.",
+    inputSchema: schema(upProperties()),
     run: simple("up"),
   },
   {
     name: "down",
     description: "Stop this tree's server cleanly (store flushed, world lease released) and its market daemon. " +
+      "It stops the EVE clients client_launch started first, unless keepClients. " +
       "Also ends a background run early: its watch ends and it writes its report.",
-    inputSchema: schema({ force: bool("Kill a server that is still booting and has no agent bridge yet.") }),
+    inputSchema: schema({
+      force: bool("Kill a server that is still booting and has no agent bridge yet."),
+      keepClients: bool("Leave the EVE clients running; they lose their connection."),
+    }),
     run: simple("down"),
+  },
+  {
+    name: "restart",
+    description: "down, then up with the world kept: one call to load changed server code. clients: true launches the EVE " +
+      "clients that were attached again, with the same account and options, and waits until they are in game. With no up " +
+      "options it boots with the last up's env, profile and plugin flags. The headless character needs login again after.",
+    inputSchema: schema({
+      clients: bool("Launch the EVE clients that were attached (or launched) again once the server is up."),
+      ...upProperties(),
+    }),
+    run: simple("restart"),
   },
   {
     name: "login",
@@ -585,9 +678,12 @@ const TOOLS = [
   },
   {
     name: "teleport",
-    description: "Teleport the ship to a system with stock /tr.",
+    description: "Teleport the ship to a system with stock /tr. A name is looked up first (stock /tr me <name> misses " +
+      "some systems), so names work. as: \"client\" moves a real EVE client's character instead.",
     inputSchema: schema({
       system: str("Solar system name or ID, e.g. Amamake."),
+      as: str("Whose ship: headless (default) or client.", { enum: ["headless", "client"] }),
+      user: str("With as client: the client's account, when more than one is online."),
     }, ["system"]),
     run: simple("teleport"),
   },
@@ -596,16 +692,39 @@ const TOOLS = [
     description: "Give the logged-in character a new ship by item name, fitted, with drones, cargo and loaded charges, and " +
       "board it where it is, docked or in space (in space the old ship is removed). Names must be exact item names; " +
       "\"Name xN\" is N of one. Every skill the hull, modules, drones and charges need is checked first: a refusal lists " +
-      "the missing skills (or the unknown names) and changes nothing. /allskills grants every skill.",
+      "the missing skills (or the unknown names) and changes nothing. /allskills grants every skill. With into, the ship " +
+      "is not boarded: it is left fitted in that station hangar or corporation office division, for that owner.",
     inputSchema: schema({
       ship: str("The hull, e.g. Tristan."),
       modules: { type: "array", items: { type: "string" }, description: "Fitted modules, e.g. [\"Light Neutron Blaster II x2\", \"1MN Afterburner II\"]." },
       drones: { type: "array", items: { type: "string" }, description: "Drone bay, e.g. [\"Hobgoblin II x5\"]." },
       cargo: { type: "array", items: { type: "string" }, description: "Cargo hold, e.g. [\"Antimatter Charge S x400\"]." },
       charges: { type: "array", items: { type: "string" }, description: "Charges to load: a full clip in every fitted module that takes one; no count." },
+      into: int("Leave the ship here instead of boarding it: a station ID, or a corporation office's ID (the one the client opens it by). " +
+        "The character needn't be docked there or in that corporation.", { minimum: 1 }),
+      owner: int("With into: the owner. Default the character, or the office's corporation (the only owner an office takes). " +
+        "A station hangar takes any character.", { minimum: 1 }),
+      flag: int("With into: the hangar flag. 4 in a station (the only one); in an office 115 is division 1 (default) through 121.", { minimum: 1 }),
       json: bool("The bridge's reply as JSON."),
     }, ["ship"]),
     run: simple("loadout"),
+  },
+  {
+    name: "world_items",
+    description: "List items from the world, read-only: what sits in a station hangar, corporation office, ship or container " +
+      "(location), or one item and what's directly inside it (item). A running server answers from its live item store, " +
+      "otherwise the tree's game store file does, and the output says which. Each row: itemID, type, owner, location, flag, " +
+      "quantity, assembled or packaged, custom name, and how many items a ship or container holds.",
+    inputSchema: schema({
+      location: int("List the items directly in this location ID (a station, an office, a ship, a container).", { minimum: 1 }),
+      item: int("Show this item and what's directly inside it. Give item or location, not both.", { minimum: 1 }),
+      owner: int("Only this owner's items.", { minimum: 1 }),
+      flag: int("Only this flag: 4 hangar, 5 cargo, 87 drone bay, 115-121 corporation office divisions 1-7.", { minimum: 0 }),
+      type: str("Only this type: a typeID or an exact item name."),
+      limit: int("Most rows to return (default 200).", { minimum: 1, maximum: 5000 }),
+      json: bool("The rows as JSON."),
+    }),
+    run: simple("world_items"),
   },
   {
     name: "grid",
@@ -616,15 +735,38 @@ const TOOLS = [
       range: num("Cut-off in km (default 10,000).", { exclusiveMinimum: 0 }),
       all: bool("Everything the session can see, nothing collapsed."),
       kind: str("Only rows of this kind, e.g. planet, stargate, station, asteroid; a kind no row has lists the kinds there are."),
-      json: bool("The bridge's full reply as JSON (field names match scenario conditions)."),
+      npc: bool("Only NPC rows."),
+      fields: { type: "array", items: { type: "string" }, description: "Keep only these keys of each row, e.g. [\"itemID\", \"name\", \"capacitorPct\", \"activeModules\"]. " +
+        "Prints JSON. An unknown name is an error that lists the valid ones." },
+      at: int("An entity's itemID: read the grid around it, with no logged-in character, so nobody is put in its system. " +
+        "Range defaults to 7,864 km. The entity's own row is marked anchor.", { minimum: 1 }),
+      json: bool("The bridge's full reply as JSON (field names match scenario conditions). range, kind and npc cut the rows; without them it is the whole grid, often over 100 KB."),
     }),
     run: simple("grid"),
   },
   {
+    name: "inspect",
+    description: "One entity by itemID, from any loaded scene, with no logged-in character: its position, speed, shield/armour/hull, " +
+      "owner, capacitor, every running module effect (target, cycle, next cycle in ms, cap need, stop reason), locks, fitted modules, " +
+      "the NPC controller (decision, targets, paused state, next think) and the active plugins' data. Times are the scene's clock. " +
+      "Use it to see why a ship's modules or AI are doing what they do. An ID in a system whose scene is not loaded is an error that says so.",
+    inputSchema: schema({
+      itemID: int("The entity's itemID, as grid and watch show it (#id).", { minimum: 1 }),
+      json: bool("The bridge's record as JSON."),
+    }, ["itemID"]),
+    run: simple("inspect"),
+  },
+  {
     name: "slash",
     description: "Run a slash command on the character's own session, as if typed in game chat, e.g. \"/tr me 30002537\", " +
-      "\"/heal\", \"/dock\", \"/npc 3\", \"/ship Rifter\". Returns the command's reply. A refused command is an error.",
-    inputSchema: schema({ command: str("The command line, starting with /.") }, ["command"]),
+      "\"/heal\", \"/dock\", \"/npc 3\", \"/ship Rifter\". Returns the command's reply. A refused command is an error. " +
+      "as: \"client\" runs it as a real EVE client's character (client_launch), for a command that needs that player, " +
+      "such as one about their corporation. /tr wants a system ID; teleport takes a name.",
+    inputSchema: schema({
+      command: str("The command line, starting with /."),
+      as: str("Whose session: headless (default, the logged-in headless character) or client.", { enum: ["headless", "client"] }),
+      user: str("With as client: the client's account, when more than one is online."),
+    }, ["command"]),
     run: simple("slash"),
   },
   {
@@ -641,6 +783,9 @@ const TOOLS = [
         "diverge (only DIVERGE lines) or off.", { enum: ["all", "fx", "diverge", "off"] }),
       divergeMeters: num("Position error that counts as DIVERGE (default 5000).", { exclusiveMinimum: 0 }),
       positions: bool("Record ball positions too, so the viewer (gridcheck view) can draw this watch."),
+      at: int("An entity's itemID: watch the grid around it instead of the character's, with no session. Nobody is put in its system, " +
+        "so idle NPC activity there is not stopped by the observer. No client view. The watch ends if the entity is gone.", { minimum: 1 }),
+      modules: bool("MODULE and CAPACITOR lines (default true); false turns them off. Sampled every 2 s, so a module that goes off and on inside one interval shows as restarted."),
       grep: str("Keep every server log line matching this regex instead of the default NPC and plugin lines."),
       log: bool("Include server log lines (default true)."),
       json: bool("Print events as JSON lines, with the field names scenario conditions use."),
@@ -872,7 +1017,8 @@ const TOOLS = [
     name: "client_screenshot",
     description: "A picture of the EVE client. By default the client saves what it last drew, which works while its window " +
       "is covered or minimized; if it can't, the window is drawn with PrintWindow from outside. Saved under " +
-      "_local/gridcheck/client/ (or the run's client/ folder) and returned as an image.",
+      "_local/gridcheck/client/ (or the run's client/ folder) and returned as an image. The text says how to turn " +
+      "pixels in the picture into the UI coordinates client_pointer takes.",
     inputSchema: schema({
       run: str("Save it in this run's folder."),
       source: str("auto (default), client (only the client's own picture) or window (only PrintWindow, not while minimized).",
@@ -894,7 +1040,7 @@ const TOOLS = [
       return {
         content: [
           { type: "image", data, mimeType: /\.png$/i.test(shot.file) ? "image/png" : "image/jpeg" },
-          { type: "text", text: `${relativePath(shot.file)} (${shot.width}x${shot.height}${shot.title ? `, "${shot.title}"` : ""})` },
+          { type: "text", text: `${relativePath(shot.file)} (${scaleText(shot)}${shot.title ? `, "${shot.title}"` : ""})` },
         ],
         isError: false,
       };
@@ -926,7 +1072,8 @@ const TOOLS = [
   {
     name: "client_events",
     description: "The EVE client's logged exceptions (unhandled tasklet errors included), the notify events it records " +
-      "(OnSessionChanged by default), its actions and the agent's own errors, oldest first: the attached client's since it " +
+      "(OnSessionChanged by default), every message it shows the player (notices that fade, UserError and other dialog text), " +
+      "its actions and the agent's own errors, oldest first: the attached client's since it " +
       "attached, the last 50. The answer ends with the since to pass for newer ones. A watch shows the same as " +
       "CLIENT_EXCEPTION and CLIENT_EVENT lines beside the server's.",
     inputSchema: schema({
@@ -941,10 +1088,11 @@ const TOOLS = [
   },
   {
     name: "client_find",
-    description: "One displayed node of the EVE client's UI, by path (as client_ui prints it) or by cls, name and text " +
-      "(contains, case-insensitive), and the node a click on it goes to (it or the nearest one above with a click " +
-      "handler). Of nested matches, such as a button and its own label, the outermost counts. Several matches is an " +
-      "error listing them; pass index or path.",
+    description: "One displayed node of the EVE client's UI, by path (as client_ui prints it), cls, name and text, all " +
+      "given ones together (cls, name, text contain, case-insensitive), and the node a click on it goes to (it or the nearest " +
+      "one above with a click handler that takes mouse input: a click passes through a label). Says whether a scroll " +
+      "container holds it out of view. Of nested matches, such as a button and its own label, the outermost counts. " +
+      "Several matches is an error listing them with unique paths; pass index or path.",
     inputSchema: schema({ ...clientNodeProps(), user: str("The client's account, when more than one is online."),
       json: bool("The answer as JSON.") }),
     run: simple("client_find"),
@@ -953,8 +1101,9 @@ const TOOLS = [
     name: "client_click",
     description: "Click a node of the EVE client's UI (found as client_find finds it) from inside the client: its own " +
       "click handler runs (a button's press, which checks it is enabled), so the client's window may stay in the " +
-      "background. Answers whether what it started finished within wait, and any dialog it opened (then " +
-      "client_click that dialog's button).",
+      "background. A node in a scroll container is scrolled into view first. Answers whether what it started finished " +
+      "within wait, any dialog it opened (then client_click that dialog's button), and what the client told the player " +
+      "meanwhile (a refusal such as \"That system has no asteroid belt\").",
     inputSchema: schema({ ...clientNodeProps(), double: bool("Double-click (OnDblClick)."), ...clientDriveProps() }),
     run: simple("client_click"),
   },
@@ -1027,6 +1176,52 @@ const TOOLS = [
     run: simple("client_act"),
   },
   {
+    name: "client_menu",
+    description: "Pick from a context menu in the EVE client in one call: opens the menu as a right click would " +
+      "(on a UI node, found as client_find finds it, or on a space item by itemID through the client's menu service), takes " +
+      "each entry by its label (exact match first, else contains, case-insensitive), opening submenus on the way, and clicks " +
+      "the last. Answers which entries it picked, whether what they started finished, and any dialog it opened or message it " +
+      "showed. An entry that isn't there is an error listing the ones that are.",
+    inputSchema: schema({
+      ...clientNodeProps(),
+      itemID: { type: ["string", "number"], description: "A space item's ID (client_ballpark lists them), instead of a node." },
+      entries: { type: "array", items: { type: "string" }, minItems: 1,
+        description: "Labels, outermost first, e.g. [\"Expel Member\", \"Confirm Expel Member\"]. All but the last open a submenu." },
+      ...clientDriveProps(),
+    }, ["entries"]),
+    run: simple("client_menu"),
+  },
+  {
+    name: "client_wait",
+    description: "Wait in the EVE client for a condition: evaluates the Python 2.7 code there (as client_eval) every `every` " +
+      "seconds until its value is true in Python's sense, then answers the value and how long it took. Not true within " +
+      "timeout is an error with the last value. Errors the code raises count as not yet, except a syntax error.",
+    inputSchema: schema({
+      code: str("An expression, e.g. uicore.registry.GetModalWindow() is None or session.stationid."),
+      timeout: num("Most seconds to wait (default 60).", { minimum: 0, maximum: 3600 }),
+      every: num("Seconds between tries (default 0.5).", { minimum: 0.05, maximum: 60 }),
+      user: str("The client's account, when more than one is online."),
+      json: bool("The answer as JSON."),
+    }, ["code"]),
+    run: simple("client_wait"),
+  },
+  {
+    name: "client_rpc",
+    description: "Call a server service from inside the EVE client as its character: sm.RemoteSvc(service).method(...). " +
+      "With payload, the one argument is that value JSON-encoded and a JSON " +
+      "string reply is decoded. With args, they are passed as they are. A server UserError comes back as an error with " +
+      "its message.",
+    inputSchema: schema({
+      service: str("The service's name."),
+      method: str("The method's name."),
+      payload: { type: ["object", "array", "string", "number", "boolean"], description: "Sent as one JSON string." },
+      args: { type: "array", description: "Sent as separate arguments (strings, numbers, booleans, lists, objects)." },
+      user: str("The client's account, when more than one is online."),
+      json: bool("The answer as JSON."),
+    }, ["service", "method"]),
+    run: simple("client_rpc"),
+  },
+  {
     name: "run_scenario",
     description: (MANAGED
       ? "Run a scenario: boot its world, run setup, watch until a stop condition, shut down, and write a "
@@ -1076,7 +1271,7 @@ const TOOLS = [
         ...(params.world ? [`--world=${params.world}`] : []), "--", target];
 
       if (params.wait === false) {
-        const started = RUNS.startBackground({ cliPath: CLI_PATH, args, runID, scenarioFile: relativePath(target) });
+        const started = RUNS.startBackground({ cliPath: CLI_PATH, args, runID, scenarioFile: relativePath(target), node: cliNode() });
         return textResult(`${prefix}${check.output.split("\n")[0]}\nstarted run ${runID} in the background (pid ${started.pid}); ` +
           `console in ${started.log}.\n${RUNS.detachedText(runID, MAX_WAIT_SECONDS)}`);
       }
@@ -1140,9 +1335,11 @@ function checkParams(tool, params) {
       continue;
     }
     const type = Array.isArray(value) ? "array" : value === null ? "null" : typeof value;
-    const ok = rule.type === "integer" ? Number.isInteger(value) : rule.type === type;
+    // A type may be a list, as client_act's target is ["string", "number"].
+    const types = [].concat(rule.type);
+    const ok = types.some((wanted) => (wanted === "integer" ? Number.isInteger(value) : wanted === type));
     if (!ok) {
-      problems.push(`${key} must be ${rule.type === "integer" ? "an integer" : `a ${rule.type}`}`);
+      problems.push(`${key} must be ${types.map((wanted) => (wanted === "integer" ? "an integer" : `a ${wanted}`)).join(" or ")}`);
       continue;
     }
     if (rule.enum && !rule.enum.includes(value)) problems.push(`${key} must be one of ${rule.enum.join(", ")}`);

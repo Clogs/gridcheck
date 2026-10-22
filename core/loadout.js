@@ -13,9 +13,14 @@
 // bridge's POST /loadout (bridge/loadout.js) builds it; this file only reads
 // and describes one, so the CLI, a scenario step and the MCP tool check a
 // loadout the same way before anything reaches a server.
+//
+// Three more keys say where it goes when it isn't boarded: "into" (a station
+// or a corporation office, by ID), and with it "owner" and "flag". Leave
+// `into` out and the character boards the ship.
 
 const LISTS = Object.freeze(["modules", "drones", "cargo", "charges"]);
-const KEYS = Object.freeze(["ship", ...LISTS]);
+const PLACEMENT = Object.freeze(["into", "owner", "flag"]);
+const KEYS = Object.freeze(["ship", ...LISTS, ...PLACEMENT]);
 const MAX_QUANTITY = 1_000_000;
 const COUNT = /^(.*?)\s+x(\d+)$/i;
 
@@ -76,6 +81,16 @@ function normalizeLoadout(raw) {
     });
     loadout[key] = [...byName.values()];
   }
+  for (const key of PLACEMENT) {
+    if (raw[key] === undefined || raw[key] === null) continue;
+    const text = String(raw[key]).trim();
+    const id = typeof raw[key] === "number" ? raw[key] : /^\d+$/.test(text) ? Number(text) : NaN;
+    if (!(Number.isSafeInteger(id) && id > 0)) problems.push(`${key}: an ID, a whole number above 0`);
+    else loadout[key] = id;
+  }
+  if (!loadout.into && (loadout.owner || loadout.flag) && !problems.some((line) => line.startsWith("into:"))) {
+    problems.push("owner and flag say where `into` leaves the ship; give into too");
+  }
   return { loadout: problems.length ? null : loadout, problems };
 }
 
@@ -84,6 +99,7 @@ function loadoutBody(loadout) {
   const entry = ({ name, quantity }) => (quantity > 1 ? `${name} x${quantity}` : name);
   const body = { ship: loadout.ship };
   for (const key of LISTS) if (loadout[key].length) body[key] = loadout[key].map(entry);
+  for (const key of PLACEMENT) if (loadout[key]) body[key] = loadout[key];
   return body;
 }
 
@@ -94,15 +110,18 @@ function describeLoadout(loadout) {
   if (loadout.drones.length) parts.push(`${count(loadout.drones)} drone(s)`);
   if (loadout.charges.length) parts.push(`${loadout.charges.map((entry) => entry.name).join(", ")} loaded`);
   if (loadout.cargo.length) parts.push(`${loadout.cargo.length} cargo stack(s)`);
-  return `loadout ${loadout.ship}${parts.length ? `: ${parts.join(", ")}` : ""}`;
+  return `loadout ${loadout.ship}${loadout.into ? ` into ${loadout.into}` : ""}${parts.length ? `: ${parts.join(", ")}` : ""}`;
 }
 
 // What the bridge answered, as the CLI prints it.
 function formatLoadoutReply(reply) {
   const lines = [];
   if (reply.ok) {
-    lines.push(`boarded ${reply.ship.name} ${reply.ship.itemID} ${reply.docked ? `docked in ${reply.locationID}` : `in space, system ${reply.systemID}`}` +
-      `${reply.replacedShipID ? `; the old ship ${reply.replacedShipID} was removed` : ""}`);
+    if (reply.placed) lines.push(`built ${reply.ship.name} ${reply.ship.itemID} in ${reply.placed.description}; not boarded`);
+    else {
+      lines.push(`boarded ${reply.ship.name} ${reply.ship.itemID} ${reply.docked ? `docked in ${reply.locationID}` : `in space, system ${reply.systemID}`}` +
+        `${reply.replacedShipID ? `; the old ship ${reply.replacedShipID} was removed` : ""}`);
+    }
     for (const module of reply.modules || []) {
       lines.push(`  ${String(module.slot || "slot").padEnd(5)} ${module.name}${module.charge ? ` (${module.charge.name} x${module.charge.quantity})` : ""}`);
     }
@@ -131,6 +150,8 @@ function formatLoadoutReply(reply) {
 module.exports = {
   KEYS,
   LISTS,
+  PLACEMENT,
+  isObject,
   describeLoadout,
   formatLoadoutReply,
   loadoutBody,

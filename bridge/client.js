@@ -203,6 +203,9 @@ function createClientAgent({ log, patched = () => false, testTree = () => false,
         traceback: Array.isArray(raw.traceback) ? raw.traceback.map(String) : [] };
       return { ...line, noise: clientNoise(line) };
     }
+    if (raw.kind === "message") {
+      return { kind: "CLIENT_EVENT", ...who, event: "message", key: str(raw.key), text: str(raw.text), messageType: str(raw.type) };
+    }
     if (raw.kind === "notify") return { kind: "CLIENT_EVENT", ...who, event: str(raw.event), args: str(raw.args) };
     return { kind: "CLIENT_EVENT", ...who, event: str(raw.kind) || "unknown", op: str(raw.op), error: str(raw.error),
       args: str(raw.args) };

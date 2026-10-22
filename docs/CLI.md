@@ -73,6 +73,10 @@ gridcheck up --world starter      # managed or auto mode; a run does this itself
 gridcheck login
 gridcheck undock
 gridcheck grid                    # what's on grid now; --json shows the field names conditions use
+gridcheck grid --at <itemID>      # the same around any entity, with no character logged in
+gridcheck inspect <itemID>        # one entity's capacitor, running modules, locks and AI state
+gridcheck loadout Tristan --into <officeID>   # a fitted ship left in a corp office, not boarded
+gridcheck world items --location <id>         # read-only: what sits in a hangar, office or ship (--item <id> for one)
 gridcheck slash "/npc 2"          # any GM command, as the character
 gridcheck act lock nearest npc    # player actions: approach, orbit, lock, activate, launchDrones, ...
 gridcheck watch --for 60          # what changed, as timeline lines
@@ -85,6 +89,11 @@ foreground; don't background it and poll its log. `--env NAME=VALUE`, repeatable
 the server's environment, such as a feature switch the tree's config leaves off. A scenario sets the
 same with `"up": { "env": { "NAME": "value" } }`. New characters skip the AIR tutorial, which EveJS
 261018.1's config turns on; `--env EVEJS_NEW_CHARACTER_EXPERIENCE_MODE=tutorial` keeps it.
+
+After changing the server's code, `gridcheck restart` stops it and boots it again with the world
+kept; `--clients` launches the EVE clients you had attached again. Log the headless character in
+again after. `gridcheck slash "<command>" --as client` runs a command as the real client's
+character, and `gridcheck teleport <name>` takes a system name, which stock `/tr` can miss.
 
 Start `gridcheck watch --for 60` in the background before you act, to see the action's effect. `gridcheck
 perf --for 10` measures server ticks; the primer covers performance runs.

@@ -55,12 +55,28 @@ function targetLabel(targetID, byID, selfID) {
   return target ? (target.name || target.typeName || `#${targetID}`) : `#${targetID}`;
 }
 
+// A cell of the cap column: the capacitor as a whole percent, or - when the row has none.
+function capCell(row) {
+  const pct = row.capacitorPct;
+  return pct === null || pct === undefined || !Number.isFinite(Number(pct)) ? "-" : `${Math.round(Number(pct))}%`;
+}
+
+function modsCell(row) {
+  return Array.isArray(row.activeModules) ? String(row.activeModules.length) : "-";
+}
+
 function headerLine(grid, options = {}) {
   const place = grid.systemName || (grid.solarSystemID ? `system ${grid.solarSystemID}` : "unknown system");
   const security = Number.isFinite(Number(grid.security)) && grid.security !== null
     ? ` (${Number(grid.security).toFixed(1)})`
     : "";
   const clock = Number.isFinite(options.sinceMs) ? `  t+${formatClock(options.sinceMs)}` : "";
+  if (grid.anchor && grid.inSpace) {
+    const anchor = grid.anchor;
+    const range = grid.rangeMeters ? `, within ${formatDistance(grid.rangeMeters)}` : "";
+    return `${place}${security}${clock}  anchor: ${anchor.name || anchor.typeName || "entity"} #${anchor.itemID} ` +
+      `(${anchor.mode || "?"}${range})`;
+  }
   if (!grid.inSpace) {
     const where = grid.stationID ? `docked in station ${grid.stationID}`
       : grid.structureID ? `docked in structure ${grid.structureID}` : "not in space";
@@ -90,10 +106,13 @@ function formatGrid(grid, options = {}) {
   const kindOf = (row) => String(row.kind || "").toLowerCase();
   const wanted = options.kind ? String(options.kind).toLowerCase() : null;
   const rows = Array.isArray(grid.entities) ? grid.entities : [];
-  const pool = wanted ? rows.filter((row) => row.isSelf || kindOf(row) === wanted) : rows;
+  // The ship or anchor the distances are from always stays.
+  const focal = (row) => row.isSelf || row.anchor === true;
+  let pool = wanted ? rows.filter((row) => focal(row) || kindOf(row) === wanted) : rows;
+  if (options.npc) pool = pool.filter((row) => focal(row) || row.isNpc);
   let shown = options.all
     ? pool
-    : pool.filter((row) => row.isSelf || (row.distanceMeters !== null && row.distanceMeters <= rangeMeters));
+    : pool.filter((row) => focal(row) || (row.distanceMeters !== null && row.distanceMeters <= rangeMeters));
   const hidden = pool.filter((row) => !shown.includes(row));
   const byID = new Map(rows.map((row) => [row.itemID, row]));
   const selfID = grid.self && grid.self.itemID;
@@ -102,7 +121,7 @@ function formatGrid(grid, options = {}) {
   // that isn't a ship, the nearest COLLAPSE_KEEP stay and the rest are a count.
   const collapsed = [];
   if (!options.all && !wanted) {
-    const collapsible = (row) => !row.isSelf && !row.isNpc && !row.characterID && kindOf(row) !== "" && kindOf(row) !== "ship";
+    const collapsible = (row) => !focal(row) && !row.isNpc && !row.characterID && kindOf(row) !== "" && kindOf(row) !== "ship";
     const counts = new Map();
     for (const row of shown) if (collapsible(row)) counts.set(row.kind, (counts.get(row.kind) || 0) + 1);
     const big = new Set([...counts].filter(([, count]) => count > COLLAPSE_AFTER).map(([kind]) => kind));
@@ -117,9 +136,13 @@ function formatGrid(grid, options = {}) {
     }
   }
 
-  lines.push(`${fit("dist", 12)}${fit("name", 24)}${fit("type", 20)}${fit("who", 8)}${fit("mode", 9)}${fit("target", 18)}S/A/H`);
+  // Cap % and a count of running modules, only when some row has them.
+  const showCap = shown.some((row) => capCell(row) !== "-" || (Array.isArray(row.activeModules) && row.activeModules.length > 0));
+  lines.push(`${fit("dist", 12)}${fit("name", 24)}${fit("type", 20)}${fit("who", 8)}${fit("mode", 9)}${fit("target", 18)}` +
+    `${showCap ? `${fit("S/A/H", 12)}${fit("cap", 6)}mods` : "S/A/H"}`);
   for (const row of shown) {
-    const name = row.isSelf ? `(self) ${row.name || row.typeName || ""}` : (row.name || row.typeName || `#${row.itemID}`);
+    const name = row.isSelf ? `(self) ${row.name || row.typeName || ""}`
+      : row.anchor ? `(anchor) ${row.name || row.typeName || ""}` : (row.name || row.typeName || `#${row.itemID}`);
     lines.push(
       fit(formatDistance(row.distanceMeters), 12) +
       fit(name, 24) +
@@ -127,7 +150,7 @@ function formatGrid(grid, options = {}) {
       fit(whoIs(row), 8) +
       fit(row.mode || "-", 9) +
       fit(targetLabel(row.targetEntityID, byID, selfID), 18) +
-      health(row),
+      (showCap ? `${fit(health(row), 12)}${fit(capCell(row), 6)}${modsCell(row)}` : health(row)),
     );
   }
   lines.push(...collapsed);
@@ -138,8 +161,9 @@ function formatGrid(grid, options = {}) {
       `at ${formatDistance(nearest.distanceMeters)} (--all to list)`,
     );
   }
-  if (wanted && !pool.some((row) => !row.isSelf)) {
-    const kinds = [...new Set(rows.filter((row) => !row.isSelf && row.kind).map((row) => row.kind))].sort();
+  if (options.npc && !wanted && !pool.some((row) => !focal(row))) lines.push("no NPCs on this grid");
+  if (wanted && !pool.some((row) => !focal(row))) {
+    const kinds = [...new Set(rows.filter((row) => !focal(row) && row.kind).map((row) => row.kind))].sort();
     lines.push(`nothing of kind ${wanted}${kinds.length ? `; the kinds the session sees: ${kinds.join(", ")}` : ""}`);
   }
   return lines.join("\n");

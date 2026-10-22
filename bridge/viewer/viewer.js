@@ -95,7 +95,7 @@
       case "FX": return `${e.label || e.itemID} ${e.guid || ""}${e.targetLabel ? ` -> ${e.targetLabel}` : ""}`;
       case "CLIENT": return `${e.op || ""} ${e.label || ""}${e.mode ? ` ${e.mode}` : ""}${e.error ? ` ${e.error}` : ""}`;
       case "CLIENT_EXCEPTION": return `${e.username || "client"}: ${e.type || "?"}: ${e.message || ""}${e.where ? `  at ${e.where}` : ""}`;
-      case "CLIENT_EVENT": return `${e.username || "client"}: ${e.event || "?"}${e.error ? ` ${e.error}` : e.args ? ` ${e.args}` : ""}`.slice(0, 200);
+      case "CLIENT_EVENT": return `${e.username || "client"}: ${e.event || "?"}${e.error ? ` ${e.error}` : e.text ? ` ${e.text}` : e.args ? ` ${e.args}` : ""}`.slice(0, 200);
       case "CLIENT_BALLPARK": return `${e.username || "client"}: ${e.ok ? "agrees with" : "disagrees with"} the server's grid` +
         ` shared ${e.shared}${e.missing ? `, ${e.missing} missing` : ""}${e.extra ? `, ${e.extra} extra` : ""}${e.moved ? `, ${e.moved} moved` : ""}`;
       case "CLIENT_BALL": return `${e.username || "client"}: ${e.label || e.itemID} ${e.status}` +

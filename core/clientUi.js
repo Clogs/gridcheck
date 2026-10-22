@@ -50,11 +50,21 @@ function validateCheck(spec) {
   return spec;
 }
 
+// A path as the agent prints it (siblings that share a label get [n]), or one that leaves out the
+// [n]: that names every sibling with the label (bridge/client/agent.py path_matches).
+function pathMatches(wanted, actual) {
+  if (wanted === actual) return true;
+  const left = wanted.split("/");
+  const right = actual.split("/");
+  return left.length === right.length && left.every((segment, index) => segment === right[index] || segment === right[index].replace(/\[\d+\]$/, ""));
+}
+
 function selected(node, selector) {
   return Object.entries(selector).every(([key, wanted]) => {
     if (key === "exact") return true;
     const actual = String(node[key] ?? "");
-    return key === "path" || selector.exact ? actual === wanted : actual.toLowerCase().includes(wanted.toLowerCase());
+    if (key === "path") return pathMatches(wanted, actual);
+    return selector.exact ? actual === wanted : actual.toLowerCase().includes(wanted.toLowerCase());
   });
 }
 
@@ -146,4 +156,4 @@ async function waitForUi({ read, spec, seconds = 0, stableMs = 0, pollMs = 250, 
   return { ...result, ok: false, elapsedMs: now() - startedAt, failures: [...result.failures, ...waited] };
 }
 
-module.exports = { validateCheck, checkUi, waitForUi };
+module.exports = { validateCheck, checkUi, waitForUi, pathMatches };

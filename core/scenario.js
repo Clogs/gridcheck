@@ -41,7 +41,7 @@ const TOP_KEYS = new Set(["name", "description", "world", "recipe", "up", "setup
 const CORE_UP_KEYS = ["market", "timeout", "profile", "profileEvery", "env"];
 // An environment variable's name, as `up --env NAME=VALUE` and a scenario's up.env take it.
 const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
-const WATCH_KEYS = new Set(["every", "offgridEvery", "client", "divergeMeters", "log", "grep", "perf", "ballpark", "screenshots"]);
+const WATCH_KEYS = new Set(["every", "offgridEvery", "client", "divergeMeters", "log", "grep", "perf", "modules", "ballpark", "screenshots"]);
 // A tick profiler window every 50 ticks (5 s at 10 Hz), beside a PERF window every 5 s.
 const PROFILE_EVERY_TICKS = 50;
 const PERF_EVERY_SECONDS = 5;
@@ -319,7 +319,7 @@ function validateScenario(raw, { source = "scenario", defaultName = null, worldE
   if (up.profileEvery !== null && !up.profile) problem("up.profileEvery", "the tick profiler's window; add \"profile\": true");
   // A server booted with the profiler is a performance run: its watch keeps tick figures too.
   const watch = { every: 2, offgridEvery: 5, client: "diverge", divergeMeters: null, log: true, grep: null,
-    perf: up.profile ? PERF_EVERY_SECONDS : 0, ballpark: 0, screenshots: [] };
+    perf: up.profile ? PERF_EVERY_SECONDS : 0, modules: true, ballpark: 0, screenshots: [] };
   // Read after expect, once every step's binding is known.
   let rawScreenshots;
   if (raw.watch !== undefined) {
@@ -332,6 +332,7 @@ function validateScenario(raw, { source = "scenario", defaultName = null, worldE
         else if ((key === "offgridEvery" || key === "divergeMeters") && !positive(value)) problem(`watch.${key}`, "a number above 0");
         else if (key === "client" && !["all", "fx", "diverge", "off"].includes(value)) problem("watch.client", "all, fx, diverge or off");
         else if (key === "log" && typeof value !== "boolean") problem("watch.log", "true or false");
+        else if (key === "modules" && typeof value !== "boolean") problem("watch.modules", "true or false");
         else if (key === "perf") {
           if (value === true) watch.perf = PERF_EVERY_SECONDS;
           else if (value === false) watch.perf = 0;
@@ -370,6 +371,8 @@ function validateScenario(raw, { source = "scenario", defaultName = null, worldE
         problem(where, 'DIVERGE needs the client view; watch.client is "off"');
       } else if (parsed.kind === "LOG" && !watch.log) {
         problem(where, "LOG needs watch.log true");
+      } else if ((parsed.kind === "MODULE" || parsed.kind === "CAPACITOR") && !watch.modules) {
+        problem(where, `${parsed.kind} needs watch.modules true`);
       } else if (parsed.kind === "PERF" && !watch.perf) {
         problem(where, 'PERF needs "watch": { "perf": true }, or "up": { "profile": true }');
       } else if (parsed.kind === "PROFILE" && !(up.profile && watch.perf)) {

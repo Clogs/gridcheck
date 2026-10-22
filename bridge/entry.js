@@ -22,11 +22,14 @@ const path = require("path");
 const { createAgentBridgeHttp, removeHandshake } = require("./http");
 const { createAgentBridgeRoutes } = require("./routes");
 const { createGridReader } = require("./grid");
+const { createEntityLocator } = require("./entities");
+const { createInspector } = require("./inspect");
 const { annotateRow, createGridWatch } = require("./watch");
 const { createDestinyTee, probeDestinyLayout } = require("./destiny");
 const { createAgentBridgeViewer } = require("./viewer");
 const { createClientAgent } = require("./client");
-const { createLoadout, loadLoadoutModules } = require("./loadout");
+const { createLoadout, loadIntoModules, loadLoadoutModules, loadModuleTable } = require("./loadout");
+const { ITEMS_EXPORTS, createItemsReader } = require("./items");
 const { createPerfMonitor } = require("./perf");
 const { createStock, serverRequire } = require("./stock");
 const { DEFAULT_PLUGINS_DIR, loadPlugins, startPlugins, stopPlugins } = require("./plugins");
@@ -130,15 +133,28 @@ function createService({ serverRoot, stock: givenStock = null, pluginsDir = DEFA
       stock, require: serverRequire(serverRoot), log, treeRoot, serverRoot, seams,
     }, { log });
     pluginStatus = { active: hooks.map((hook) => hook.name), skipped };
+    const controllerFor = (itemID) => {
+      const npcs = optional(() => stock.npcRegistry);
+      return npcs && typeof npcs.getControllerByEntityID === "function" ? npcs.getControllerByEntityID(itemID) : null;
+    };
+    // The item store says where an item is, for "its system's scene isn't loaded".
+    const describeItem = (itemID) => {
+      const store = optional(() => serverRequire(serverRoot)("services/inventory/itemStore"));
+      return store && typeof store.findItemById === "function" ? store.findItemById(itemID) : null;
+    };
+    const locate = createEntityLocator({
+      space: stock.space,
+      describeItem,
+      describeSystem: seams.describeSystem,
+    });
     const grid = createGridReader({
       space: stock.space,
       projectEntity: stock.webGateway.projectSpaceEntity,
       describeType: seams.describeType,
       describeSystem: seams.describeSystem,
+      locate,
       npcDecision: (entity) => {
-        const npcs = optional(() => stock.npcRegistry);
-        const controller = npcs && typeof npcs.getControllerByEntityID === "function"
-          ? npcs.getControllerByEntityID(entity.itemID) : null;
+        const controller = controllerFor(entity.itemID);
         return controller && typeof controller.lastDecision === "string" ? controller.lastDecision : null;
       },
     });
@@ -150,11 +166,24 @@ function createService({ serverRoot, stock: givenStock = null, pluginsDir = DEFA
     let loadoutBuilder = null;
     const loadout = () => {
       if (!loadoutBuilder) {
-        const { modules, missing } = loadLoadoutModules(serverRequire(serverRoot));
-        loadoutBuilder = missing.length ? { error: missing.join("; "), missing } : { run: createLoadout(modules), missing: [] };
+        const load = serverRequire(serverRoot);
+        const { modules, missing } = loadLoadoutModules(load);
+        const into = loadIntoModules(load);
+        loadoutBuilder = missing.length ? { error: missing.join("; "), missing, intoMissing: into.missing }
+          : { run: createLoadout({ ...modules, ...into.modules }, { intoMissing: into.missing }), missing: [], intoMissing: into.missing };
         if (missing.length) log.warn(`[AgentBridge] loadout off: ${loadoutBuilder.error}`);
+        else if (into.missing.length) log.warn(`[AgentBridge] loadout into off: ${into.missing.join("; ")}`);
       }
       return loadoutBuilder;
+    };
+    // Loaded on the first GET /items, for the same reason.
+    let itemsBuilder = null;
+    const items = () => {
+      if (!itemsBuilder) {
+        const { modules, missing } = loadModuleTable(ITEMS_EXPORTS, serverRequire(serverRoot));
+        itemsBuilder = missing.length ? { error: missing.join("; ") } : { run: createItemsReader(modules) };
+      }
+      return itemsBuilder;
     };
     // A PackagedAction carries its updates as marshalled bytes.
     const destinyTee = createDestinyTee({
@@ -180,9 +209,23 @@ function createService({ serverRoot, stock: givenStock = null, pluginsDir = DEFA
       liveSessions: () => stock.sessionRegistry.getSessions(),
     });
     const clientAgentOn = clientAgent.install(runtimeContext && runtimeContext.serviceManager, optional(() => stock.baseService));
+    const gridAnnotate = (row, entity, session) => annotateRow(hooks, row, entity, {
+      nowMs: Date.now(),
+      characterID: session && session.characterID,
+    });
+    const inspector = createInspector({
+      locate,
+      projectEntity: stock.webGateway.projectSpaceEntity,
+      describeType: seams.describeType,
+      describeSystem: seams.describeSystem,
+      controllerFor,
+      annotate: gridAnnotate,
+    });
     const watcher = createGridWatch({
       findSession: seams.findSession,
       readGrid: grid.readGrid,
+      readGridAt: grid.readGridAt,
+      explainAnchor: locate.explainMissing,
       hooks,
       killmails: optional(() => stock.killmailState),
       describeType: seams.describeType,
@@ -194,6 +237,9 @@ function createService({ serverRoot, stock: givenStock = null, pluginsDir = DEFA
       findSession: seams.findSession,
       executeChatCommand: seams.executeChatCommand,
       readGrid: grid.readGrid,
+      readGridAt: grid.readGridAt,
+      inspector,
+      explainAnchor: locate.explainMissing,
       watcher,
       // The installed owner-process handler turns SIGTERM into hooks, a store
       // flush and a lease release. Emitting it from inside is the one graceful
@@ -202,11 +248,9 @@ function createService({ serverRoot, stock: givenStock = null, pluginsDir = DEFA
       log,
       destinyTee,
       loadout,
+      items,
       perf,
-      gridAnnotate: (row, entity, session) => annotateRow(hooks, row, entity, {
-        nowMs: Date.now(),
-        characterID: session && session.characterID,
-      }),
+      gridAnnotate,
       extraRoutes: [
         ...(clientAgentOn ? [{ owner: "client agent", routes: clientAgent.routes }] : []),
         ...hooks.map((hook) => ({ owner: `plugin ${hook.name}`, routes: hook.routes })),
@@ -222,7 +266,7 @@ function createService({ serverRoot, stock: givenStock = null, pluginsDir = DEFA
           allowlist: optional(() => stock.webGateway.WEB_CALL_ALLOWLIST),
           allowlistError: "the gateway exports no WEB_CALL_ALLOWLIST",
           destiny: layout,
-          loadout: { missing: loadout().missing },
+          loadout: { missing: loadout().missing, intoMissing: loadout().intoMissing },
           client: clientAgent.status(),
         },
         live: {

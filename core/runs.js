@@ -289,12 +289,13 @@ function createRuns({ treeRoot, runsDir, e2eDir, surface = "mcp" }) {
   }
 
   // Starts `node <cli> <args>` detached, its console in the background dir.
+  // node: which node (core/node.js), this process's by default.
   // -> { pid, log } with log relative to the tree.
-  function startBackground({ cliPath, args, runID, scenarioFile }) {
+  function startBackground({ cliPath, args, runID, scenarioFile, node = process.execPath }) {
     fs.mkdirSync(backgroundDir, { recursive: true });
     const logPath = path.join(backgroundDir, `${runID}.log`);
     const out = fs.openSync(logPath, "w");
-    const child = spawn(process.execPath, [cliPath, ...args], {
+    const child = spawn(node, [cliPath, ...args], {
       cwd: treeRoot,
       detached: true,
       stdio: ["ignore", out, out],
