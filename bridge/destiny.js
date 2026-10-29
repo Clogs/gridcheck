@@ -261,12 +261,16 @@ const PROBE_STAMP = 4242;
 const PROBE_BIG_ID = 9_007_199_254_740_993n;
 const PROBE_SHIP = { kind: "ship", typeID: 587, radius: 35, mass: 1_000_000, maxVelocity: 400,
   position: { x: 1000, y: 2000, z: 3000 }, velocity: { x: 0, y: 0, z: 0 }, mode: "STOP" };
+// The warp ball carries its warp both ways: in entity.warpState, as 0.12.9
+// and 261018.1 keep it, and on the ball itself, as 261028.1's Evolve does.
+const PROBE_WARP_TARGET = { x: 9e9, y: 1, z: 2 };
 const PROBE_ENTITIES = Object.freeze([
   { ...PROBE_SHIP, itemID: 1 },
   { ...PROBE_SHIP, itemID: 2, mode: "GOTO", targetPoint: { x: 5e6, y: 0, z: 0 }, velocity: { x: 120, y: -3, z: 0 } },
   { ...PROBE_SHIP, itemID: 3, mode: "ORBIT", targetEntityID: 1, orbitDistance: 2500 },
-  { ...PROBE_SHIP, itemID: PROBE_BIG_ID, mode: "WARP", warpState: { targetPoint: { x: 9e9, y: 1, z: 2 }, effectStamp: 7,
-    totalDistance: 9e9, stopDistance: 15_000, warpSpeed: 3000 } },
+  { ...PROBE_SHIP, itemID: PROBE_BIG_ID, mode: "WARP", warpState: { targetPoint: PROBE_WARP_TARGET, effectStamp: 7,
+    totalDistance: 9e9, stopDistance: 15_000, warpSpeed: 3000 },
+  targetPoint: PROBE_WARP_TARGET, effectStamp: 7, warpDistance: 9e9, warpMinRange: 15_000, warpFactor: 3000 },
   { kind: "station", itemID: 60004603, radius: 20_000, position: { x: 1e9, y: 2e9, z: 3e9 }, destinyBallMode: "STOP",
     corporationID: 1000049 },
   { kind: "planet", itemID: 40000001, radius: 6e6, position: { x: -1e11, y: 0, z: 4e10 },
@@ -282,7 +286,8 @@ const PROBE_EXPECT = Object.freeze([
 ]);
 // The warp ball's mode data, checked apart from the layout. A tree can write
 // the stock bytes yet read a warp's state from somewhere other than
-// entity.warpState, and then encodes the probe's warp with no destination.
+// entity.warpState or the ball's own targetPoint and warpMinRange, and then
+// encodes the probe's warp with no destination.
 // Only the warp-landing check reads these values.
 const PROBE_WARP_INDEX = 3;
 const PROBE_WARP_EXPECT = Object.freeze({ targetPoint: { x: 9e9, y: 1, z: 2 }, minimumRange: 15_000 });
@@ -326,7 +331,8 @@ function probeDestinyLayout(encode) {
     error: ok ? null : `this tree's destiny ball layout is not the one the decoder reads: ${problems.slice(0, 3).join("; ")}`,
     balls: decoded.balls.length,
     warpOff: warpProblems.length
-      ? `the tree's encoder didn't write the probe warp's destination and minimum range (entity.warpState): ${warpProblems.join("; ")}`
+      ? "the tree's encoder didn't write the probe warp's destination and minimum range (entity.warpState, or the ball's " +
+        `targetPoint and warpMinRange): ${warpProblems.join("; ")}`
       : null,
   };
 }

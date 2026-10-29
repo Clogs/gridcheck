@@ -399,14 +399,14 @@ From the ships, drones, wrecks, containers and structures the session can see:
 | Kind | When |
 | --- | --- |
 | `GRID`, `PRESENT` | The first sample in a system: where you are, and what is already there. |
-| `ARRIVE`, `LEAVE` | A ball appears or goes. Members of one group (`groupKey`) are one line. A ship first seen in warp is printed when it drops out, so the distance is where it landed (after 30 s it is printed anyway, marked still in warp). |
+| `ARRIVE`, `LEAVE` | A ball appears or goes. Members of one group (`groupKey`) are one line. A ship first seen in warp is printed when it drops out, so the distance is where it landed (after 30 s it is printed anyway, marked still in warp). A ship that goes outside warp may yet leave a wreck, so its `LEAVE` is printed 5 s later, when none has come. |
 | `MODE` | Ball mode changes, e.g. `ORBIT -> WARP`, with the ball it acts on. |
 | `DECISION` | An NPC controller's last think took another branch. Needs the `last-decision` patch, or a tree that records it. |
 | `TARGET` | A lock gained or lost, from the entity's own `lockedTargets`. |
 | `DAMAGE` | Shield, armour or hull drops across a quarter band (100, 75, 50, 25), or returns to full after a repair or `/heal`. Regeneration climbing through the bands is not printed. |
 | `MODULE` | A module on a ship on grid turned on, off, or began a new activation. Fields: `moduleID`, `moduleName`, `effectName`, `on`, `restarted`, `targetID`, `targetLabel`, `reason` (the stop reason of the activation that ended, such as `cycle` or `ammo`, when the tree records one) and `capPct`. A weapon cycling inside one activation prints nothing after its first `on`. |
 | `CAPACITOR` | A ship's capacitor fell a quarter band (75, 50, 25), reached 5% or less (`state` `empty`), or filled again after a reported drop (`state` `full`). `fromPct`, `toPct`. A band only counts as climbed back 5 points past its lower edge, so a ship hovering at 25% reports once. |
-| `DESTROYED`, `KILLMAIL` | A ship replaced by a wreck within 20 km. The killmail ID follows when the killmail worker writes it, within 20 s. |
+| `DESTROYED`, `KILLMAIL` | A ship replaced by a wreck within 20 km, in the same sample or up to 5 s later: since EveJS 261028.1 the wreck comes a second or two after the ship goes. The killmail ID follows when the killmail worker writes it, within 20 s. |
 | `SELF`, `DOCKED`, `SYSTEM`, `MOVED` | Your own ship, dock state or system changed, or you jumped more than 1,000 km inside a system (warp, `/tr me <celestial>`). The last two start a new baseline. |
 | `LOG` | A server log line tagged `NpcController`, or with a tag a plugin lists, that names a ball the watch has seen. `--grep <regex>` keeps every line matching it instead; `--no-log` drops them. |
 | `PERF`, `PROFILE` | With `--perf`: the server's ticks every 5 s, and each tick profiler window. See [Performance testing](#performance-testing). |
@@ -464,8 +464,10 @@ changes; the code is `bridge/destiny.js`.
 At boot the bridge has the tree's own encoder write a set of test balls and reads them back. If
 the layout differs from what the decoder knows, the client view stays off and says so in the log,
 on `/tee` and in every watch's `START` line, rather than reporting DIVERGEs that aren't there.
-A tree can write the stock layout but keep a warp's state somewhere other than `entity.warpState`,
-so the test warp ball comes back without its destination. Then only the `warp-landing` check is
+The test warp ball carries its warp the two ways stock has kept it: in `entity.warpState`, as
+0.12.9 and 261018.1 do, and in the ball's own `targetPoint`, `warpMinRange` and `warpFactor`, as
+261028.1 does. A tree can write the stock layout but keep a warp's state somewhere else, so the
+test warp ball comes back without its destination. Then only the `warp-landing` check is
 off: the client view runs, and the log, `gridcheck doctor` and the `START` line say why.
 
 `gridcheck login` attaches the tee through `POST /tee`, so the client view starts from the undock's

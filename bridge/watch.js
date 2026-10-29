@@ -27,6 +27,10 @@ const WARP_IN_SETTLE_MS = 30_000;
 // A killmail is written after the wreck appears, by a worker.
 const KILLMAIL_WAIT_MS = 20_000;
 const WRECK_MATCH_METERS = 20_000;
+// Since EveJS 261028.1 a wreck reaches the grid a second or two after its
+// ship has gone. A ship that goes outside warp waits this long for one before
+// it is a LEAVE.
+const WRECK_WAIT_MS = 5_000;
 // A ship covers well under this in one sample outside warp.
 const SELF_MOVED_METERS = 1_000_000;
 // CAPACITOR events: a quarter band down, empty at or under this, full again from
@@ -260,6 +264,16 @@ function createGridDiffer({ gridHooks = [], timed = (_name, fn) => fn(), modules
   let docked = false;
   // group key -> { firstSeenAtMs, itemIDs }
   const pendingArrivals = new Map();
+  // itemID -> { entry, self, atMs }: a ship that went outside warp with no
+  // wreck yet (WRECK_WAIT_MS).
+  const awaitingWreck = new Map();
+
+  // A new grid: whoever was still waiting for a wreck left the old one.
+  function flushAwaitingWreck(events) {
+    const leaving = [...awaitingWreck.values()].filter((waiting) => !waiting.self).map((waiting) => waiting.entry);
+    awaitingWreck.clear();
+    for (const group of groupByKey(leaving)) events.push(groupEvent("LEAVE", group, { warped: false }));
+  }
 
   function labelFor(itemID, current) {
     const id = toPositiveInt(itemID);
@@ -420,6 +434,7 @@ function createGridDiffer({ gridHooks = [], timed = (_name, fn) => fn(), modules
   function step(grid, atMs) {
     const events = [];
     if (!grid || !grid.inSpace) {
+      flushAwaitingWreck(events);
       if (!docked) {
         events.push({ kind: "DOCKED", systemID: grid && grid.solarSystemID, systemName: grid && grid.systemName,
           stationID: grid && (grid.stationID || grid.structureID) });
@@ -431,6 +446,7 @@ function createGridDiffer({ gridHooks = [], timed = (_name, fn) => fn(), modules
     }
     docked = false;
     if (systemID && grid.solarSystemID !== systemID) {
+      flushAwaitingWreck(events);
       events.push({ kind: "SYSTEM", fromSystemID: systemID, toSystemID: grid.solarSystemID,
         toSystemName: grid.systemName, security: grid.security });
       previous = null;
@@ -452,6 +468,7 @@ function createGridDiffer({ gridHooks = [], timed = (_name, fn) => fn(), modules
       const now = current.get(focusNow);
       const moved = before && now ? centreDistance(before.position, now.position) : null;
       if (moved !== null && moved > SELF_MOVED_METERS) {
+        flushAwaitingWreck(events);
         events.push({ kind: "MOVED", distanceMeters: moved, systemName: grid.systemName, ...(anchorNow ? { anchor: true } : {}) });
         previous = null;
         pendingArrivals.clear();
@@ -481,41 +498,58 @@ function createGridDiffer({ gridHooks = [], timed = (_name, fn) => fn(), modules
     const wrecks = arrived.filter((entry) => entry.kind === "wreck");
     const usedWrecks = new Set();
     const leaving = [];
+    const canWreck = (entry) => entry.kind === "ship" || entry.kind === "structure";
 
-    for (const gone of departed) {
+    function claimWreck(gone) {
       let wreck = null;
-      if (gone.kind === "ship" || gone.kind === "structure") {
-        let best = Infinity;
-        for (const candidate of wrecks) {
-          if (usedWrecks.has(candidate.itemID)) continue;
-          const d = centreDistance(gone.position, candidate.position);
-          if (d !== null && d <= WRECK_MATCH_METERS && d < best) {
-            best = d;
-            wreck = candidate;
-          }
+      let best = Infinity;
+      for (const candidate of wrecks) {
+        if (usedWrecks.has(candidate.itemID)) continue;
+        const d = centreDistance(gone.position, candidate.position);
+        if (d !== null && d <= WRECK_MATCH_METERS && d < best) {
+          best = d;
+          wreck = candidate;
         }
       }
-      if (wreck) {
-        usedWrecks.add(wreck.itemID);
-        events.push({
-          kind: "DESTROYED",
-          itemID: gone.itemID,
-          label: gone.itemID === oldSelfID ? "self" : gone.label,
-          typeName: gone.typeName,
-          typeID: gone.typeID,
-          corporationID: gone.corporationID,
-          characterID: gone.characterID,
-          self: gone.itemID === oldSelfID,
-          who: gone.itemID === oldSelfID ? "self" : gone.who,
-          wreckID: wreck.itemID,
-          wreckLabel: wreck.label,
-          distanceMeters: gone.distanceMeters,
-          groupKey: gone.groupKey,
-          ext: gone.ext,
-        });
-      } else if (gone.itemID !== oldSelfID) {
-        leaving.push(gone);
-      }
+      if (wreck) usedWrecks.add(wreck.itemID);
+      return wreck;
+    }
+
+    function destroyed(gone, wreck, self) {
+      events.push({
+        kind: "DESTROYED",
+        itemID: gone.itemID,
+        label: self ? "self" : gone.label,
+        typeName: gone.typeName,
+        typeID: gone.typeID,
+        corporationID: gone.corporationID,
+        characterID: gone.characterID,
+        self,
+        who: self ? "self" : gone.who,
+        wreckID: wreck.itemID,
+        wreckLabel: wreck.label,
+        distanceMeters: gone.distanceMeters,
+        groupKey: gone.groupKey,
+        ext: gone.ext,
+      });
+    }
+
+    // Ships that went in an earlier sample: their wreck may have come now.
+    for (const [itemID, waiting] of awaitingWreck) {
+      const back = current.has(itemID);
+      const wreck = back ? null : claimWreck(waiting.entry);
+      if (wreck) destroyed(waiting.entry, wreck, waiting.self);
+      else if (!back && atMs - waiting.atMs < WRECK_WAIT_MS) continue;
+      else if (!waiting.self) leaving.push(waiting.entry);
+      awaitingWreck.delete(itemID);
+    }
+
+    for (const gone of departed) {
+      const self = gone.itemID === oldSelfID;
+      const wreck = canWreck(gone) ? claimWreck(gone) : null;
+      if (wreck) destroyed(gone, wreck, self);
+      else if (canWreck(gone) && gone.mode !== "WARP") awaitingWreck.set(gone.itemID, { entry: gone, self, atMs });
+      else if (!self) leaving.push(gone);
     }
     for (const group of groupByKey(leaving)) {
       const warped = group.every((entry) => entry.mode === "WARP");

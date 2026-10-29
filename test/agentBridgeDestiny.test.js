@@ -46,6 +46,20 @@ function ship(itemID, overrides = {}) {
   };
 }
 
+// A ship's warp, as both encoders read it: entity.warpState (0.12.9, 261018.1)
+// and the ball's own fields (261028.1's Evolve).
+function warping(targetPoint, { stopDistance = 0, effectStamp = 1, totalDistance = 1e9, warpSpeed = 3000 } = {}) {
+  return {
+    mode: "WARP",
+    warpState: { targetPoint, effectStamp, totalDistance, stopDistance, warpSpeed },
+    targetPoint,
+    effectStamp,
+    warpDistance: totalDistance,
+    warpMinRange: stopDistance,
+    warpFactor: warpSpeed,
+  };
+}
+
 function destinyUpdate(...payloads) {
   return encoded.destinyUpdate(...payloads);
 }
@@ -68,8 +82,7 @@ test("the ball state decoder reads every ball the stock encoder writes", () => {
     ship(2, { mode: "GOTO", targetPoint: { x: 5e6, y: 0, z: 0 }, velocity: { x: 120, y: -3, z: 0 } }),
     ship(3, { mode: "ORBIT", targetEntityID: 1, orbitDistance: 2500 }),
     ship(4, { mode: "FOLLOW", targetEntityID: 1, followRange: 500 }),
-    ship(BIG_NPC_ID, { mode: "WARP", warpState: { targetPoint: { x: 9e9, y: 1, z: 2 }, effectStamp: 7,
-      totalDistance: 9e9, stopDistance: 15_000, warpSpeed: 3000 } }),
+    ship(BIG_NPC_ID, warping({ x: 9e9, y: 1, z: 2 }, { effectStamp: 7, totalDistance: 9e9, stopDistance: 15_000 })),
     { kind: "wreck", itemID: 6, typeID: 26468, radius: 14, position: { x: 7, y: 8, z: 9 } },
     { kind: "planet", itemID: 40000001, radius: 6e6, position: { x: -1e11, y: 0, z: 4e10 },
       miniBalls: [{ x: 1, y: 2, z: 3, radius: 100 }, { x: 4, y: 5, z: 6, radius: 200 }] },
@@ -130,8 +143,7 @@ test("the client model follows SetState, AddBalls, movement, damage, effects and
   assert.strictEqual(model.balls.get("2").typeID, 17932);
   assert.ok(model.baseline);
 
-  events = apply(model, addBalls([ship(3, { mode: "WARP", warpState: { targetPoint: { x: 1e5, y: 0, z: 0 },
-    stopDistance: 2500, effectStamp: 1, totalDistance: 1e9 } })]), 2000);
+  events = apply(model, addBalls([ship(3, warping({ x: 1e5, y: 0, z: 0 }, { stopDistance: 2500 }))]), 2000);
   assert.deepStrictEqual(events.map((event) => event.op), ["AddBalls"]);
   assert.deepStrictEqual(model.balls.get("3").warp.dest, { x: 1e5, y: 0, z: 0 });
 
@@ -189,8 +201,8 @@ const shiftedEncoder = (stamp, entities) => {
 
 // The stock bytes, but the warp ball carries what the stock encoder writes when
 // it finds no warp state on the entity: position + 1e16 m along x, and no
-// minimum range. A tree that keeps warp state elsewhere than entity.warpState
-// writes this for the probe.
+// minimum range. A tree that keeps warp state somewhere the probe doesn't set
+// writes this for it.
 const warplessEncoder = (stamp, entities) => {
   const buffer = Buffer.from(treeEncoder(stamp, entities));
   const pattern = Buffer.alloc(24);
@@ -281,8 +293,7 @@ test("a tree whose encoder writes no warp destination for the probe keeps the cl
 test("without warp mode data, a ball bound in mid-warp leaves warp when the server's does, with no landing check", () => {
   const model = createClientModel({ warpOff: "the probe's warp read back wrong" });
   apply(model, setState([ship(1)]), 0);
-  apply(model, addBalls([ship(4, { mode: "WARP", warpState: { targetPoint: { x: 0, y: 0, z: 0 }, stopDistance: 0,
-    effectStamp: 1, totalDistance: 1e9 } })]), 0);
+  apply(model, addBalls([ship(4, warping({ x: 0, y: 0, z: 0 }))]), 0);
   assert.strictEqual(model.balls.get("4").mode, "WARP");
   assert.strictEqual(model.balls.get("4").warp.dest, null, "the encoded destination isn't trusted");
 
@@ -339,8 +350,7 @@ function row(itemID, overrides = {}) {
 test("a ship that warped in is position-checked at sub-warp speed, not its warp velocity", () => {
   const model = createClientModel();
   apply(model, setState([ship(1)]), 0);
-  apply(model, addBalls([ship(5, { mode: "WARP", velocity: { x: 150_000, y: 0, z: 0 },
-    warpState: { targetPoint: { x: 1e6, y: 0, z: 0 }, stopDistance: 0, effectStamp: 1, totalDistance: 1e9 } })]), 0);
+  apply(model, addBalls([ship(5, { ...warping({ x: 1e6, y: 0, z: 0 }), velocity: { x: 150_000, y: 0, z: 0 } })]), 0);
   apply(model, destinyUpdate(actions.buildStopPayload(5),
     actions.buildSetBallPositionPayload(5, { x: 1e6, y: 0, z: 0 })), 1000);
   const checker = createDivergenceChecker();
@@ -547,8 +557,7 @@ test("one-sided balls, mode mismatches, position errors, bad warp landings and o
   const model = createClientModel();
   apply(model, setState([ship(1), ship(2), ship(3, { mode: "ORBIT", targetEntityID: 1, orbitDistance: 500 })]), 0);
   // Ball 4 lands far from where the client was told it warps to.
-  apply(model, addBalls([ship(4, { mode: "WARP", warpState: { targetPoint: { x: 0, y: 0, z: 0 }, stopDistance: 0,
-    effectStamp: 1, totalDistance: 1e9 } })]), 0);
+  apply(model, addBalls([ship(4, warping({ x: 0, y: 0, z: 0 }))]), 0);
   apply(model, destinyUpdate(actions.buildSetBallPositionPayload(2, { x: 1000, y: 2000, z: 3000 })), 0);
   apply(model, destinyUpdate(actions.buildStopPayload(77)), 0);
   const checker = createDivergenceChecker({ positionMeters: 5000 });

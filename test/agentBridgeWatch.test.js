@@ -153,6 +153,55 @@ test("a ship replaced by a wreck is DESTROYED; one that warps away is a LEAVE", 
   assert.strictEqual(events[1].warped, true);
 });
 
+const wreckAt = (itemID, x) => ({ kind: "wreck", itemID, name: "Worm Wreck", position: { x, y: 0, z: 0 }, distanceMeters: x });
+
+test("a wreck that comes a sample or two after its ship, as EveJS 261028.1 sends it, is still that ship's DESTROYED", () => {
+  const differ = createGridDiffer();
+  differ.step(grid([npc(2)]), 1000);
+  assert.deepStrictEqual(kinds(differ.step(grid([]), 2000)), [], "no LEAVE while it may yet have a wreck");
+  assert.deepStrictEqual(kinds(differ.step(grid([]), 3000)), []);
+  const events = differ.step(grid([wreckAt(50, 24_100)]), 4000);
+  assert.deepStrictEqual(kinds(events), ["DESTROYED"], "and the wreck is no ARRIVE");
+  assert.deepStrictEqual([events[0].itemID, events[0].wreckID, events[0].self], [2, 50, false]);
+  assert.strictEqual(events[0].ext.lu.corporation, "Guristas");
+
+  // Self: the session moves to the capsule at once, the wreck comes later.
+  const podded = createGridDiffer();
+  podded.step(grid([]), 1000);
+  const capsule = { ...SELF, itemID: 7, typeName: "Capsule", name: "Capsule" };
+  const inCapsule = (entities) => ({ ...grid([]), self: { itemID: 7, typeName: "Capsule", mode: "STOP" }, entities: [capsule, ...entities] });
+  assert.deepStrictEqual(kinds(podded.step(inCapsule([]), 1500)), ["SELF"]);
+  const lost = podded.step(inCapsule([wreckAt(51, 0)]), 2500);
+  assert.deepStrictEqual(lost.map((event) => [event.kind, event.label, event.itemID, event.self]), [["DESTROYED", "self", 1, true]]);
+});
+
+test("a ship that goes outside warp and leaves no wreck is a LEAVE once the wait is over; one that comes back is no kill", () => {
+  const differ = createGridDiffer();
+  differ.step(grid([npc(2), npc(3, { groupKey: null, ext: null })]), 1000);
+  assert.deepStrictEqual(kinds(differ.step(grid([npc(3, { groupKey: null, ext: null })]), 3000)), []);
+  assert.deepStrictEqual(kinds(differ.step(grid([npc(3, { groupKey: null, ext: null })]), 7000)), []);
+  const left = differ.step(grid([npc(3, { groupKey: null, ext: null })]), 8000);
+  assert.deepStrictEqual(left.map((event) => [event.kind, event.warped]), [["LEAVE", false]]);
+  assert.strictEqual(left[0].groupKey, "flight:living_flight_4420");
+  assert.deepStrictEqual(kinds(differ.step(grid([npc(3, { groupKey: null, ext: null }), wreckAt(52, 24_000)]), 9000)), ["ARRIVE"],
+    "a wreck after the wait belongs to nobody that left");
+
+  const cloaked = createGridDiffer();
+  cloaked.step(grid([npc(2)]), 1000);
+  cloaked.step(grid([]), 2000);
+  assert.deepStrictEqual(kinds(cloaked.step(grid([npc(2)]), 3000)), ["LEAVE", "ARRIVE"]);
+});
+
+test("a new grid ends the wait: who was still waiting for a wreck left the old grid", () => {
+  const differ = createGridDiffer();
+  differ.step(grid([npc(2)]), 1000);
+  differ.step(grid([]), 2000);
+  const siseide = { solarSystemID: 30002538, systemName: "Siseide" };
+  const events = differ.step(grid([], siseide), 3000);
+  assert.deepStrictEqual(kinds(events), ["LEAVE", "SYSTEM", "GRID"]);
+  assert.deepStrictEqual(kinds(differ.step(grid([wreckAt(50, 24_100)], siseide), 4000)), ["ARRIVE"]);
+});
+
 test("the lu onGrid hook: a hunter report on self is one SIGHTING until it goes stale", () => {
   const differ = luDiffer();
   const report = { observerID: 2, source: "sighting", certainty: "confirmed", observedAtMs: 10_000 };

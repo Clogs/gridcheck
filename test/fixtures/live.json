@@ -1,5 +1,5 @@
 {
-  "evejs": "0.12.9",
+  "evejs": "261028.1",
   "session": {
     "clientID": 2000000001,
     "gatewayClientID": true,
@@ -23,7 +23,6 @@
       "_pendingLocalChannelSync",
       "_skipNextInitialBallparkRebase",
       "_space",
-      "_syncLedgerDestinyLifecycle",
       "_syncLedgerEvents",
       "_syncLedgerSeq",
       "_transitionState",
@@ -109,7 +108,7 @@
     "stationID": null,
     "structureID": null,
     "inSpace": true,
-    "sampledAtMs": 1790873302720,
+    "sampledAtMs": 1793255225208,
     "self": {
       "itemID": 9988400000114,
       "typeID": 601,
@@ -118,8 +117,8 @@
       "mode": "GOTO",
       "protection": {
         "active": true,
-        "untilMs": 1790873330591,
-        "remainingMs": 27871,
+        "untilMs": 1793255252624,
+        "remainingMs": 27416,
         "cloaked": false
       }
     },
@@ -160,9 +159,9 @@
         "ownerID": 140000005,
         "radius": 47,
         "position": {
-          "x": 311989850708.7316,
+          "x": 311989850605.35394,
           "y": -13069154040.31763,
-          "z": 156646294007.17502
+          "z": 156646294079.56097
         },
         "velocity": {
           "x": -277.89733102504044,
@@ -185,7 +184,9 @@
         "npcEntityType": null,
         "compressionFacility": null,
         "typeName": "Ibis",
-        "distanceMeters": 0
+        "distanceMeters": 0,
+        "capacitorPct": 100,
+        "activeModules": []
       },
       {
         "kind": "sentryGun",
@@ -211,7 +212,7 @@
         "armorRatio": null,
         "hullRatio": null,
         "typeName": "Caldari Sentry Gun I",
-        "distanceMeters": 56984.487611459714
+        "distanceMeters": 56947.237944604654
       },
       {
         "kind": "sentryGun",
@@ -237,7 +238,7 @@
         "armorRatio": null,
         "hullRatio": null,
         "typeName": "Caldari Sentry Gun III",
-        "distanceMeters": 60737.02246502393
+        "distanceMeters": 60702.07209005249
       },
       {
         "kind": "sentryGun",
@@ -263,7 +264,7 @@
         "armorRatio": null,
         "hullRatio": null,
         "typeName": "Caldari Sentry Gun II",
-        "distanceMeters": 63159.80447477916
+        "distanceMeters": 63150.454263501175
       },
       {
         "kind": "sentryGun",
@@ -289,7 +290,7 @@
         "armorRatio": null,
         "hullRatio": null,
         "typeName": "Caldari Sentry Gun III",
-        "distanceMeters": 66565.59750624804
+        "distanceMeters": 66556.72509853666
       },
       {
         "kind": "sentryGun",
@@ -315,7 +316,7 @@
         "armorRatio": null,
         "hullRatio": null,
         "typeName": "Caldari Sentry Gun II",
-        "distanceMeters": 80453.5060733662
+        "distanceMeters": 80535.08904969173
       },
       {
         "kind": "sentryGun",
@@ -341,7 +342,7 @@
         "armorRatio": null,
         "hullRatio": null,
         "typeName": "Caldari Sentry Gun I",
-        "distanceMeters": 83154.76020485089
+        "distanceMeters": 83233.69846461651
       },
       {
         "kind": "sentryGun",
@@ -367,7 +368,7 @@
         "armorRatio": null,
         "hullRatio": null,
         "typeName": "Caldari Sentry Gun I",
-        "distanceMeters": 84941.19281239092
+        "distanceMeters": 85036.49607855604
       },
       {
         "kind": "sentryGun",
@@ -393,7 +394,7 @@
         "armorRatio": null,
         "hullRatio": null,
         "typeName": "Caldari Sentry Gun II",
-        "distanceMeters": 87504.16667331124
+        "distanceMeters": 87596.68445008172
       },
       {
         "kind": "authoredSpaceProp",
@@ -419,7 +420,7 @@
         "armorRatio": null,
         "hullRatio": null,
         "typeName": "ENV_Oceanic_01a",
-        "distanceMeters": 136785.86024363313
+        "distanceMeters": 136874.82315043974
       },
       {
         "kind": "authoredSpaceProp",
@@ -445,7 +446,7 @@
         "armorRatio": null,
         "hullRatio": null,
         "typeName": "VDB_Cloud_Vortex_05d",
-        "distanceMeters": 797427.2555656424
+        "distanceMeters": 797436.0418246594
       },
       {
         "kind": "planet",
@@ -471,21 +472,21 @@
         "armorRatio": null,
         "hullRatio": null,
         "typeName": "Planet (Temperate)",
-        "distanceMeters": 2509166.692339385
+        "distanceMeters": 2509283.763635548
       },
       {
         "kind": "orbital",
         "itemID": 1200040491241,
-        "typeID": 2233,
+        "typeID": 4318,
         "groupID": 1025,
         "categoryID": 46,
         "name": "Customs Office (Manifest V)",
-        "ownerID": 1,
+        "ownerID": 1000148,
         "radius": 8000,
         "position": {
-          "x": 311988681684.8576,
-          "y": -13069401190.315878,
-          "z": 156639807162
+          "x": 311984946052.1521,
+          "y": -13069872454,
+          "z": 156642279377.17773
         },
         "velocity": {
           "x": 0,
@@ -496,8 +497,8 @@
         "shieldRatio": 1,
         "armorRatio": 1,
         "hullRatio": 1,
-        "typeName": "Customs Office",
-        "distanceMeters": 6587926.033929768
+        "typeName": "InterBus Customs Office",
+        "distanceMeters": 6370714.286857912
       },
       {
         "kind": "moon",
@@ -523,7 +524,7 @@
         "armorRatio": null,
         "hullRatio": null,
         "typeName": "Moon",
-        "distanceMeters": 499234950.8198526
+        "distanceMeters": 499235015.3634906
       },
       {
         "kind": "moon",
@@ -549,7 +550,7 @@
         "armorRatio": null,
         "hullRatio": null,
         "typeName": "Moon",
-        "distanceMeters": 296291610928.0653
+        "distanceMeters": 296291610955.9141
       },
       {
         "kind": "moon",
@@ -575,7 +576,7 @@
         "armorRatio": null,
         "hullRatio": null,
         "typeName": "Moon",
-        "distanceMeters": 296321607059.53577
+        "distanceMeters": 296321607087.0747
       },
       {
         "kind": "station",
@@ -601,7 +602,7 @@
         "armorRatio": null,
         "hullRatio": null,
         "typeName": "Paragon Fulfilment Center",
-        "distanceMeters": 296325858877.6688
+        "distanceMeters": 296325858905.2051
       },
       {
         "kind": "moon",
@@ -627,7 +628,7 @@
         "armorRatio": null,
         "hullRatio": null,
         "typeName": "Moon",
-        "distanceMeters": 297065596161.28705
+        "distanceMeters": 297065596189.31647
       },
       {
         "kind": "planet",
@@ -653,21 +654,21 @@
         "armorRatio": null,
         "hullRatio": null,
         "typeName": "Planet (Gas)",
-        "distanceMeters": 297077726905.7165
+        "distanceMeters": 297077726933.71936
       },
       {
         "kind": "orbital",
         "itemID": 1200040491235,
-        "typeID": 2233,
+        "typeID": 4318,
         "groupID": 1025,
         "categoryID": 46,
         "name": "Customs Office (Manifest IV)",
-        "ownerID": 1,
+        "ownerID": 1000148,
         "radius": 8000,
         "position": {
-          "x": 199854514480.81677,
-          "y": -8392135597.736205,
-          "z": -118438142181
+          "x": 199855318384.15878,
+          "y": -8378288375,
+          "z": -118462769260.98178
         },
         "velocity": {
           "x": 0,
@@ -678,8 +679,8 @@
         "shieldRatio": 1,
         "armorRatio": 1,
         "hullRatio": 1,
-        "typeName": "Customs Office",
-        "distanceMeters": 297098721612.73096
+        "typeName": "InterBus Customs Office",
+        "distanceMeters": 297121438956.186
       },
       {
         "kind": "moon",
@@ -705,7 +706,7 @@
         "armorRatio": null,
         "hullRatio": null,
         "typeName": "Moon",
-        "distanceMeters": 297357723088.0166
+        "distanceMeters": 297357723116.0914
       },
       {
         "kind": "moon",
@@ -731,7 +732,7 @@
         "armorRatio": null,
         "hullRatio": null,
         "typeName": "Moon",
-        "distanceMeters": 297418903085.93097
+        "distanceMeters": 297418903113.79974
       },
       {
         "kind": "planet",
@@ -757,21 +758,21 @@
         "armorRatio": null,
         "hullRatio": null,
         "typeName": "Planet (Lava)",
-        "distanceMeters": 306276724257.7129
+        "distanceMeters": 306276724219.5284
       },
       {
         "kind": "orbital",
         "itemID": 1200040491233,
-        "typeID": 2233,
+        "typeID": 4318,
         "groupID": 1025,
         "categoryID": 46,
         "name": "Customs Office (Manifest III)",
-        "ownerID": 1,
+        "ownerID": 1000148,
         "radius": 8000,
         "position": {
-          "x": 68735403018.25464,
-          "y": -2880899390.641712,
-          "z": -29183800990
+          "x": 68733689626.56734,
+          "y": -2879401670,
+          "z": -29185492498.28125
         },
         "velocity": {
           "x": 0,
@@ -782,8 +783,8 @@
         "shieldRatio": 1,
         "armorRatio": 1,
         "hullRatio": 1,
-        "typeName": "Customs Office",
-        "distanceMeters": 306283114342.5054
+        "typeName": "InterBus Customs Office",
+        "distanceMeters": 306285551211.37976
       },
       {
         "kind": "moon",
@@ -809,7 +810,7 @@
         "armorRatio": null,
         "hullRatio": null,
         "typeName": "Moon",
-        "distanceMeters": 306369507530.3489
+        "distanceMeters": 306369507492.17065
       },
       {
         "kind": "planet",
@@ -835,21 +836,21 @@
         "armorRatio": null,
         "hullRatio": null,
         "typeName": "Planet (Plasma)",
-        "distanceMeters": 324354885583.6916
+        "distanceMeters": 324354885539.8766
       },
       {
         "kind": "orbital",
         "itemID": 1200040491232,
-        "typeID": 2233,
+        "typeID": 4318,
         "groupID": 1025,
         "categoryID": 46,
         "name": "Customs Office (Manifest II)",
-        "ownerID": 1,
+        "ownerID": 1000148,
         "radius": 8000,
         "position": {
-          "x": 45387537438.306274,
-          "y": -1900534990.729845,
-          "z": -27764569794
+          "x": 45386528049.766,
+          "y": -1901539854,
+          "z": -27762964109.32277
         },
         "velocity": {
           "x": 0,
@@ -860,8 +861,8 @@
         "shieldRatio": 1,
         "armorRatio": 1,
         "hullRatio": 1,
-        "typeName": "Customs Office",
-        "distanceMeters": 324359203600.38385
+        "typeName": "InterBus Customs Office",
+        "distanceMeters": 324359085721.1071
       },
       {
         "kind": "sun",
@@ -887,7 +888,7 @@
         "armorRatio": null,
         "hullRatio": null,
         "typeName": "Sun B0 (Blue)",
-        "distanceMeters": 348846286694.44946
+        "distanceMeters": 348846286634.58484
       },
       {
         "kind": "planet",
@@ -913,21 +914,21 @@
         "armorRatio": null,
         "hullRatio": null,
         "typeName": "Planet (Barren)",
-        "distanceMeters": 380465522320.8027
+        "distanceMeters": 380465522253.7707
       },
       {
         "kind": "orbital",
         "itemID": 1200040491231,
-        "typeID": 2233,
+        "typeID": 4318,
         "groupID": 1025,
         "categoryID": 46,
         "name": "Customs Office (Manifest I)",
-        "ownerID": 1,
+        "ownerID": 1000148,
         "radius": 8000,
         "position": {
-          "x": -38257874066.307785,
-          "y": 1605055605.4720626,
-          "z": 8769525118
+          "x": -38258234225.37676,
+          "y": 1602892409,
+          "z": 8772624550.924194
         },
         "velocity": {
           "x": 0,
@@ -938,8 +939,8 @@
         "shieldRatio": 1,
         "armorRatio": 1,
         "hullRatio": 1,
-        "typeName": "Customs Office",
-        "distanceMeters": 380468571359.924
+        "typeName": "InterBus Customs Office",
+        "distanceMeters": 380467614773.22125
       },
       {
         "kind": "moon",
@@ -965,7 +966,7 @@
         "armorRatio": null,
         "hullRatio": null,
         "typeName": "Moon",
-        "distanceMeters": 713724759720.408
+        "distanceMeters": 713724759776.6531
       },
       {
         "kind": "moon",
@@ -991,7 +992,7 @@
         "armorRatio": null,
         "hullRatio": null,
         "typeName": "Moon",
-        "distanceMeters": 715243074791.569
+        "distanceMeters": 715243074847.8541
       },
       {
         "kind": "moon",
@@ -1017,7 +1018,7 @@
         "armorRatio": null,
         "hullRatio": null,
         "typeName": "Moon",
-        "distanceMeters": 715421619351.6385
+        "distanceMeters": 715421619407.6447
       },
       {
         "kind": "moon",
@@ -1043,7 +1044,7 @@
         "armorRatio": null,
         "hullRatio": null,
         "typeName": "Moon",
-        "distanceMeters": 716722528359.7284
+        "distanceMeters": 716722528415.911
       },
       {
         "kind": "moon",
@@ -1069,7 +1070,7 @@
         "armorRatio": null,
         "hullRatio": null,
         "typeName": "Moon",
-        "distanceMeters": 717111288316.3243
+        "distanceMeters": 717111288372.3954
       },
       {
         "kind": "moon",
@@ -1095,7 +1096,7 @@
         "armorRatio": null,
         "hullRatio": null,
         "typeName": "Moon",
-        "distanceMeters": 717145783552.5793
+        "distanceMeters": 717145783608.8368
       },
       {
         "kind": "moon",
@@ -1121,7 +1122,7 @@
         "armorRatio": null,
         "hullRatio": null,
         "typeName": "Moon",
-        "distanceMeters": 717300908898.4938
+        "distanceMeters": 717300908954.7623
       },
       {
         "kind": "planet",
@@ -1147,33 +1148,7 @@
         "armorRatio": null,
         "hullRatio": null,
         "typeName": "Planet (Gas)",
-        "distanceMeters": 717312448221.1875
-      },
-      {
-        "kind": "orbital",
-        "itemID": 1200040491245,
-        "typeID": 2233,
-        "groupID": 1025,
-        "categoryID": 46,
-        "name": "Customs Office (Manifest VII)",
-        "ownerID": 1,
-        "radius": 8000,
-        "position": {
-          "x": 205549222284.10263,
-          "y": -8626435609.988228,
-          "z": -552734127712
-        },
-        "velocity": {
-          "x": 0,
-          "y": 0,
-          "z": 0
-        },
-        "isSelf": false,
-        "shieldRatio": 1,
-        "armorRatio": 1,
-        "hullRatio": 1,
-        "typeName": "Customs Office",
-        "distanceMeters": 717335288620.4342
+        "distanceMeters": 717312448277.4279
       },
       {
         "kind": "moon",
@@ -1199,7 +1174,33 @@
         "armorRatio": null,
         "hullRatio": null,
         "typeName": "Moon",
-        "distanceMeters": 717340500895.0217
+        "distanceMeters": 717340500951.2777
+      },
+      {
+        "kind": "orbital",
+        "itemID": 1200040491245,
+        "typeID": 4318,
+        "groupID": 1025,
+        "categoryID": 46,
+        "name": "Customs Office (Manifest VII)",
+        "ownerID": 1000148,
+        "radius": 8000,
+        "position": {
+          "x": 205559964925.9911,
+          "y": -8610822938,
+          "z": -552757131312.8188
+        },
+        "velocity": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "isSelf": false,
+        "shieldRatio": 1,
+        "armorRatio": 1,
+        "hullRatio": 1,
+        "typeName": "InterBus Customs Office",
+        "distanceMeters": 717356540149.4893
       },
       {
         "kind": "moon",
@@ -1225,7 +1226,7 @@
         "armorRatio": null,
         "hullRatio": null,
         "typeName": "Moon",
-        "distanceMeters": 717360230542.5723
+        "distanceMeters": 717360230598.709
       },
       {
         "kind": "moon",
@@ -1251,7 +1252,7 @@
         "armorRatio": null,
         "hullRatio": null,
         "typeName": "Moon",
-        "distanceMeters": 717387760457.8755
+        "distanceMeters": 717387760514.1243
       },
       {
         "kind": "moon",
@@ -1277,7 +1278,7 @@
         "armorRatio": null,
         "hullRatio": null,
         "typeName": "Moon",
-        "distanceMeters": 717459264336.028
+        "distanceMeters": 717459264392.256
       },
       {
         "kind": "moon",
@@ -1303,7 +1304,7 @@
         "armorRatio": null,
         "hullRatio": null,
         "typeName": "Moon",
-        "distanceMeters": 717520889004.0012
+        "distanceMeters": 717520889060.1724
       },
       {
         "kind": "moon",
@@ -1329,7 +1330,7 @@
         "armorRatio": null,
         "hullRatio": null,
         "typeName": "Moon",
-        "distanceMeters": 717533997799.3865
+        "distanceMeters": 717533997855.574
       },
       {
         "kind": "moon",
@@ -1355,7 +1356,7 @@
         "armorRatio": null,
         "hullRatio": null,
         "typeName": "Moon",
-        "distanceMeters": 717572900245.4509
+        "distanceMeters": 717572900301.9436
       },
       {
         "kind": "moon",
@@ -1381,7 +1382,7 @@
         "armorRatio": null,
         "hullRatio": null,
         "typeName": "Moon",
-        "distanceMeters": 717589616570.908
+        "distanceMeters": 717589616627.1663
       },
       {
         "kind": "moon",
@@ -1407,7 +1408,7 @@
         "armorRatio": null,
         "hullRatio": null,
         "typeName": "Moon",
-        "distanceMeters": 717892218404.2178
+        "distanceMeters": 717892218460.434
       },
       {
         "kind": "moon",
@@ -1433,7 +1434,7 @@
         "armorRatio": null,
         "hullRatio": null,
         "typeName": "Moon",
-        "distanceMeters": 718131051269.3867
+        "distanceMeters": 718131051325.6843
       },
       {
         "kind": "moon",
@@ -1459,7 +1460,7 @@
         "armorRatio": null,
         "hullRatio": null,
         "typeName": "Moon",
-        "distanceMeters": 719853099109.1383
+        "distanceMeters": 719853099165.1459
       },
       {
         "kind": "moon",
@@ -1485,7 +1486,7 @@
         "armorRatio": null,
         "hullRatio": null,
         "typeName": "Moon",
-        "distanceMeters": 777265503749.2626
+        "distanceMeters": 777265503680.213
       },
       {
         "kind": "planet",
@@ -1511,7 +1512,7 @@
         "armorRatio": null,
         "hullRatio": null,
         "typeName": "Planet (Barren)",
-        "distanceMeters": 777344680883.126
+        "distanceMeters": 777344680813.952
       },
       {
         "kind": "station",
@@ -1537,21 +1538,21 @@
         "armorRatio": null,
         "hullRatio": null,
         "typeName": "Caldari Trading Station",
-        "distanceMeters": 777352061118.0254
+        "distanceMeters": 777352061048.8512
       },
       {
         "kind": "orbital",
         "itemID": 1200040491243,
-        "typeID": 2233,
+        "typeID": 4318,
         "groupID": 1025,
         "categoryID": 46,
         "name": "Customs Office (Manifest VI)",
-        "ownerID": 1,
+        "ownerID": 1000148,
         "radius": 8000,
         "position": {
-          "x": -409562512768.0182,
-          "y": 17154522910.081202,
-          "z": -130975826806
+          "x": -409563788065.6109,
+          "y": 17158864381,
+          "z": -130982970639.37184
         },
         "velocity": {
           "x": 0,
@@ -1562,8 +1563,8 @@
         "shieldRatio": 1,
         "armorRatio": 1,
         "hullRatio": 1,
-        "typeName": "Customs Office",
-        "distanceMeters": 777353044476.983
+        "typeName": "InterBus Customs Office",
+        "distanceMeters": 777357040226.0203
       },
       {
         "kind": "moon",
@@ -1589,7 +1590,7 @@
         "armorRatio": null,
         "hullRatio": null,
         "typeName": "Moon",
-        "distanceMeters": 1726641023223.3513
+        "distanceMeters": 1726641023145.199
       },
       {
         "kind": "moon",
@@ -1615,7 +1616,7 @@
         "armorRatio": null,
         "hullRatio": null,
         "typeName": "Moon",
-        "distanceMeters": 1744471448164.8286
+        "distanceMeters": 1744471448087.107
       },
       {
         "kind": "moon",
@@ -1641,7 +1642,7 @@
         "armorRatio": null,
         "hullRatio": null,
         "typeName": "Moon",
-        "distanceMeters": 1745016790281.036
+        "distanceMeters": 1745016790203.7957
       },
       {
         "kind": "moon",
@@ -1667,7 +1668,7 @@
         "armorRatio": null,
         "hullRatio": null,
         "typeName": "Moon",
-        "distanceMeters": 1745413945701.554
+        "distanceMeters": 1745413945624.209
       },
       {
         "kind": "moon",
@@ -1693,7 +1694,7 @@
         "armorRatio": null,
         "hullRatio": null,
         "typeName": "Moon",
-        "distanceMeters": 1745693638035.036
+        "distanceMeters": 1745693637957.74
       },
       {
         "kind": "moon",
@@ -1719,7 +1720,7 @@
         "armorRatio": null,
         "hullRatio": null,
         "typeName": "Moon",
-        "distanceMeters": 1745872752639.7334
+        "distanceMeters": 1745872752562.2664
       },
       {
         "kind": "moon",
@@ -1745,7 +1746,7 @@
         "armorRatio": null,
         "hullRatio": null,
         "typeName": "Moon",
-        "distanceMeters": 1746264253424.6416
+        "distanceMeters": 1746264253347.3433
       },
       {
         "kind": "moon",
@@ -1771,7 +1772,7 @@
         "armorRatio": null,
         "hullRatio": null,
         "typeName": "Moon",
-        "distanceMeters": 1746712533152.1902
+        "distanceMeters": 1746712533074.9229
       },
       {
         "kind": "moon",
@@ -1797,7 +1798,7 @@
         "armorRatio": null,
         "hullRatio": null,
         "typeName": "Moon",
-        "distanceMeters": 1746823810154.4993
+        "distanceMeters": 1746823810077.223
       },
       {
         "kind": "moon",
@@ -1823,7 +1824,7 @@
         "armorRatio": null,
         "hullRatio": null,
         "typeName": "Moon",
-        "distanceMeters": 1746901516742.8345
+        "distanceMeters": 1746901516665.5403
       },
       {
         "kind": "moon",
@@ -1849,7 +1850,7 @@
         "armorRatio": null,
         "hullRatio": null,
         "typeName": "Moon",
-        "distanceMeters": 1746962300412.5117
+        "distanceMeters": 1746962300334.8992
       },
       {
         "kind": "planet",
@@ -1875,21 +1876,21 @@
         "armorRatio": null,
         "hullRatio": null,
         "typeName": "Planet (Gas)",
-        "distanceMeters": 1747063933297.2898
+        "distanceMeters": 1747063933219.9954
       },
       {
         "kind": "orbital",
         "itemID": 1200040491264,
-        "typeID": 2233,
+        "typeID": 4318,
         "groupID": 1025,
         "categoryID": 46,
         "name": "Customs Office (Manifest VIII)",
-        "ownerID": 1,
+        "ownerID": 1000148,
         "radius": 8000,
         "position": {
-          "x": 227656669863.0077,
-          "y": -9513150079.738457,
-          "z": 1901719415470
+          "x": 227682441100.8113,
+          "y": -9543722696,
+          "z": 1901758970020.5876
         },
         "velocity": {
           "x": 0,
@@ -1900,8 +1901,8 @@
         "shieldRatio": 1,
         "armorRatio": 1,
         "hullRatio": 1,
-        "typeName": "Customs Office",
-        "distanceMeters": 1747113305338.1772
+        "typeName": "InterBus Customs Office",
+        "distanceMeters": 1747151507905.0598
       },
       {
         "kind": "stargate",
@@ -1927,7 +1928,7 @@
         "armorRatio": null,
         "hullRatio": null,
         "typeName": "Stargate (CONCORD System)",
-        "distanceMeters": 1747301249498.6624
+        "distanceMeters": 1747301249421.3728
       },
       {
         "kind": "moon",
@@ -1953,7 +1954,7 @@
         "armorRatio": null,
         "hullRatio": null,
         "typeName": "Moon",
-        "distanceMeters": 1747734656479.038
+        "distanceMeters": 1747734656401.7192
       },
       {
         "kind": "moon",
@@ -1979,7 +1980,7 @@
         "armorRatio": null,
         "hullRatio": null,
         "typeName": "Moon",
-        "distanceMeters": 1749945756823.982
+        "distanceMeters": 1749945756746.8416
       },
       {
         "kind": "moon",
@@ -2005,7 +2006,7 @@
         "armorRatio": null,
         "hullRatio": null,
         "typeName": "Moon",
-        "distanceMeters": 1755648630373.0583
+        "distanceMeters": 1755648630296.5554
       },
       {
         "kind": "stargate",
@@ -2031,7 +2032,7 @@
         "armorRatio": null,
         "hullRatio": null,
         "typeName": "Stargate (CONCORD System)",
-        "distanceMeters": 1955091513291.5127
+        "distanceMeters": 1955091513283.495
       },
       {
         "kind": "stargate",
@@ -2057,7 +2058,7 @@
         "armorRatio": null,
         "hullRatio": null,
         "typeName": "Stargate (CONCORD System)",
-        "distanceMeters": 3044005885011.812
+        "distanceMeters": 3044005884934.6323
       },
       {
         "kind": "moon",
@@ -2083,7 +2084,7 @@
         "armorRatio": null,
         "hullRatio": null,
         "typeName": "Moon",
-        "distanceMeters": 3941059085064.9546
+        "distanceMeters": 3941059085073.189
       },
       {
         "kind": "moon",
@@ -2109,7 +2110,7 @@
         "armorRatio": null,
         "hullRatio": null,
         "typeName": "Moon",
-        "distanceMeters": 3944271307117.426
+        "distanceMeters": 3944271307125.373
       },
       {
         "kind": "moon",
@@ -2135,7 +2136,7 @@
         "armorRatio": null,
         "hullRatio": null,
         "typeName": "Moon",
-        "distanceMeters": 3945947923632.1064
+        "distanceMeters": 3945947923639.7935
       },
       {
         "kind": "moon",
@@ -2161,7 +2162,7 @@
         "armorRatio": null,
         "hullRatio": null,
         "typeName": "Moon",
-        "distanceMeters": 3946267921714.4634
+        "distanceMeters": 3946267921721.8506
       },
       {
         "kind": "moon",
@@ -2187,7 +2188,7 @@
         "armorRatio": null,
         "hullRatio": null,
         "typeName": "Moon",
-        "distanceMeters": 3955488970120.2974
+        "distanceMeters": 3955488970128.5146
       },
       {
         "kind": "moon",
@@ -2213,7 +2214,7 @@
         "armorRatio": null,
         "hullRatio": null,
         "typeName": "Moon",
-        "distanceMeters": 3957198036765.823
+        "distanceMeters": 3957198036774.0186
       },
       {
         "kind": "moon",
@@ -2239,7 +2240,7 @@
         "armorRatio": null,
         "hullRatio": null,
         "typeName": "Moon",
-        "distanceMeters": 3957827448869.9136
+        "distanceMeters": 3957827448878.041
       },
       {
         "kind": "moon",
@@ -2265,7 +2266,7 @@
         "armorRatio": null,
         "hullRatio": null,
         "typeName": "Moon",
-        "distanceMeters": 3957882120358.9526
+        "distanceMeters": 3957882120367.127
       },
       {
         "kind": "moon",
@@ -2291,7 +2292,7 @@
         "armorRatio": null,
         "hullRatio": null,
         "typeName": "Moon",
-        "distanceMeters": 3958018894968.543
+        "distanceMeters": 3958018894976.6963
       },
       {
         "kind": "moon",
@@ -2317,7 +2318,7 @@
         "armorRatio": null,
         "hullRatio": null,
         "typeName": "Moon",
-        "distanceMeters": 3958053255984.509
+        "distanceMeters": 3958053255992.6523
       },
       {
         "kind": "planet",
@@ -2343,7 +2344,7 @@
         "armorRatio": null,
         "hullRatio": null,
         "typeName": "Planet (Ice)",
-        "distanceMeters": 3958084663973.14
+        "distanceMeters": 3958084663981.2876
       },
       {
         "kind": "moon",
@@ -2369,21 +2370,21 @@
         "armorRatio": null,
         "hullRatio": null,
         "typeName": "Moon",
-        "distanceMeters": 3958107236596.575
+        "distanceMeters": 3958107236604.7593
       },
       {
         "kind": "orbital",
         "itemID": 1200040491279,
-        "typeID": 2233,
+        "typeID": 4318,
         "groupID": 1025,
         "categoryID": 46,
         "name": "Customs Office (Manifest IX)",
-        "ownerID": 1,
+        "ownerID": 1000148,
         "radius": 8000,
         "position": {
-          "x": -1743693934570.9944,
-          "y": 73030318515.34435,
-          "z": -3224682570120
+          "x": -1743691788637.8599,
+          "y": 73056966271,
+          "z": -3224723013724.2354
         },
         "velocity": {
           "x": 0,
@@ -2394,8 +2395,8 @@
         "shieldRatio": 1,
         "armorRatio": 1,
         "hullRatio": 1,
-        "typeName": "Customs Office",
-        "distanceMeters": 3958109873148.3057
+        "typeName": "InterBus Customs Office",
+        "distanceMeters": 3958143888564.02
       },
       {
         "kind": "moon",
@@ -2421,7 +2422,7 @@
         "armorRatio": null,
         "hullRatio": null,
         "typeName": "Moon",
-        "distanceMeters": 3958336396716.0005
+        "distanceMeters": 3958336396724.148
       },
       {
         "kind": "moon",
@@ -2447,7 +2448,7 @@
         "armorRatio": null,
         "hullRatio": null,
         "typeName": "Moon",
-        "distanceMeters": 3958346620931.6665
+        "distanceMeters": 3958346620939.8076
       },
       {
         "kind": "moon",
@@ -2473,7 +2474,7 @@
         "armorRatio": null,
         "hullRatio": null,
         "typeName": "Moon",
-        "distanceMeters": 3958581627098.953
+        "distanceMeters": 3958581627107.1045
       },
       {
         "kind": "moon",
@@ -2499,7 +2500,7 @@
         "armorRatio": null,
         "hullRatio": null,
         "typeName": "Moon",
-        "distanceMeters": 3958710559770.9087
+        "distanceMeters": 3958710559779.0586
       },
       {
         "kind": "moon",
@@ -2525,7 +2526,7 @@
         "armorRatio": null,
         "hullRatio": null,
         "typeName": "Moon",
-        "distanceMeters": 3958712033776.0723
+        "distanceMeters": 3958712033784.1963
       },
       {
         "kind": "moon",
@@ -2551,7 +2552,7 @@
         "armorRatio": null,
         "hullRatio": null,
         "typeName": "Moon",
-        "distanceMeters": 3959266115567.207
+        "distanceMeters": 3959266115574.636
       },
       {
         "kind": "moon",
@@ -2577,7 +2578,7 @@
         "armorRatio": null,
         "hullRatio": null,
         "typeName": "Moon",
-        "distanceMeters": 3960034061210.574
+        "distanceMeters": 3960034061218.603
       },
       {
         "kind": "moon",
@@ -2603,7 +2604,7 @@
         "armorRatio": null,
         "hullRatio": null,
         "typeName": "Moon",
-        "distanceMeters": 3960311944819.0396
+        "distanceMeters": 3960311944827.187
       },
       {
         "kind": "moon",
@@ -2629,7 +2630,7 @@
         "armorRatio": null,
         "hullRatio": null,
         "typeName": "Moon",
-        "distanceMeters": 3961234993801.272
+        "distanceMeters": 3961234993810.08
       },
       {
         "kind": "moon",
@@ -2655,7 +2656,7 @@
         "armorRatio": null,
         "hullRatio": null,
         "typeName": "Moon",
-        "distanceMeters": 3963214154216.8413
+        "distanceMeters": 3963214154224.97
       },
       {
         "kind": "moon",
@@ -2681,7 +2682,7 @@
         "armorRatio": null,
         "hullRatio": null,
         "typeName": "Moon",
-        "distanceMeters": 3963239538033.586
+        "distanceMeters": 3963239538041.5386
       },
       {
         "kind": "moon",
@@ -2707,7 +2708,7 @@
         "armorRatio": null,
         "hullRatio": null,
         "typeName": "Moon",
-        "distanceMeters": 3968083224874.166
+        "distanceMeters": 3968083224881.616
       },
       {
         "kind": "moon",
@@ -2733,7 +2734,7 @@
         "armorRatio": null,
         "hullRatio": null,
         "typeName": "Moon",
-        "distanceMeters": 3969105616006.9155
+        "distanceMeters": 3969105616014.984
       },
       {
         "kind": "stargate",
@@ -2759,7 +2760,7 @@
         "armorRatio": null,
         "hullRatio": null,
         "typeName": "Stargate (CONCORD System)",
-        "distanceMeters": 5089926347962.904
+        "distanceMeters": 5089926347837.706
       },
       {
         "kind": "planet",
@@ -2785,21 +2786,21 @@
         "armorRatio": null,
         "hullRatio": null,
         "typeName": "Planet (Oceanic)",
-        "distanceMeters": 5089928771093.071
+        "distanceMeters": 5089928770967.872
       },
       {
         "kind": "orbital",
         "itemID": 1200040491304,
-        "typeID": 2233,
+        "typeID": 4318,
         "groupID": 1025,
         "categoryID": 46,
         "name": "Customs Office (Manifest X)",
-        "ownerID": 1,
+        "ownerID": 1000148,
         "radius": 8000,
         "position": {
-          "x": -4175372601411.4727,
-          "y": 174937926442.06543,
-          "z": 2551569626130
+          "x": -4175373693449.836,
+          "y": 174939414456,
+          "z": 2551566824826.8765
         },
         "velocity": {
           "x": 0,
@@ -2810,8 +2811,8 @@
         "shieldRatio": 1,
         "armorRatio": 1,
         "hullRatio": 1,
-        "typeName": "Customs Office",
-        "distanceMeters": 5089933803482.975
+        "typeName": "InterBus Customs Office",
+        "distanceMeters": 5089933503005.829
       },
       {
         "kind": "stargate",
@@ -2837,7 +2838,7 @@
         "armorRatio": null,
         "hullRatio": null,
         "typeName": "Stargate (CONCORD Region)",
-        "distanceMeters": 5089936087532.009
+        "distanceMeters": 5089936087406.811
       },
       {
         "kind": "moon",
@@ -2863,7 +2864,7 @@
         "armorRatio": null,
         "hullRatio": null,
         "typeName": "Moon",
-        "distanceMeters": 6361388088590.06
+        "distanceMeters": 6361388088662.725
       },
       {
         "kind": "planet",
@@ -2889,21 +2890,21 @@
         "armorRatio": null,
         "hullRatio": null,
         "typeName": "Planet (Barren)",
-        "distanceMeters": 6362089648102.221
+        "distanceMeters": 6362089648174.916
       },
       {
         "kind": "orbital",
         "itemID": 1200040491305,
-        "typeID": 2233,
+        "typeID": 4318,
         "groupID": 1025,
         "categoryID": 46,
         "name": "Customs Office (Manifest XI)",
-        "ownerID": 1,
+        "ownerID": 1000148,
         "radius": 8000,
         "position": {
-          "x": 331075954432.5634,
-          "y": -13875739592.322895,
-          "z": -6205419346480
+          "x": 331075781178.87195,
+          "y": -13872174950,
+          "z": -6205425111421.078
         },
         "velocity": {
           "x": 0,
@@ -2914,8 +2915,8 @@
         "shieldRatio": 1,
         "armorRatio": 1,
         "hullRatio": 1,
-        "typeName": "Customs Office",
-        "distanceMeters": 6362094312520.96
+        "typeName": "InterBus Customs Office",
+        "distanceMeters": 6362100076538.066
       }
     ]
   }
