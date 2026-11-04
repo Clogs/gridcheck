@@ -32,7 +32,11 @@
 //   listeners    { name: { offset, env, label } }   ports in the tree's block
 //   logTags      [tag]                      server log tags the watch keeps by default
 //   world        { onSave(ctx), onRestore(ctx) }    saved-world hooks (worlds.js)
+//   onStop(io, { runDir }) -> Promise               stop what the plugin started: at a run's end and at `gridcheck down`
 //   targetFields { term: field }            `gridcheck act` target terms read from the plugin's data
+//
+// A plugin's scenarios and worlds folders hold its scenarios and world recipes.
+// A step with recipe: true may be a recipe's step.
 //
 // Each consumer documents the shape it reads.
 
@@ -158,6 +162,8 @@ function createToolRegistry(loaded = { active: [], skipped: [] }) {
     listeners: [],
     logTags: [],
     worldHooks: [],
+    stopHooks: [],
+    recipeDirs: [],
     targetFields: {},
     scenarioDirs: [],
     booleanFlags: new Set(),
@@ -182,6 +188,7 @@ function createToolRegistry(loaded = { active: [], skipped: [] }) {
     }
     registry.plugins.push({ name, dir: dir || null, tool: tool || {} });
     if (dir && fs.existsSync(path.join(dir, "scenarios"))) registry.scenarioDirs.push({ plugin: name, dir: path.join(dir, "scenarios") });
+    if (dir && fs.existsSync(path.join(dir, "worlds"))) registry.recipeDirs.push({ plugin: name, dir: path.join(dir, "worlds") });
     if (!isObject(tool)) continue;
     for (const [kind, fields] of Object.entries(tool.kinds || {})) {
       if (!/^[A-Z][A-Z_]*$/.test(kind)) {
@@ -245,6 +252,7 @@ function createToolRegistry(loaded = { active: [], skipped: [] }) {
       if (/^\w+$/.test(String(tag)) && !registry.logTags.includes(tag)) registry.logTags.push(String(tag));
     }
     if (isObject(tool.world)) registry.worldHooks.push({ ...tool.world, plugin: name });
+    if (typeof tool.onStop === "function") registry.stopHooks.push({ plugin: name, run: tool.onStop });
     for (const [term, field] of Object.entries(tool.targetFields || {})) {
       if (typeof field === "string") claim(registry.targetFields, term, { field }, name, "target term");
     }

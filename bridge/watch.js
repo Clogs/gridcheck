@@ -693,7 +693,7 @@ function createGridWatch({
   }
 
   async function runWatch({ characterID, forMs, everyMs, offGridEveryMs, clientMode = "all", divergeMeters = null,
-    positions = false, perfEveryMs = 0 }, sink, closers = []) {
+    positions = false, perfEveryMs = 0, follow = false }, sink, closers = []) {
     const startedAtMs = now();
     let seq = 0;
     const emit = (event) => {
@@ -707,6 +707,7 @@ function createGridWatch({
       const watcher = safe(() => hook.onGrid.watch({ characterID, startedAtMs }));
       if (watcher && typeof watcher.step === "function") gridHooks.push({ name: hook.name, step: watcher.step });
     }
+    let pilotOnline = null;
     const differ = createGridDiffer({
       gridHooks,
       timed: (name, fn) => {
@@ -776,7 +777,16 @@ function createGridWatch({
     for (;;) {
       if (sink.closed()) { reason = "client-closed"; break; }
       const session = findSession(characterID);
-      if (!session) { reason = "session-gone"; break; }
+      if (!session && !follow) { reason = "session-gone"; break; }
+      if (follow && pilotOnline !== Boolean(session)) {
+        pilotOnline = Boolean(session);
+        emit({ kind: "PILOT", online: pilotOnline });
+      }
+      if (!session) {
+        if (now() - startedAtMs >= forMs) break;
+        await wait(everyMs);
+        continue;
+      }
       const sampleStart = perfNow();
       const atMs = now();
       sampleNowMs = atMs;

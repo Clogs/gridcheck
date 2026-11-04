@@ -178,6 +178,10 @@ Every watch times each server hook and reports it in END, as `costs.hooks["<plug
 The repo ships one plugin, `plugins/lu`, for the X-Eve Living Universe fork. Its guide is that
 tree's `docs/E2E-GRID-TESTING.md`.
 
+A plugin's `scenarios` and `worlds` folders hold its scenarios and world recipes. A step marked
+`recipe: true` may be a recipe's step. `tool.onStop(io, { runDir })` stops what the plugin started,
+at a run's end and at `gridcheck down`.
+
 ## Worlds
 
 A world is the tree's game store (`gamestore.sqlite` and `manifest.json` beside the data dir), and
@@ -720,7 +724,7 @@ node tools/gridcheck/bin/gridcheck.js run loadout-npc-fight --reuse     # again:
 | `up` | `market` (default `true`), `timeout` (boot, seconds), `profile` (boot with the tick profiler; turns `watch.perf` on), `profileEvery` (ticks per profiler window, default 50), `env` (`{ "NAME": "value" }`, variables for the server's environment, as `up --env` sets them; not the ones gridcheck sets itself), and the plugins' `up` flags. A restore flag such as the lu plugin's `realClock` applies to a saved world or recipe only: its default is off in a `fresh` world, and setting it there is an error. |
 | `setup` | Steps, in order. A login runs first if the list doesn't start with one. |
 | `during` | Steps that run after setup, beside the stop conditions; see [During](#during). Optional. |
-| `watch` | `every` (2 s), `offgridEvery` (5 s), `client` (`diverge` by default; `FX` lines need `"fx"` or `"all"`, `CLIENT` lines `"all"`), `divergeMeters`, `log` (`true`), `grep`, `perf` (`true` for a `PERF` window every 5 s, or seconds), `ballpark` (`true`: each real client's ballpark against the server's grid every 2 s, or seconds; see [A real client in a scenario](#a-real-client-in-a-scenario)), `screenshots` (conditions, and `"stop"`, at which to take a picture of each real client). |
+| `watch` | `pilot` (follow this account's pilot instead of the held character, online or not: `PILOT` lines say when it comes and goes; no client view), `every` (2 s), `offgridEvery` (5 s), `client` (`diverge` by default; `FX` lines need `"fx"` or `"all"`, `CLIENT` lines `"all"`), `divergeMeters`, `log` (`true`), `grep`, `perf` (`true` for a `PERF` window every 5 s, or seconds), `ballpark` (`true`: each real client's ballpark against the server's grid every 2 s, or seconds; see [A real client in a scenario](#a-real-client-in-a-scenario)), `screenshots` (conditions, and `"stop"`, at which to take a picture of each real client). |
 | `until` | `any`: stop conditions; the first one met stops the run. `timeout`: seconds after setup, required. `grace`: at most this many seconds more after a stop condition, e.g. for the `KILLMAIL` after a `DESTROYED`. Grace ends early once every expectation that isn't a `no` is met, but not before `graceMin` (default 5 s, or all of a shorter grace), which gives a `no DIVERGE` time to open: the watch delivers lines 1.5 s late and a divergence settles over 3 s. Set `graceMin` to `grace` when a `no` expectation needs the whole window. The report says how long grace ran and why it ended. `from`: `"setup"` (default) matches only events after setup ends; `"start"` matches every event since the watch began, for a stop condition that setup itself causes, such as the `GRID` after an undock. |
 | `expect` | Expected observations, as conditions. `"no <condition>"` or `{ "match": ..., "absent": true }` expects none. `{ "match": ..., "note": ... }` adds a note to the report. |
 | `name`, `description` | Default name: the file name. |
