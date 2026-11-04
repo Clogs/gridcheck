@@ -7,6 +7,10 @@
 // sha256 for every file. `gridcheck vendor check` fails when the copy differs, so a
 // fix made in a tree is made in the repo instead.
 //
+// The one exception is a plugin the tree added itself: a folder or a link at
+// plugins/<name>/, under a name VENDOR.json has no file for. It is the tree's
+// (often kept in the project it tests), so check leaves it out and update keeps it.
+//
 // Files come from git objects, not the checkout's working files, so each keeps
 // the line endings it was committed with and uncommitted work is never
 // vendored. test/ and the repo's dotfiles stay behind: the tests and the
@@ -22,6 +26,7 @@ const VENDOR_DIR = path.join("tools", "gridcheck");
 const SHIM_PATH = path.join("server", "src", "_secondary", "agentBridge", "server.js");
 const SHIM_SOURCE = "bridge/shim.js";
 const MANIFEST_NAME = "VENDOR.json";
+const PLUGINS_DIR = "plugins";
 const PACKAGE_NAME = "gridcheck";
 // The checkout this file sits in, when it is one.
 const OWN_CHECKOUT = path.resolve(__dirname, "..");
@@ -257,6 +262,23 @@ function readManifest(target) {
   }
 }
 
+// The plugins a tree added to this copy, by name. A loose file in plugins/ isn't one.
+function addedPlugins(copy, manifest) {
+  const dir = path.join(copy, PLUGINS_DIR);
+  if (!fs.existsSync(dir) || !manifest || !manifest.files) return [];
+  const installed = new Set(Object.keys(manifest.files).map((file) => file.split("/"))
+    .filter((parts) => parts[0] === PLUGINS_DIR).map((parts) => parts[1]));
+  return fs.readdirSync(dir, { withFileTypes: true })
+    .filter((entry) => (entry.isDirectory() || entry.isSymbolicLink()) && !installed.has(entry.name))
+    .map((entry) => entry.name).sort();
+}
+
+// Is this forward-slash path, relative to the copy, in one of these plugins?
+function inPlugin(file, names) {
+  const [top, name] = file.split("/");
+  return top === PLUGINS_DIR && names.includes(name);
+}
+
 // -> { ok, manifest, problems: [{ file, problem }] }. problem: edited, missing,
 // added, not a file, shim edited, shim missing.
 // copy: the folder to check, when it isn't the tree's tools/gridcheck (an old copy before it moves).
@@ -270,8 +292,9 @@ function checkVendored({ tree, copy = null }) {
   }
   const problems = [];
   const onDisk = new Map();
+  const added = addedPlugins(target, manifest);
   for (const entry of walk(target)) {
-    if (entry.file === MANIFEST_NAME) continue;
+    if (entry.file === MANIFEST_NAME || inPlugin(entry.file, added)) continue;
     if (!entry.isFile) problems.push({ file: entry.file, problem: "not a file" });
     else onDisk.set(entry.file, entry.full);
   }
@@ -332,12 +355,25 @@ function updateVendored({ tree, from, force = false, dryRun = false }) {
         problemLines(drift.problems).join("\n"));
     }
   }
+  // The tree's own plugins stay, unless this version ships one of the same name.
+  let treePlugins = [];
+  try {
+    treePlugins = addedPlugins(current, readManifest(current));
+  } catch (error) {
+    if (!(error instanceof VendorError)) throw error; // A manifest that can't be read keeps nothing.
+  }
+  const clashes = treePlugins.filter((name) => [...source.files.keys()].some((file) => inPlugin(file, [name])));
+  if (clashes.length && !force) {
+    throw new VendorError(`this version ships ${clashes.map((name) => `${PLUGINS_DIR}/${name}`).join(", ")}, which the tree added itself; ` +
+      "remove it, or --force replaces it");
+  }
+  const kept = treePlugins.filter((name) => !clashes.includes(name));
   const legacyConfig = path.join(treeRoot, LEGACY_CONFIG);
   const moveConfig = fs.existsSync(legacyConfig) && !fs.existsSync(path.join(treeRoot, CONFIG_FILE));
   const migrated = migrating || moveConfig
     ? { copy: migrating ? slashed(LEGACY_VENDOR_DIR) : null, config: moveConfig ? LEGACY_CONFIG : null } : null;
 
-  const before = new Map(walk(current).filter((entry) => entry.isFile && entry.file !== MANIFEST_NAME)
+  const before = new Map(walk(current).filter((entry) => entry.isFile && entry.file !== MANIFEST_NAME && !inPlugin(entry.file, kept))
     .map((entry) => [entry.file, sha256(fs.readFileSync(entry.full))]));
   const manifest = buildManifest(source);
   const changes = { added: [], changed: [], removed: [], same: 0 };
@@ -352,7 +388,7 @@ function updateVendored({ tree, from, force = false, dryRun = false }) {
   const shimBefore = fs.existsSync(shim) ? fs.readFileSync(shim) : null;
   const shimState = shimBefore === null ? "installed" : shimBefore.equals(shimBytes) ? "unchanged" : "replaced";
   const result = { manifest, target, treeRoot, checkout: source.checkout, dirty: source.dirty, counts, changes, shim: shimState,
-    migrated };
+    migrated, kept };
   if (dryRun) return { ...result, dryRun: true };
 
   const parent = path.dirname(target);
@@ -376,6 +412,11 @@ function updateVendored({ tree, from, force = false, dryRun = false }) {
     }
   } finally {
     fs.rmSync(staged, { recursive: true, force: true });
+  }
+  // Last, so a failed swap leaves them where they were.
+  for (const name of kept) {
+    fs.mkdirSync(path.join(target, PLUGINS_DIR), { recursive: true });
+    renameRetrying(path.join(migrating ? legacy : retired, PLUGINS_DIR, name), path.join(target, PLUGINS_DIR, name));
   }
   fs.rmSync(retired, { recursive: true, force: true });
 
@@ -423,6 +464,7 @@ function runVendor(action, { tree = OWN_TREE, from, force = false, dryRun = fals
         ...listed("-", result.changes.removed),
         ...(result.dirty ? [`  ${slashed(result.checkout)} has uncommitted changes; they wouldn't be vendored`] : []),
         ...migrationLines(result.migrated, "would"),
+        ...(result.kept.length ? [`  would keep the tree's own plugins: ${result.kept.join(", ")}`] : []),
         "  nothing was written (--dry-run)",
       ];
     }
@@ -432,6 +474,7 @@ function runVendor(action, { tree = OWN_TREE, from, force = false, dryRun = fals
         `${counts.removed} removed; shim ${result.shim}`,
       ...(result.dirty ? [`  ${slashed(result.checkout)} has uncommitted changes; they were not vendored`] : []),
       ...migrationLines(result.migrated, "did"),
+      ...(result.kept.length ? [`  kept the tree's own plugins: ${result.kept.join(", ")}`] : []),
     ];
   }
   if (action === "check") {
@@ -489,7 +532,9 @@ module.exports = {
   VENDOR_DIR,
   VendorError,
   buildManifest,
+  addedPlugins,
   checkVendored,
+  inPlugin,
   isFolderCopy,
   problemLines,
   readSource,

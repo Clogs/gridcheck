@@ -1,7 +1,8 @@
 "use strict";
 
 // Plugins: plugins/<name>/plugin.js beside the core, and nothing else is
-// scanned. A plugin exports
+// scanned. An entry can be a link, for a plugin kept in the project it tests;
+// core/vendor.js leaves one a tree added alone. A plugin exports
 //
 //   { name, apiVersion, applies(tree), server(ctx), tool }
 //
@@ -80,6 +81,19 @@ function appliesResult(answer) {
   return { ok: false, reason };
 }
 
+// The names of the folders in dir, sorted. A link to a folder counts as one.
+function foldersIn(dir) {
+  if (!fs.existsSync(dir)) return [];
+  const isFolder = (name) => {
+    try {
+      return fs.statSync(path.join(dir, name)).isDirectory();
+    } catch (_error) {
+      return false; // A link to nothing.
+    }
+  };
+  return fs.readdirSync(dir).filter(isFolder).sort();
+}
+
 // -> { active: [{ name, plugin, dir }], skipped: [{ name, reason }] }
 function loadPlugins({ pluginsDir = DEFAULT_PLUGINS_DIR, tree, log = null, load = require } = {}) {
   const active = [];
@@ -88,10 +102,7 @@ function loadPlugins({ pluginsDir = DEFAULT_PLUGINS_DIR, tree, log = null, load 
     skipped.push({ name, reason });
     if (log) log.info(`[AgentBridge] plugin ${name} skipped: ${reason}`);
   };
-  const entries = fs.existsSync(pluginsDir)
-    ? fs.readdirSync(pluginsDir, { withFileTypes: true }).filter((entry) => entry.isDirectory()).map((entry) => entry.name).sort()
-    : [];
-  for (const dirName of entries) {
+  for (const dirName of foldersIn(pluginsDir)) {
     const file = path.join(pluginsDir, dirName, "plugin.js");
     if (!fs.existsSync(file)) continue;
     let plugin;

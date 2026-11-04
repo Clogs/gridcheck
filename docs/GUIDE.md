@@ -178,6 +178,13 @@ Every watch times each server hook and reports it in END, as `costs.hooks["<plug
 The repo ships one plugin, `plugins/lu`, for the X-Eve Living Universe fork. Its guide is that
 tree's `docs/E2E-GRID-TESTING.md`.
 
+A plugin can live outside this repo, in the project it tests. Put its folder, or a link to it, at
+`tools/gridcheck/plugins/<name>/` in the tree. A name `VENDOR.json` has no file for is the tree's:
+`vendor check` leaves it out and `vendor update` keeps it. If a new version ships a plugin of that
+name, `vendor update` refuses until you remove yours or pass `--force`. The
+[EVE.js web companion](https://github.com/rrfarmer/evejs-web-companion) keeps its plugin this way, in
+`tools/gridcheck-plugin`, with a guide in its `docs/gridcheck.md`.
+
 A plugin's `scenarios` and `worlds` folders hold its scenarios and world recipes. A step marked
 `recipe: true` may be a recipe's step. `tool.onStop(io, { runDir })` stops what the plugin started,
 at a run's end and at `gridcheck down`.

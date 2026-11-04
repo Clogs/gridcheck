@@ -226,7 +226,8 @@ node bin/gridcheck.js vendor update --from <tag> --tree <tree>   # a tag
 node tools/gridcheck/bin/gridcheck.js vendor check               # in the tree: fails on any edited file
 ```
 
-A tree's own scenarios go in its `tools/gridcheck-scenarios/`, outside the copy.
+A tree's own scenarios go in its `tools/gridcheck-scenarios/`, outside the copy. A plugin the tree
+added to `plugins/` under a name of its own is left out of `vendor check` and kept by `vendor update`.
 
 **Trees set up before the rename.** The tool was called evejs-e2e until its first public release.
 A tree with `tools/evejs-e2e/` keeps working until you update it: `vendor update` (or `setup`) moves
@@ -241,7 +242,8 @@ vendored by this version.
 A mod adds its own events, scenario steps, commands and MCP tools as a plugin in
 `plugins/<name>/plugin.js`. Each plugin says whether it applies to a tree, and the core skips it
 in trees without its mod. [docs/GUIDE.md](docs/GUIDE.md#plugins) has the contract. This repo ships
-`plugins/lu` for the X-Eve Living Universe fork.
+`plugins/lu` for the X-Eve Living Universe fork. A plugin kept in another project goes in the tree's
+`tools/gridcheck/plugins/<name>/`, as a folder or a link.
 
 ## Testing the tool
 
