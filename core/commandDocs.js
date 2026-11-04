@@ -249,7 +249,7 @@ const DOCS = {
     summary: "Prints what changed on grid and why, as one timeline, and saves it as a run.",
     flags: [["--for", "600 s", "How long to watch."], ["--every", "2 s", "How often the grid is sampled."],
       ["--offgrid-every", "5 s", "How often plugins scan the rest of the system."],
-      ["--grep <regex>", null, "Keep every log line that matches."], ["--no-log", null, "Drop the server log lines."],
+      ["--pilot <account>", null, "Follow this account's pilot, even offline. No login, no client view."], ["--grep <regex>", null, "Keep every log line that matches."], ["--no-log", null, "Drop the server log lines."],
       ["--client all|fx|diverge|off", "all", "Which client-view lines to print."],
       ["--diverge-meters", "5,000 m", "How far apart client and server may be before DIVERGE."],
       ["--positions", null, "Write the positions the replay map needs."], ["--perf", null, "Add the server's ticks, every --perf-every 5 s."],

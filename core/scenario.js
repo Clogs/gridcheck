@@ -41,7 +41,7 @@ const TOP_KEYS = new Set(["name", "description", "world", "recipe", "up", "setup
 const CORE_UP_KEYS = ["market", "timeout", "profile", "profileEvery", "env"];
 // An environment variable's name, as `up --env NAME=VALUE` and a scenario's up.env take it.
 const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
-const WATCH_KEYS = new Set(["every", "offgridEvery", "client", "divergeMeters", "log", "grep", "perf", "ballpark", "screenshots"]);
+const WATCH_KEYS = new Set(["every", "offgridEvery", "client", "divergeMeters", "log", "grep", "perf", "ballpark", "screenshots", "pilot"]);
 // A tick profiler window every 50 ticks (5 s at 10 Hz), beside a PERF window every 5 s.
 const PROFILE_EVERY_TICKS = 50;
 const PERF_EVERY_SECONDS = 5;
@@ -263,8 +263,9 @@ function upForWorld(up, world, registry = defaultRegistry()) {
 // tests pass stubs. `context.registry` is the plugins' (core/plugins.js), by
 // default this tree's. A scenario starts from a saved world or from a world
 // recipe (core/recipes.js), which the run builds when it has to.
+// forRecipe: these are a world recipe's steps, which may log in several pilots in turn.
 function validateScenario(raw, { source = "scenario", defaultName = null, worldExists = () => true,
-  recipeExists = () => true, resolveSystemID = (text) => text, registry = defaultRegistry() } = {}) {
+  recipeExists = () => true, resolveSystemID = (text) => text, registry = defaultRegistry(), forRecipe = false } = {}) {
   const extraSteps = pluginSteps(registry);
   const types = stepTypes(registry);
   const problems = [];
@@ -318,7 +319,7 @@ function validateScenario(raw, { source = "scenario", defaultName = null, worldE
 
   if (up.profileEvery !== null && !up.profile) problem("up.profileEvery", "the tick profiler's window; add \"profile\": true");
   // A server booted with the profiler is a performance run: its watch keeps tick figures too.
-  const watch = { every: 2, offgridEvery: 5, client: "diverge", divergeMeters: null, log: true, grep: null,
+  const watch = { pilot: null, every: 2, offgridEvery: 5, client: "diverge", divergeMeters: null, log: true, grep: null,
     perf: up.profile ? PERF_EVERY_SECONDS : 0, ballpark: 0, screenshots: [] };
   // Read after expect, once every step's binding is known.
   let rawScreenshots;
@@ -332,6 +333,14 @@ function validateScenario(raw, { source = "scenario", defaultName = null, worldE
         else if ((key === "offgridEvery" || key === "divergeMeters") && !positive(value)) problem(`watch.${key}`, "a number above 0");
         else if (key === "client" && !["all", "fx", "diverge", "off"].includes(value)) problem("watch.client", "all, fx, diverge or off");
         else if (key === "log" && typeof value !== "boolean") problem("watch.log", "true or false");
+        else if (key === "pilot") {
+          if (typeof value !== "string" || !value.trim()) problem("watch.pilot", "the account whose pilot to follow, instead of the held character");
+          else if (raw.watch.client !== undefined && raw.watch.client !== "off") problem("watch.client", 'a followed pilot has no client view: "off", or leave it out');
+          else {
+            watch.pilot = value.trim();
+            watch.client = "off";
+          }
+        }
         else if (key === "perf") {
           if (value === true) watch.perf = PERF_EVERY_SECONDS;
           else if (value === false) watch.perf = 0;
@@ -530,7 +539,7 @@ function validateScenario(raw, { source = "scenario", defaultName = null, worldE
         case "login":
           if (inRepeat) problem(where, "login can't be repeated");
           else if (during) problem(where, "login is a setup step");
-          else if (index !== 0) problem(where, "login is the first step, or left out (an implicit login runs first)");
+          else if (index !== 0 && !forRecipe) problem(where, "login is the first step, or left out (an implicit login runs first)");
           if (value !== true && !isObject(value)) problem(where, 'login: true, or { "user": ..., "name": ... }');
           if (isObject(value)) {
             for (const key of Object.keys(value)) if (!["user", "name"].includes(key)) problem(`${where}.login.${key}`, "unknown key; user or name");

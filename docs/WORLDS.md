@@ -59,7 +59,9 @@ a fresh game store, in the same syntax as a scenario's setup:
 ```
 
 `fresh` comes first. After it a recipe takes `login`, `undock`, `dock`, `slash`, `teleport`,
-`loadout` and `wait`: steps that put a character somewhere, but nothing that watches.
+`loadout` and `wait`: steps that put a character somewhere, but nothing that watches. Each `login`
+makes that account the held one, so a recipe can set up several pilots. A plugin can add steps to
+this list, and recipes of its own in its `worlds` folder.
 
 ```
 node tools/gridcheck/bin/gridcheck.js world recipes          # each recipe, and whether its world is built and current (--json for data)

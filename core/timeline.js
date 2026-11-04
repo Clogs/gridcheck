@@ -222,6 +222,8 @@ function eventBody(event, registry) {
       return [`self ship ${event.fromTypeName || event.fromItemID || "-"} -> ${event.toTypeName || event.toItemID || "-"}`, ""];
     case "DOCKED":
       return [`self docked${event.stationID ? ` in ${event.stationID}` : ""}`, ""];
+    case "PILOT":
+      return [`pilot ${event.online ? "online" : "offline"}`, ""];
     case "STEP":
       return [`${event.phase === "during" ? "during: " : ""}${event.ok ? "" : "FAILED "}${event.step}` +
         `${event.text ? `: ${event.text}` : ""}`.slice(0, 200), ""];

@@ -1,7 +1,8 @@
 "use strict";
 
 // Plugins: plugins/<name>/plugin.js beside the core, and nothing else is
-// scanned. A plugin exports
+// scanned. An entry can be a link, for a plugin kept in the project it tests;
+// core/vendor.js leaves one a tree added alone. A plugin exports
 //
 //   { name, apiVersion, applies(tree), server(ctx), tool }
 //
@@ -32,7 +33,11 @@
 //   listeners    { name: { offset, env, label } }   ports in the tree's block
 //   logTags      [tag]                      server log tags the watch keeps by default
 //   world        { onSave(ctx), onRestore(ctx) }    saved-world hooks (worlds.js)
+//   onStop(io, { runDir }) -> Promise               stop what the plugin started: at a run's end and at `gridcheck down`
 //   targetFields { term: field }            `gridcheck act` target terms read from the plugin's data
+//
+// A plugin's scenarios and worlds folders hold its scenarios and world recipes.
+// A step with recipe: true may be a recipe's step.
 //
 // Each consumer documents the shape it reads.
 
@@ -76,6 +81,19 @@ function appliesResult(answer) {
   return { ok: false, reason };
 }
 
+// The names of the folders in dir, sorted. A link to a folder counts as one.
+function foldersIn(dir) {
+  if (!fs.existsSync(dir)) return [];
+  const isFolder = (name) => {
+    try {
+      return fs.statSync(path.join(dir, name)).isDirectory();
+    } catch (_error) {
+      return false; // A link to nothing.
+    }
+  };
+  return fs.readdirSync(dir).filter(isFolder).sort();
+}
+
 // -> { active: [{ name, plugin, dir }], skipped: [{ name, reason }] }
 function loadPlugins({ pluginsDir = DEFAULT_PLUGINS_DIR, tree, log = null, load = require } = {}) {
   const active = [];
@@ -84,10 +102,7 @@ function loadPlugins({ pluginsDir = DEFAULT_PLUGINS_DIR, tree, log = null, load 
     skipped.push({ name, reason });
     if (log) log.info(`[AgentBridge] plugin ${name} skipped: ${reason}`);
   };
-  const entries = fs.existsSync(pluginsDir)
-    ? fs.readdirSync(pluginsDir, { withFileTypes: true }).filter((entry) => entry.isDirectory()).map((entry) => entry.name).sort()
-    : [];
-  for (const dirName of entries) {
+  for (const dirName of foldersIn(pluginsDir)) {
     const file = path.join(pluginsDir, dirName, "plugin.js");
     if (!fs.existsSync(file)) continue;
     let plugin;
@@ -158,6 +173,8 @@ function createToolRegistry(loaded = { active: [], skipped: [] }) {
     listeners: [],
     logTags: [],
     worldHooks: [],
+    stopHooks: [],
+    recipeDirs: [],
     targetFields: {},
     scenarioDirs: [],
     booleanFlags: new Set(),
@@ -182,6 +199,7 @@ function createToolRegistry(loaded = { active: [], skipped: [] }) {
     }
     registry.plugins.push({ name, dir: dir || null, tool: tool || {} });
     if (dir && fs.existsSync(path.join(dir, "scenarios"))) registry.scenarioDirs.push({ plugin: name, dir: path.join(dir, "scenarios") });
+    if (dir && fs.existsSync(path.join(dir, "worlds"))) registry.recipeDirs.push({ plugin: name, dir: path.join(dir, "worlds") });
     if (!isObject(tool)) continue;
     for (const [kind, fields] of Object.entries(tool.kinds || {})) {
       if (!/^[A-Z][A-Z_]*$/.test(kind)) {
@@ -245,6 +263,7 @@ function createToolRegistry(loaded = { active: [], skipped: [] }) {
       if (/^\w+$/.test(String(tag)) && !registry.logTags.includes(tag)) registry.logTags.push(String(tag));
     }
     if (isObject(tool.world)) registry.worldHooks.push({ ...tool.world, plugin: name });
+    if (typeof tool.onStop === "function") registry.stopHooks.push({ plugin: name, run: tool.onStop });
     for (const [term, field] of Object.entries(tool.targetFields || {})) {
       if (typeof field === "string") claim(registry.targetFields, term, { field }, name, "target term");
     }

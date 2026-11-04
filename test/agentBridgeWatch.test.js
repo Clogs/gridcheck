@@ -449,6 +449,49 @@ test("a watch runs on its clock, streams START ... END and stops when the sessio
   assert.strictEqual(watch.busy(), false);
 });
 
+test("a followed pilot may be offline: the watch says so and goes on until it comes back", async () => {
+  let clock = 1000;
+  let online = false;
+  const session = { characterID: 7 };
+  const samples = [grid([])];
+  let waits = 0;
+  const watch = createGridWatch({
+    findSession: () => (online ? session : null),
+    readGrid: () => samples[0],
+    now: () => clock,
+    perfNow: () => clock,
+    wait: async (ms) => {
+      clock += ms;
+      waits += 1;
+      online = waits === 2;
+    },
+  });
+  const out = sink();
+  const result = await watch.run({ characterID: 7, forMs: 8000, everyMs: 2000, offGridEveryMs: 2000, follow: true }, out);
+  assert.strictEqual(result.reason, "time");
+  assert.deepStrictEqual(out.lines.filter((event) => event.kind === "PILOT").map((event) => event.online), [false, true, false]);
+});
+
+test("/watch follows a pilot with no session, with no client view; without follow it still refuses", async () => {
+  const seen = [];
+  const routes = createAgentBridgeRoutes({
+    findSession: () => null,
+    executeChatCommand: async () => null,
+    readGrid: () => null,
+    watcher: { busy: () => false, run: async (options) => { seen.push(options); return {}; } },
+    requestShutdown: () => {},
+    log: { debug() {} },
+  });
+  const handle = (body) => routes.handle("POST", "/watch", {}, body);
+  assert.strictEqual((await handle({ characterID: 7 })).statusCode, 409);
+  const followed = await handle({ characterID: 7, follow: true, forSeconds: 30, client: "all" });
+  assert.strictEqual(followed.statusCode, 200);
+  await followed.stream({});
+  assert.strictEqual(seen[0].follow, true);
+  assert.strictEqual(seen[0].clientMode, "off");
+  assert.strictEqual((await handle({ follow: true })).statusCode, 400);
+});
+
 test("/watch validates, refuses when busy, and hands the HTTP layer a stream", () => {
   let busy = false;
   const calls = [];

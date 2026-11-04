@@ -146,8 +146,14 @@ function createAgentBridgeRoutes({
   // Answers { statusCode, stream(sink) }: the HTTP layer writes each event as
   // one JSON line until the watch ends or the caller hangs up.
   function watch(body) {
-    const found = sessionFor(body && body.characterID);
-    if (found.error) return found.error;
+    // follow: the pilot may be offline now and come and go during the watch.
+    const follow = Boolean(body && body.follow === true);
+    if (follow) {
+      if (!toPositiveInt(body.characterID)) return { statusCode: 400, body: { ok: false, error: "A positive characterID is required." } };
+    } else {
+      const found = sessionFor(body && body.characterID);
+      if (found.error) return found.error;
+    }
     if (!watcher) {
       return { statusCode: 503, body: { ok: false, error: "This server has no grid watcher loaded." } };
     }
@@ -166,7 +172,8 @@ function createAgentBridgeRoutes({
         },
       };
     }
-    const clientMode = body.client === undefined || body.client === null ? "all" : String(body.client);
+    // A followed pilot's session may not be a gateway session, so it has no client view.
+    const clientMode = follow ? "off" : body.client === undefined || body.client === null ? "all" : String(body.client);
     if (!CLIENT_MODES.has(clientMode)) {
       return { statusCode: 400, body: { ok: false, error: "client must be all, fx, diverge or off." } };
     }
@@ -199,6 +206,7 @@ function createAgentBridgeRoutes({
         divergeMeters,
         positions: body.positions === true,
         perfEveryMs: perfEverySeconds * 1000,
+        ...(follow ? { follow: true } : {}),
       }, sink),
     };
   }
