@@ -26,6 +26,9 @@ const WARP_IN_SETTLE_MS = 30_000;
 // A killmail is written after the wreck appears, by a worker.
 const KILLMAIL_WAIT_MS = 20_000;
 const WRECK_MATCH_METERS = 20_000;
+// A tree can drop the wreck a sample after the ship it replaces (EveJS 261115
+// does): a ship that left without warping is matched to a wreck this long after.
+const WRECK_LATE_MS = 5_000;
 // A ship covers well under this in one sample outside warp.
 const SELF_MOVED_METERS = 1_000_000;
 // POS events (watch option `positions`): after any sample with an on-grid
@@ -229,6 +232,27 @@ function createGridDiffer({ gridHooks = [], timed = (_name, fn) => fn() } = {}) 
   let docked = false;
   // group key -> { firstSeenAtMs, itemIDs }
   const pendingArrivals = new Map();
+  // itemID -> { gone, atMs, wasSelf }: ships that left without warping and without a wreck yet.
+  const goneWithoutWreck = new Map();
+
+  function destroyedEvent(gone, wreck, wasSelf) {
+    return {
+      kind: "DESTROYED",
+      itemID: gone.itemID,
+      label: wasSelf ? "self" : gone.label,
+      typeName: gone.typeName,
+      typeID: gone.typeID,
+      corporationID: gone.corporationID,
+      characterID: gone.characterID,
+      self: wasSelf,
+      who: wasSelf ? "self" : gone.who,
+      wreckID: wreck.itemID,
+      wreckLabel: wreck.label,
+      distanceMeters: gone.distanceMeters,
+      groupKey: gone.groupKey,
+      ext: gone.ext,
+    };
+  }
 
   function labelFor(itemID, current) {
     const id = toPositiveInt(itemID);
@@ -297,6 +321,7 @@ function createGridDiffer({ gridHooks = [], timed = (_name, fn) => fn() } = {}) 
       docked = true;
       previous = null;
       pendingArrivals.clear();
+        goneWithoutWreck.clear();
       return events;
     }
     docked = false;
@@ -305,6 +330,7 @@ function createGridDiffer({ gridHooks = [], timed = (_name, fn) => fn() } = {}) 
         toSystemName: grid.systemName, security: grid.security });
       previous = null;
       pendingArrivals.clear();
+        goneWithoutWreck.clear();
     }
     systemID = grid.solarSystemID;
 
@@ -323,6 +349,7 @@ function createGridDiffer({ gridHooks = [], timed = (_name, fn) => fn() } = {}) 
         events.push({ kind: "MOVED", distanceMeters: moved, systemName: grid.systemName });
         previous = null;
         pendingArrivals.clear();
+        goneWithoutWreck.clear();
       }
     }
 
@@ -362,24 +389,35 @@ function createGridDiffer({ gridHooks = [], timed = (_name, fn) => fn() } = {}) 
       }
       if (wreck) {
         usedWrecks.add(wreck.itemID);
-        events.push({
-          kind: "DESTROYED",
-          itemID: gone.itemID,
-          label: gone.itemID === oldSelfID ? "self" : gone.label,
-          typeName: gone.typeName,
-          typeID: gone.typeID,
-          corporationID: gone.corporationID,
-          characterID: gone.characterID,
-          self: gone.itemID === oldSelfID,
-          who: gone.itemID === oldSelfID ? "self" : gone.who,
-          wreckID: wreck.itemID,
-          wreckLabel: wreck.label,
-          distanceMeters: gone.distanceMeters,
-          groupKey: gone.groupKey,
-          ext: gone.ext,
-        });
-      } else if (gone.itemID !== oldSelfID) {
-        leaving.push(gone);
+        events.push(destroyedEvent(gone, wreck, gone.itemID === oldSelfID));
+      } else {
+        if ((gone.kind === "ship" || gone.kind === "structure") && gone.mode !== "WARP") {
+          goneWithoutWreck.set(gone.itemID, { gone, atMs, wasSelf: gone.itemID === oldSelfID });
+        }
+        if (gone.itemID !== oldSelfID) leaving.push(gone);
+      }
+    }
+    // A wreck that lands after its ship left.
+    for (const [itemID, held] of goneWithoutWreck) {
+      if (held.atMs === atMs) continue;
+      if (atMs - held.atMs > WRECK_LATE_MS) {
+        goneWithoutWreck.delete(itemID);
+        continue;
+      }
+      let wreck = null;
+      let best = Infinity;
+      for (const candidate of wrecks) {
+        if (usedWrecks.has(candidate.itemID)) continue;
+        const d = centreDistance(held.gone.position, candidate.position);
+        if (d !== null && d <= WRECK_MATCH_METERS && d < best) {
+          best = d;
+          wreck = candidate;
+        }
+      }
+      if (wreck) {
+        usedWrecks.add(wreck.itemID);
+        goneWithoutWreck.delete(itemID);
+        events.push(destroyedEvent(held.gone, wreck, held.wasSelf));
       }
     }
     for (const group of groupByKey(leaving)) {

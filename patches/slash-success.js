@@ -65,7 +65,10 @@ module.exports = {
 
     { file: DISPATCH, anchor: ["handledResult,", "} = require(path.join(__dirname, \"./commands/commandReplies\"));"],
       insert: "after", at: 0, lines: ["  reportsOutcome,"] },
-    { file: DISPATCH, anchor: ["const command = normalizeCommandName(commandName);"], insert: "after", lines: [
+    // EveJS 261115 added executeClientChatCommand, which has the same first line;
+    // the next line picks the dispatcher.
+    { file: DISPATCH, anchor: ["const command = normalizeCommandName(commandName);", "const argumentText = rest.join(\" \").trim();"],
+      insert: "after", at: 0, lines: [
       `  if (${JSON.stringify(COMMANDS).replace(/,/g, ", ")}.includes(command)) {`,
       "    options = reportsOutcome(options);",
       "  }",
