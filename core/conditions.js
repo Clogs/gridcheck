@@ -32,6 +32,8 @@ const EVENT_FIELDS = Object.freeze({
       protection: { obj: { active: "bool", untilMs: "ms", remainingMs: "ms", cloaked: "bool" } } } },
   },
   PRESENT: GROUP,
+  // A followed pilot came online or went offline (a watch with pilot).
+  PILOT: { online: "bool" },
   ARRIVE: { ...GROUP, firstSeenAtMs: "ms", warpIn: "bool", stillWarping: "bool" },
   LEAVE: { ...GROUP, warped: "bool" },
   MODE: {

@@ -140,8 +140,10 @@ function notAsVendored(root, files) {
   if (!manifest || !manifest.files || typeof manifest.files !== "object") return files;
   const dir = `${slashed(vendor.VENDOR_DIR)}/`;
   const shim = slashed(vendor.SHIM_PATH);
+  const treePlugins = vendor.addedPlugins(path.join(root, vendor.VENDOR_DIR), manifest);
   return files.filter((file) => {
     if (file === `${dir}${vendor.MANIFEST_NAME}`) return false;
+    if (file.startsWith(dir) && vendor.inPlugin(file.slice(dir.length), treePlugins)) return false; // vendor update keeps these.
     const expected = file.startsWith(dir) ? manifest.files[file.slice(dir.length)]
       : file === shim && manifest.shim ? manifest.shim.sha256 : null;
     if (typeof expected !== "string") return true;

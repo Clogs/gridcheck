@@ -33,6 +33,17 @@ function recorder() {
   return { lines, debug() {}, info: push("info"), warn: push("warn"), err: push("err") };
 }
 
+test("the loader takes a plugin through a link, and passes over a link to nothing", (t) => {
+  const dir = scratch(t, "e2e-plugins-");
+  const elsewhere = scratch(t, "e2e-plugins-elsewhere-");
+  writePlugin(elsewhere, "linked", `module.exports = { name: "linked", apiVersion: ${API_VERSION} };`);
+  fs.symlinkSync(path.join(elsewhere, "linked"), path.join(dir, "linked"), "junction");
+  fs.symlinkSync(path.join(elsewhere, "gone"), path.join(dir, "dangling"), "junction");
+  const { active, skipped } = loadPlugins({ pluginsDir: dir, tree: {} });
+  assert.deepEqual(active.map((row) => row.name), ["linked"]);
+  assert.deepEqual(skipped, []);
+});
+
 test("the loader takes plugins that apply, and skips the rest with one line each", (t) => {
   const dir = scratch(t, "e2e-plugins-");
   writePlugin(dir, "good", `module.exports = { name: "good", apiVersion: ${API_VERSION}, applies: () => true,

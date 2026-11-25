@@ -31,10 +31,17 @@ const RECIPE_KEYS = new Set(["description", "steps"]);
 
 class RecipeError extends Error {}
 
-function recipePath(nameOrPath, { dir = RECIPE_DIR } = {}) {
+// The core's recipes, then each active plugin's (plugins/<name>/worlds/).
+function recipeDirs(dir, registry) {
+  return [dir, ...registry.recipeDirs.map((row) => row.dir)];
+}
+
+function recipePath(nameOrPath, { dir = RECIPE_DIR, registry = defaultRegistry() } = {}) {
   const text = String(nameOrPath || "");
   if (text.endsWith(".json") || text.includes("/") || text.includes("\\")) return path.resolve(text);
-  return path.join(dir, `${text}${SUFFIX}`);
+  const file = `${text}${SUFFIX}`;
+  const found = recipeDirs(dir, registry).map((folder) => path.join(folder, file)).find((candidate) => fs.existsSync(candidate));
+  return found || path.join(dir, file);
 }
 
 function recipeName(file) {
@@ -48,12 +55,12 @@ function recipeExists(nameOrPath, options = {}) {
 
 // -> { name, file, description, steps, sha256 }, or a RecipeError listing every problem.
 function loadRecipe(nameOrPath, { dir = RECIPE_DIR, resolveSystemID = (text) => text, registry = defaultRegistry() } = {}) {
-  const file = recipePath(nameOrPath, { dir });
+  const file = recipePath(nameOrPath, { dir, registry });
   let bytes;
   try {
     bytes = fs.readFileSync(file);
   } catch (error) {
-    const known = listRecipes({ dir }).map((row) => row.name);
+    const known = listRecipes({ dir, registry }).map((row) => row.name);
     throw new RecipeError(`${file}: ${error.code === "ENOENT" ? `no such recipe${known.length ? ` (recipes: ${known.join(", ")})` : ""}` : error.message}`);
   }
   const name = recipeName(file);
@@ -79,13 +86,14 @@ function loadRecipe(nameOrPath, { dir = RECIPE_DIR, resolveSystemID = (text) => 
     const foreign = [];
     for (const [index, entry] of rest.entries()) {
       const type = typeof entry === "string" ? entry : entry && typeof entry === "object" ? Object.keys(entry)[0] : null;
-      if (type && !RECIPE_STEPS.includes(type)) foreign.push(`steps[${index + 1}]: ${type} is not a recipe step; recipes take ${RECIPE_STEPS.join(", ")}`);
+      const pluginStep = type && registry.steps[type] && registry.steps[type].recipe === true;
+      if (type && !RECIPE_STEPS.includes(type) && !pluginStep) foreign.push(`steps[${index + 1}]: ${type} is not a recipe step; recipes take ${RECIPE_STEPS.join(", ")}`);
     }
     problems.push(...foreign);
     if (!foreign.length) {
       try {
         steps = validateScenario({ name, world: "fresh", setup: rest, until: { timeout: 1 }, expect: ["GRID"] },
-          { source: file, resolveSystemID, registry }).setup;
+          { source: file, resolveSystemID, registry, forRecipe: true }).setup;
       } catch (error) {
         for (const line of error.problems || [error.message]) {
           problems.push(line.replace(/^setup\[(\d+)\]/, (_match, index) => `steps[${Number(index) + 1}]`));
@@ -103,15 +111,16 @@ function loadRecipe(nameOrPath, { dir = RECIPE_DIR, resolveSystemID = (text) => 
   };
 }
 
-function listRecipes({ dir = RECIPE_DIR } = {}) {
-  let names = [];
-  try {
-    names = fs.readdirSync(dir).filter((name) => name.endsWith(SUFFIX)).sort();
-  } catch (_error) {
-    return [];
+function listRecipes({ dir = RECIPE_DIR, registry = defaultRegistry() } = {}) {
+  const files = [];
+  for (const folder of recipeDirs(dir, registry)) {
+    try {
+      files.push(...fs.readdirSync(folder).filter((name) => name.endsWith(SUFFIX)).sort().map((name) => path.join(folder, name)));
+    } catch (_error) {
+      // A folder that isn't there has no recipes.
+    }
   }
-  return names.map((name) => {
-    const file = path.join(dir, name);
+  return files.map((file) => {
     try {
       const raw = JSON.parse(fs.readFileSync(file, "utf8"));
       return { name: recipeName(file), file, description: String(raw.description || "") };

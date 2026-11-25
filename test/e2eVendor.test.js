@@ -110,6 +110,63 @@ test("update refuses a drifted copy or an unvendored folder unless forced, and t
   assert.strictEqual(vendor.checkVendored({ tree: s.tree }).ok, true);
 });
 
+test("a plugin the tree added, as a folder or a link, is left out of the check and kept by update", (t) => {
+  const s = setup(t);
+  write(s.source, "plugins/shipped/plugin.js", "shipped\n");
+  git(s.source, "add", "-A");
+  git(s.source, "commit", "-q", "-m", "a shipped plugin");
+  vendor.updateVendored({ tree: s.tree, from: s.source });
+  write(s.target, "plugins/mine/plugin.js", "mine\n");
+  const elsewhere = path.join(s.dir, "project", "linked");
+  write(elsewhere, "plugin.js", "linked\n");
+  fs.symlinkSync(elsewhere, path.join(s.target, "plugins", "linked"), "junction");
+  assert.deepStrictEqual(vendor.addedPlugins(s.target, JSON.parse(fs.readFileSync(path.join(s.target, "VENDOR.json"), "utf8"))), ["linked", "mine"]);
+  assert.strictEqual(vendor.checkVendored({ tree: s.tree }).ok, true);
+
+  write(s.source, "core/new.js", "new\n");
+  git(s.source, "add", "-A");
+  git(s.source, "commit", "-q", "-m", "two");
+  const result = vendor.updateVendored({ tree: s.tree, from: s.source });
+  assert.deepStrictEqual(result.kept, ["linked", "mine"]);
+  assert.deepStrictEqual(result.counts, { added: 1, changed: 0, removed: 0, same: 6 });
+  assert.strictEqual(fs.readFileSync(path.join(s.target, "plugins", "mine", "plugin.js"), "utf8"), "mine\n");
+  assert.strictEqual(fs.readFileSync(path.join(s.target, "plugins", "linked", "plugin.js"), "utf8"), "linked\n");
+  assert.strictEqual(fs.readFileSync(path.join(elsewhere, "plugin.js"), "utf8"), "linked\n", "what a link points at stays");
+  assert.strictEqual(vendor.checkVendored({ tree: s.tree }).ok, true);
+  assert.deepStrictEqual(fs.readdirSync(path.dirname(s.target)), ["gridcheck"], "no staging folders are left");
+});
+
+test("what the copy was vendored with is still checked exactly, in plugins/ too", (t) => {
+  const s = setup(t);
+  write(s.source, "plugins/shipped/plugin.js", "shipped\n");
+  git(s.source, "add", "-A");
+  git(s.source, "commit", "-q", "-m", "a shipped plugin");
+  vendor.updateVendored({ tree: s.tree, from: s.source });
+  write(s.target, "plugins/shipped/plugin.js", "edited\n");
+  write(s.target, "plugins/shipped/extra.js", "x\n");
+  write(s.target, "plugins/loose.js", "x\n");
+  assert.deepStrictEqual(vendor.checkVendored({ tree: s.tree }).problems, [
+    { file: "plugins/loose.js", problem: "added" },
+    { file: "plugins/shipped/extra.js", problem: "added" },
+    { file: "plugins/shipped/plugin.js", problem: "edited" },
+  ]);
+});
+
+test("update refuses a version that ships a plugin the tree added, until it's removed or forced", (t) => {
+  const s = setup(t);
+  vendor.updateVendored({ tree: s.tree, from: s.source });
+  write(s.target, "plugins/both/plugin.js", "mine\n");
+  write(s.source, "plugins/both/plugin.js", "shipped\n");
+  git(s.source, "add", "-A");
+  git(s.source, "commit", "-q", "-m", "ships it");
+  assert.throws(() => vendor.updateVendored({ tree: s.tree, from: s.source }), /ships plugins\/both, which the tree added itself/);
+  assert.strictEqual(fs.readFileSync(path.join(s.target, "plugins", "both", "plugin.js"), "utf8"), "mine\n", "a refusal changes nothing");
+  const result = vendor.updateVendored({ tree: s.tree, from: s.source, force: true });
+  assert.deepStrictEqual(result.kept, []);
+  assert.strictEqual(fs.readFileSync(path.join(s.target, "plugins", "both", "plugin.js"), "utf8"), "shipped\n");
+  assert.strictEqual(vendor.checkVendored({ tree: s.tree }).ok, true);
+});
+
 test("update takes a commit, not the working files, and a removed file leaves the copy", (t) => {
   const s = setup(t);
   vendor.updateVendored({ tree: s.tree, from: s.source });
