@@ -153,6 +153,24 @@ test("a ship replaced by a wreck is DESTROYED; one that warps away is a LEAVE", 
   assert.strictEqual(events[1].warped, true);
 });
 
+test("a wreck that lands a sample after its ship left is still DESTROYED, once; a late one is not", () => {
+  // EveJS 261115 drops the wreck a tick after the ship's ball goes.
+  const wreck = (itemID) => ({ kind: "wreck", itemID, name: "Worm Wreck", position: { x: 24_100, y: 0, z: 0 }, distanceMeters: 24_100 });
+  const differ = createGridDiffer();
+  differ.step(grid([npc(2)]), 1000);
+  assert.deepStrictEqual(kinds(differ.step(grid([]), 2000)), ["LEAVE"]);
+  const events = differ.step(grid([wreck(50)]), 3000);
+  assert.deepStrictEqual(kinds(events), ["DESTROYED"]);
+  assert.strictEqual(events[0].itemID, 2);
+  assert.strictEqual(events[0].wreckID, 50);
+  assert.deepStrictEqual(kinds(differ.step(grid([wreck(50)]), 4000)), []);
+
+  const slow = createGridDiffer();
+  slow.step(grid([npc(2)]), 1000);
+  slow.step(grid([]), 2000);
+  assert.deepStrictEqual(kinds(slow.step(grid([wreck(51)]), 9000)), ["ARRIVE"], "too late to be its wreck");
+});
+
 test("the lu onGrid hook: a hunter report on self is one SIGHTING until it goes stale", () => {
   const differ = luDiffer();
   const report = { observerID: 2, source: "sighting", certainty: "confirmed", observedAtMs: 10_000 };
